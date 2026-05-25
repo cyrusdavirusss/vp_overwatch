@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="../colors_and_type.css" />
+  <style>
+    body { margin: 0; padding: 16px 18px; background: var(--ink-0); font-family: var(--font-ui); }
+    .scrub {
+      background: color-mix(in srgb, var(--ink-1) 88%, transparent);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-md);
+      padding: 10px 14px 14px;
+    }
+    .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .labels { display: flex; align-items: baseline; gap: 10px; }
+    .time { font-family: var(--font-mono); font-size: 13px; font-weight: 600; letter-spacing: 0.04em; color: var(--fg-1); }
+    .clock { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+    .now {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 24px; padding: 0 10px;
+      border-radius: var(--r-full);
+      background: var(--blue);
+      color: #fff;
+      font-family: var(--font-mono);
+      font-size: 10px; font-weight: 600; letter-spacing: 0.10em;
+    }
+    .track { position: relative; height: 50px; }
+    .hist { position: absolute; left: 0; right: 0; bottom: 12px; height: 38px; }
+    .bar { position: absolute; bottom: 0; width: 4px; transform: translateX(-50%); background: var(--ink-4); border-radius: 2px; }
+    .ticks { position: absolute; inset: 0; }
+    .tick { position: absolute; bottom: 0; font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); transform: translateX(-50%); }
+    .play { position: absolute; top: 0; bottom: 12px; transform: translateX(-50%); }
+    .play-line { width: 1.5px; height: 100%; background: var(--blue); box-shadow: 0 0 8px rgba(77,124,255,0.5); }
+    .play-handle {
+      position: absolute; top: -2px; left: 50%;
+      transform: translate(-50%, 0);
+      width: 18px; height: 18px;
+      background: var(--blue);
+      border-radius: 50%;
+      box-shadow: 0 0 0 4px rgba(77,124,255,0.20), 0 2px 6px rgba(0,0,0,0.5);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .play-handle::after { content: ''; width: 6px; height: 6px; background: #fff; border-radius: 50%; }
+  </style>
+</head>
+<body>
+  <div class="scrub">
+    <div class="head">
+      <div class="labels">
+        <span class="time">−12m24</span>
+        <span class="clock">14:20:04</span>
+      </div>
+      <span class="now">▸ SNAP TO NOW</span>
+    </div>
+    <div class="track">
+      <div class="hist">
+        <!-- some bars -->
+        <div class="bar" style="left: 95%; height: 35%; background: var(--blue);"></div>
+        <div class="bar" style="left: 90%; height: 45%; background: var(--blue);"></div>
+        <div class="bar" style="left: 85%; height: 60%; background: var(--blue);"></div>
+        <div class="bar" style="left: 80%; height: 55%;"></div>
+        <div class="bar" style="left: 75%; height: 70%;"></div>
+        <div class="bar" style="left: 70%; height: 50%;"></div>
+        <div class="bar" style="left: 65%; height: 80%;"></div>
+        <div class="bar" style="left: 60%; height: 75%;"></div>
+        <div class="bar" style="left: 55%; height: 90%;"></div>
+        <div class="bar" style="left: 50%; height: 65%;"></div>
+        <div class="bar" style="left: 45%; height: 50%;"></div>
+        <div class="bar" style="left: 40%; height: 40%;"></div>
+        <div class="bar" style="left: 35%; height: 55%;"></div>
+        <div class="bar" style="left: 30%; height: 70%;"></div>
+        <div class="bar" style="left: 25%; height: 60%;"></div>
+        <div class="bar" style="left: 20%; height: 45%;"></div>
+        <div class="bar" style="left: 15%; height: 50%;"></div>
+        <div class="bar" style="left: 10%; height: 35%;"></div>
+      </div>
+      <div class="ticks">
+        <span class="tick" style="left: 100%;">−0m</span>
+        <span class="tick" style="left: 75%;">−15m</span>
+        <span class="tick" style="left: 50%;">−30m</span>
+        <span class="tick" style="left: 25%;">−45m</span>
+        <span class="tick" style="left: 0%;">−60m</span>
+      </div>
+      <div class="play" style="left: 79%;">
+        <div class="play-line"></div>
+        <div class="play-handle"></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
