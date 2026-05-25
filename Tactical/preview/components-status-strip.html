@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="../colors_and_type.css" />
+  <style>
+    body { margin: 0; padding: 14px 18px; background: var(--ink-0); font-family: var(--font-ui); }
+    .strip {
+      height: 56px;
+      background: color-mix(in srgb, var(--ink-1) 78%, transparent);
+      backdrop-filter: blur(18px);
+      border-bottom: 1px solid var(--border-subtle);
+      border-radius: var(--r-md);
+      padding: 0 14px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .left { display: flex; align-items: center; gap: 10px; }
+    .mark {
+      width: 32px; height: 32px;
+      background: var(--ink-2); border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .id { display: flex; flex-direction: column; gap: 2px; }
+    .title { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.10em; color: var(--fg-1); }
+    .sub { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 9.5px; font-weight: 500; letter-spacing: 0.06em; color: var(--fg-3); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); }
+    .stats { display: flex; align-items: center; gap: 6px; }
+    .stat { display: flex; align-items: baseline; gap: 4px; padding: 0 4px; }
+    .stat-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 600; line-height: 1; }
+    .amber { color: var(--amber); }
+    .red { color: var(--red); }
+    .stat-label { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-3); }
+  </style>
+</head>
+<body>
+  <div class="strip">
+    <div class="left">
+      <div class="mark">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="#4D7CFF" stroke-width="1.2" opacity="0.4"/>
+          <circle cx="12" cy="12" r="6.5" stroke="#4D7CFF" stroke-width="1.2" opacity="0.7"/>
+          <path d="M12 6 L16.5 14.5 L12 12.5 L7.5 14.5 Z" fill="#FFB020"/>
+          <circle cx="12" cy="12" r="0.8" fill="#F2F4F8"/>
+        </svg>
+      </div>
+      <div class="id">
+        <div class="title">VP-OVERWATCH</div>
+        <div class="sub"><span class="dot"></span> LIVE <span>· 23s</span></div>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="stat-num amber">04</span><span class="stat-label">airborne</span></div>
+      <div class="stat"><span class="stat-num red">10</span><span class="stat-label">ground</span></div>
+    </div>
+  </div>
+</body>
+</html>

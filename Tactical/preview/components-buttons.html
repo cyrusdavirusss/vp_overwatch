@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="../colors_and_type.css" />
+  <style>
+    body { margin: 0; padding: 22px 24px; background: var(--ink-0); display: flex; flex-direction: column; gap: 14px; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .row-label {
+      font-family: var(--font-mono);
+      font-size: 9.5px; font-weight: 500;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      color: var(--fg-3);
+      width: 72px;
+    }
+  </style>
+</head>
+<body>
+  <div class="row"><div class="row-label">Primary</div>
+    <button class="btn btn-primary">Snap to now</button>
+    <button class="btn btn-primary"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3 L19 12 L5 21 Z"/></svg>Resume</button>
+  </div>
+  <div class="row"><div class="row-label">Secondary</div>
+    <button class="btn btn-secondary">Filters</button>
+    <button class="btn btn-secondary">Layers</button>
+  </div>
+  <div class="row"><div class="row-label">Ghost</div>
+    <button class="btn btn-ghost">Cancel</button>
+    <button class="btn btn-ghost">View all</button>
+  </div>
+  <div class="row"><div class="row-label">Icon</div>
+    <button class="btn btn-secondary btn-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 2 L2 7 L12 12 L22 7 Z M2 12 L12 17 L22 12"/></svg></button>
+    <button class="btn btn-secondary btn-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 22 V18 M12 6 V2 M22 12 H18 M6 12 H2 M19 12 A7 7 0 1 1 12 5 A7 7 0 0 1 19 12"/></svg></button>
+  </div>
+</body>
+</html>
