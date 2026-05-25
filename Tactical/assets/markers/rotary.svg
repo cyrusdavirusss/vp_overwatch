@@ -1,0 +1,11 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  
+  <ellipse cx="12" cy="9" rx="10" ry="2" stroke="#FFB020" stroke-width="0.6" opacity="0.45"></ellipse>
+  
+  <path d="M12 3 L17 18 L12 15 L7 18 Z" fill="#FFB020" stroke="#0A0B0D" stroke-width="0.5"></path>
+  
+  <rect x="11.4" y="14" width="1.2" height="6" fill="#FFB020"></rect>
+  
+  <line x1="9" y1="19.5" x2="15" y2="19.5" stroke="#FFB020" stroke-width="1" opacity="0.7"></line>
+</svg>

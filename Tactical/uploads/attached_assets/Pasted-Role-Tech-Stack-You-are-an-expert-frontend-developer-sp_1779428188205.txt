@@ -1,0 +1,15 @@
+Role & Tech Stack: You are an expert frontend developer specializing in immersive 3D web applications using React Three Fiber, Three.js, and 3D mapping libraries (like Mapbox GL JS or Cesium).
+​Core Task: Build a highly professional, futuristic, and user-friendly multimedia web interface featuring an interactive 3D map environment with a 3D helicopter.
+​1. UI/UX & Aesthetic (Futuristic & Professional):
+​Theme: High-tech aerospace / next-gen command center. The design must be sleek, modern, and uncluttered.
+​Styling: Use a dark mode palette (deep charcoal/blacks) with "glassmorphism" (frosted glass) overlay panels. Include subtle, futuristic glowing accents (like neon cyan or electric blue) for active UI elements.
+​Multimedia Overlays: Include a clean, user-friendly HUD (Heads Up Display) that floats over the 3D canvas, displaying mock telemetry data (altitude, speed, heading) and clean interactive buttons for multimedia features.
+​2. 3D Interaction Logic:
+​Integrate a 3D helicopter model that the user can interact with (e.g., click to select, or use keyboard/UI controls to simulate forward movement and rotation).
+​The helicopter must be integrated directly into a topographical 3D map view, not just floating in empty space.
+​3. Camera & Alignment Logic (CRITICAL INSTRUCTION):
+​Set up a dynamic "chase camera" that locks onto the 3D helicopter.
+​Zoom & Framing: Zoom the camera out just enough so the entire helicopter is visible in the lower foreground, maximizing the visibility of the terrain ahead.
+​Perfect Alignment: The camera's forward-looking vector must perfectly align with the helicopter's nose/forward alignment. As the helicopter rotates or moves across the map, the camera and the map view must pan and rotate seamlessly to maintain this exact forward-facing perspective at all times.
+​A quick tip for the best results:
+​When the AI generates this, it will likely use a placeholder box or a basic shape for the helicopter if it doesn't have a specific 3D model file (.gltf or .glb) to reference. Once it builds the structure, you can easily swap in a high-quality 3D helicopter model from a site like Sketchfab.
