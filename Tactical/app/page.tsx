@@ -9,7 +9,7 @@ import { BottomSheet } from '@/components/bottom-sheet'
 import { AircraftDetail } from '@/components/aircraft-detail'
 import { ReportDetail } from '@/components/report-detail'
 import { FilterPanel, type Filters } from '@/components/filter-panel'
-import { AIRCRAFT, REPORTS, USER, RELAY, sampleTrack } from '@/lib/data'
+import { useRealtimeData, sampleTrack } from '@/hooks/useRealtimeData'
 
 // Dynamically import the map component to avoid SSR issues with Leaflet
 const VPMap = dynamic(() => import('@/components/map').then((mod) => mod.VPMap), {
@@ -21,13 +21,36 @@ const VPMap = dynamic(() => import('@/components/map').then((mod) => mod.VPMap),
   ),
 })
 
-// iPhone 16 viewport dimensions
-const SCREEN_W = 393
-const SCREEN_H = 852
+// iPhone 16 viewport dimensions (used on desktop)
+const IPHONE_W = 393
+const IPHONE_H = 852
 const STRIP_H = 110 // 54px island clearance + 56px strip body
 const SCRUB_H = 96
 
 export default function VPOverwatch() {
+  // Detect actual screen size for mobile viewing
+  const [screenDims, setScreenDims] = useState({ w: IPHONE_W, h: IPHONE_H })
+  useEffect(() => {
+    function update() {
+      const isMobile = window.innerWidth < 500
+      setScreenDims({
+        w: isMobile ? window.innerWidth : IPHONE_W,
+        h: isMobile ? window.innerHeight : IPHONE_H,
+      })
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+
+  // ── Live data from API ─────────────────────────────────────────────────
+  const liveData = useRealtimeData({
+    aircraftInterval: 30_000,
+    reportsInterval: 15_000,
+    gpsInterval: 10_000,
+    relayInterval: 3_000,
+  })
+
   // Core state
   const [scrubT, setScrubT] = useState(0)
   const [selectedAircraftId, setSelectedAircraftId] = useState<string | null>(null)
@@ -36,7 +59,20 @@ export default function VPOverwatch() {
   const [filterOpen, setFilterOpen] = useState(false)
   const [followUser, setFollowUser] = useState(false)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lng: number } | null>(null)
-  const [relayTick, setRelayTick] = useState(RELAY.lastTickAgo)
+  // Local relay tick for smooth animation (overlays the API-driven relay data)
+  const [relayTick, setRelayTick] = useState(liveData.relay.lastTickAgo)
+
+  // Sync relay tick from API data then animate locally
+  useEffect(() => {
+    setRelayTick(liveData.relay.lastTickAgo)
+  }, [liveData.relay.lastTickAgo])
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setRelayTick((t) => t + 1)
+    }, 1000)
+    return () => clearInterval(id)
+  }, [])
 
   // Filter state
   const [filters, setFilters] = useState<Filters>({
@@ -58,26 +94,18 @@ export default function VPOverwatch() {
     windowMin: 60,
   })
 
-  // Tick relay counter every second
-  useEffect(() => {
-    const id = setInterval(() => {
-      setRelayTick((t) => (t + 1) % 60)
-    }, 1000)
-    return () => clearInterval(id)
-  }, [])
-
   // Filter aircraft and reports based on filters
   const filteredAircraft = useMemo(() => {
-    return AIRCRAFT.filter((a) => {
+    return liveData.aircraft.filter((a) => {
       if (!filters.aircraft) return false
       if (a.role === 'rotary' && !filters.rotary) return false
       if (a.role === 'fixedwing' && !filters.fixedwing) return false
       return true
     })
-  }, [filters])
+  }, [liveData.aircraft, filters])
 
   const filteredReports = useMemo(() => {
-    return REPORTS.filter((r) => {
+    return liveData.reports.filter((r) => {
       if (!filters.reports) return false
       if (r.kind === 'marked' && !filters.kind_marked) return false
       if (r.kind === 'unmarked' && !filters.kind_unmarked) return false
@@ -88,10 +116,10 @@ export default function VPOverwatch() {
       if (r.kind === 'camera' && !filters.kind_camera) return false
       return true
     })
-  }, [filters])
+  }, [liveData.reports, filters])
 
-  // Map area height
-  const MAP_H = SCREEN_H - STRIP_H - SCRUB_H
+  // Map area height — derived from actual screen dimensions
+  const MAP_H = screenDims.h - STRIP_H - SCRUB_H
 
   // Selection handlers
   const onSelectAircraft = useCallback((id: string | null) => {
@@ -99,23 +127,23 @@ export default function VPOverwatch() {
     setSelectedReportId(null)
     if (id) {
       setSnap('half')
-      const a = AIRCRAFT.find((x) => x.id === id)
+      const a = liveData.aircraft.find((x) => x.id === id)
       if (a) {
         const pos = sampleTrack(a.track, 0)
         if (pos) setFocusTarget({ lat: pos.lat, lng: pos.lng })
       }
     }
-  }, [])
+  }, [liveData.aircraft])
 
   const onSelectReport = useCallback((id: string | null) => {
     setSelectedReportId(id)
     setSelectedAircraftId(null)
     if (id) {
       setSnap('half')
-      const r = REPORTS.find((x) => x.id === id)
+      const r = liveData.reports.find((x) => x.id === id)
       if (r) setFocusTarget({ lat: r.lat, lng: r.lng })
     }
-  }, [])
+  }, [liveData.reports])
 
   const onCloseDetail = useCallback(() => {
     setSelectedAircraftId(null)
@@ -125,9 +153,9 @@ export default function VPOverwatch() {
 
   const onRecenter = useCallback(() => {
     setFollowUser(true)
-    setFocusTarget({ lat: USER.lat, lng: USER.lng })
+    setFocusTarget({ lat: liveData.user.lat, lng: liveData.user.lng })
     setTimeout(() => setFollowUser(false), 100)
-  }, [])
+  }, [liveData.user])
 
   const selectedAircraft = filteredAircraft.find((a) => a.id === selectedAircraftId)
   const selectedReport = filteredReports.find((r) => r.id === selectedReportId)
@@ -145,8 +173,8 @@ export default function VPOverwatch() {
       <div
         className="relative overflow-hidden bg-ink-0"
         style={{
-          width: SCREEN_W,
-          height: SCREEN_H,
+          width: screenDims.w,
+          height: screenDims.h,
           fontFamily: 'var(--font-ui)',
         }}
       >
@@ -155,7 +183,7 @@ export default function VPOverwatch() {
           aircraftCount={filteredAircraft.length}
           reportsCount={filteredReports.length}
           scrubT={scrubT}
-          relay={{ ...RELAY, lastTickAgo: relayTick }}
+          relay={{ ...liveData.relay, lastTickAgo: relayTick }}
         />
 
         {/* Map Host */}
@@ -166,7 +194,7 @@ export default function VPOverwatch() {
           <VPMap
             aircraft={filteredAircraft}
             reports={filteredReports}
-            user={USER}
+            user={liveData.user}
             selectedAircraftId={selectedAircraftId}
             selectedReportId={selectedReportId}
             onSelectAircraft={onSelectAircraft}
@@ -231,8 +259,8 @@ export default function VPOverwatch() {
           style={{ height: SCRUB_H }}
         >
           <TimeScrubber
-            aircraft={AIRCRAFT}
-            reports={REPORTS}
+            aircraft={liveData.aircraft}
+            reports={liveData.reports}
             value={scrubT}
             onChange={setScrubT}
           />
