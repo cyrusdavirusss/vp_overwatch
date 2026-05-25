@@ -3,47 +3,8 @@
    Mobile-first situational awareness app
    ========================================================================= */
 
-/* All @imports MUST come first in Tailwind v4 */
-@import 'tailwindcss';
-@import 'leaflet/dist/leaflet.css';
+/* JetBrains Mono — data + identifiers */
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
-
-@theme inline {
-  --font-ui: 'Aktiv Grotesk', ui-sans-serif, -apple-system, system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-  --font-sans: var(--font-ui);
-  
-  /* Colors */
-  --color-ink-0: #0a0b0d;
-  --color-ink-1: #14161a;
-  --color-ink-2: #1c1f24;
-  --color-ink-3: #262a31;
-  --color-ink-4: #2f343d;
-  
-  --color-fg-1: #f2f4f8;
-  --color-fg-2: #a6adbb;
-  --color-fg-3: #6b7280;
-  --color-fg-4: #444b57;
-  
-  --color-border: #2a2f37;
-  --color-border-strong: #3a4049;
-  --color-border-subtle: #1e2229;
-  
-  --color-blue: #4d7cff;
-  --color-blue-hi: #6b92ff;
-  --color-blue-lo: #3a66e0;
-  
-  --color-amber: #ffb020;
-  --color-amber-hi: #ffc44d;
-  --color-amber-lo: #e89400;
-  
-  --color-red: #ff4757;
-  --color-red-hi: #ff6b78;
-  --color-red-lo: #e02e3f;
-  
-  --color-green: #5bd68a;
-  --color-stale: #5a6270;
-}
 
 /* Aktiv Grotesk — brand UI face. Local OTF files. */
 @font-face {
@@ -102,6 +63,11 @@
   font-style: normal;
   font-display: swap;
 }
+
+/* Base Tailwind */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* ---------- BASE TOKENS (DARK) ---------- */
 :root {
@@ -163,7 +129,8 @@
   --map-label: #5a6270;
 
   /* TYPOGRAPHY */
-  --font-ui: 'Aktiv Grotesk', ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --font-ui: 'Aktiv Grotesk', ui-sans-serif, -apple-system, system-ui,
+    sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   /* SIZE STEP */
@@ -215,7 +182,8 @@
 
   /* SHADOWS */
   --shadow-sheet: 0 -8px 24px -4px rgba(0, 0, 0, 0.5);
-  --shadow-fab: 0 4px 12px -2px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-fab: 0 4px 12px -2px rgba(0, 0, 0, 0.6),
+    0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-panel: 0 8px 32px -8px rgba(0, 0, 0, 0.7);
   --shadow-pop: 0 12px 40px -12px rgba(0, 0, 0, 0.8);
 
