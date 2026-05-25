@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="../colors_and_type.css" />
+  <style>
+    body { margin: 0; padding: 14px 18px; background: var(--ink-0); font-family: var(--font-ui); display: flex; flex-direction: column; gap: 8px; }
+    .row { display: flex; align-items: center; gap: 10px; }
+    .row-chip {
+      width: 28px; height: 28px;
+      border-radius: var(--r-sm);
+      border: 1px solid var(--border-subtle);
+    }
+    .row-name {
+      font-family: var(--font-mono);
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--fg-1);
+      min-width: 70px;
+    }
+    .row-hex {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--fg-3);
+      min-width: 70px;
+    }
+    .row-use {
+      font-size: 11px;
+      color: var(--fg-2);
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="row"><div class="row-chip" style="background: #F2F4F8"></div><div class="row-name">fg-1</div><div class="row-hex">#F2F4F8</div><div class="row-use">Primary text · headings · key numerics</div></div>
+  <div class="row"><div class="row-chip" style="background: #A6ADBB"></div><div class="row-name">fg-2</div><div class="row-hex">#A6ADBB</div><div class="row-use">Secondary text · labels · descriptions</div></div>
+  <div class="row"><div class="row-chip" style="background: #6B7280"></div><div class="row-name">fg-3</div><div class="row-hex">#6B7280</div><div class="row-use">Tertiary · captions · stale data</div></div>
+  <div class="row"><div class="row-chip" style="background: #444B57"></div><div class="row-name">fg-4</div><div class="row-hex">#444B57</div><div class="row-use">Disabled · scaffolding · scrubber inactive bars</div></div>
+  <div class="row"><div class="row-chip" style="background: #5BD68A"></div><div class="row-name">green</div><div class="row-hex">#5BD68A</div><div class="row-use">Confirm chip · positive vertical-speed trend</div></div>
+  <div class="row"><div class="row-chip" style="background: #5A6270"></div><div class="row-name">stale</div><div class="row-hex">#5A6270</div><div class="row-use">Historical · aged-out reports · "STALE" chip</div></div>
+</body>
+</html>
