@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 40" fill="none">
+  
+
+  
+  <g transform="translate(0,4)">
+    <path d="M 9 2 L 23 2 L 30 9 L 30 23 L 23 30 L 9 30 L 2 23 L 2 9 Z" fill="#0A0B0D" stroke="#2A2F37" stroke-width="0.8"></path>
+    <circle cx="16" cy="16" r="7" stroke="#4D7CFF" stroke-width="0.7" fill="none"></circle>
+    <path d="M 16 5 L 16 7 M 16 25 L 16 27 M 5 16 L 7 16 M 25 16 L 27 16" stroke="#4D7CFF" stroke-width="0.7" stroke-linecap="square"></path>
+    <line x1="11" y1="13.5" x2="21" y2="13.5" stroke="#FFB020" stroke-width="0.4" stroke-opacity="0.5"></line>
+    <path d="M 16 12 L 19 19.5 L 16 18 L 13 19.5 Z" fill="#FFB020"></path>
+    <rect x="15.6" y="17.5" width="0.8" height="3" fill="#FFB020"></rect>
+  </g>
+
+  
+  <line x1="42" y1="8" x2="42" y2="32" stroke="#2A2F37" stroke-width="1"></line>
+
+  
+  <text x="50" y="14" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="8" font-weight="500" letter-spacing="0.20em" fill="#6B7280">VPAW · ADS-B · WAZE</text>
+
+  
+  <text x="50" y="30" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="14" font-weight="700" letter-spacing="0.14em" fill="#F2F4F8">VP–OVERWATCH</text>
+
+  
+  <g transform="translate(265,11)">
+    <rect x="0" y="0" width="50" height="18" fill="#0A0B0D" stroke="#4D7CFF" stroke-width="0.8"></rect>
+    <text x="25" y="12" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="8" font-weight="600" letter-spacing="0.16em" fill="#4D7CFF" text-anchor="middle">VIC</text>
+  </g>
+</svg>
