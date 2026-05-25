@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="../colors_and_type.css" />
+  <style>
+    body { margin: 0; padding: 20px 24px; background: var(--ink-0); font-family: var(--font-ui); }
+    .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .swatch {
+      border-radius: var(--r-md);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      background: var(--ink-1);
+    }
+    .swatch-chip { height: 56px; }
+    .swatch-meta { padding: 8px 10px; }
+    .swatch-name { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--fg-1); letter-spacing: 0.04em; }
+    .swatch-hex  { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div class="grid">
+    <div class="swatch"><div class="swatch-chip" style="background: #0A0B0D"></div><div class="swatch-meta"><div class="swatch-name">ink-0</div><div class="swatch-hex">#0A0B0D · page base</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background: #14161A"></div><div class="swatch-meta"><div class="swatch-name">ink-1</div><div class="swatch-hex">#14161A · sheets</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background: #1C1F24"></div><div class="swatch-meta"><div class="swatch-name">ink-2</div><div class="swatch-hex">#1C1F24 · raised</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background: #262A31"></div><div class="swatch-meta"><div class="swatch-name">ink-3</div><div class="swatch-hex">#262A31 · controls</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background: #2F343D"></div><div class="swatch-meta"><div class="swatch-name">ink-4</div><div class="swatch-hex">#2F343D · hover</div></div></div>
+    <div class="swatch"><div class="swatch-chip" style="background: #2A2F37"></div><div class="swatch-meta"><div class="swatch-name">border</div><div class="swatch-hex">#2A2F37</div></div></div>
+  </div>
+</body>
+</html>
