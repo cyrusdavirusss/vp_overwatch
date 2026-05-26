@@ -190,6 +190,8 @@ async function pollOpenSky(): Promise<void> {
       const hex = (icao24 as string).toUpperCase()
       const known = KNOWN_AIRCRAFT[hex]
 
+      if (!known) continue
+
       const alt = Math.round(Number(baroAltitude ?? geoAltitude ?? 0) * 3.28084)
       const speed = Math.round(Number(velocity ?? 0) * 1.94384)
       const heading = Math.round(trueTrack ?? 0)

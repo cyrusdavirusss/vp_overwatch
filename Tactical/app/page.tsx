@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { StatusStrip } from '@/components/status-strip'
 import { TimeScrubber } from '@/components/time-scrubber'
@@ -67,6 +67,17 @@ export default function VPOverwatch() {
     }, 1000)
     return () => clearInterval(id)
   }, [])
+
+  // Auto-center map on user's real location when geolocation first arrives
+  const hasAutocentered = useRef(false)
+  useEffect(() => {
+    const defaultLat = -37.8136
+    const isDefault = Math.abs(liveData.user.lat - defaultLat) < 0.001
+    if (!isDefault && !hasAutocentered.current) {
+      hasAutocentered.current = true
+      setFocusTarget({ lat: liveData.user.lat, lng: liveData.user.lng })
+    }
+  }, [liveData.user.lat, liveData.user.lng])
 
   const [filters, setFilters] = useState<Filters>({
     aircraft: true,
