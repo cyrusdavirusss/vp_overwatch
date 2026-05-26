@@ -6,18 +6,13 @@ import type {
   Report,
   User,
   Relay,
-  TrackPoint,
-  Aircraft as AircraftType,
 } from '@/lib/data'
 
-// Re-export helper functions from data for convenience
 export {
   sampleTrack,
   sampleTrailUntil,
   computeDistance,
 } from '@/lib/data'
-
-// ── Types ────────────────────────────────────────────────────────────────
 
 export interface RealtimeData {
   aircraft: Aircraft[]
@@ -29,8 +24,6 @@ export interface RealtimeData {
   lastUpdate: number
 }
 
-// ── Fallback: use mock data while API is starting up ──────────────────────
-
 import {
   AIRCRAFT as MOCK_AIRCRAFT,
   REPORTS as MOCK_REPORTS,
@@ -38,18 +31,11 @@ import {
   RELAY as MOCK_RELAY,
 } from '@/lib/data'
 
-// ── Hook ──────────────────────────────────────────────────────────────────
-
 interface UseRealtimeOptions {
-  /** Poll interval for aircraft in ms (default: 30000) */
   aircraftInterval?: number
-  /** Poll interval for reports in ms (default: 15000) */
   reportsInterval?: number
-  /** Poll interval for GPS in ms (default: 10000) */
   gpsInterval?: number
-  /** Poll interval for relay status in ms (default: 3000) */
   relayInterval?: number
-  /** Whether to start polling immediately (default: true) */
   enabled?: boolean
 }
 
@@ -74,8 +60,6 @@ export function useRealtimeData(options: UseRealtimeOptions = {}): RealtimeData 
 
   const hasEverLoaded = useRef(false)
 
-  // ── Fetch helper ──────────────────────────────────────────────────────
-
   const fetchJson = useCallback(async <T,>(url: string, fallback: T): Promise<T> => {
     try {
       const res = await fetch(url, { cache: 'no-store' })
@@ -87,19 +71,54 @@ export function useRealtimeData(options: UseRealtimeOptions = {}): RealtimeData 
     }
   }, [])
 
-  // ── Aircraft poll ─────────────────────────────────────────────────────
-
+  // ── Browser geolocation: request permission and push to server ────────
   useEffect(() => {
     if (!enabled) return
+    if (!navigator.geolocation) return
 
+    let watchId: number
+
+    function sendGPS(lat: number, lng: number, hdg: number, accuracy: number) {
+      setData((prev) => ({
+        ...prev,
+        user: { lat, lng, hdg, accuracy },
+      }))
+      fetch('/api/gps/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-gps-secret': 'gps-dev' },
+        body: JSON.stringify({ lat, lng, hdg, accuracy }),
+      }).catch(() => {})
+    }
+
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        sendGPS(
+          pos.coords.latitude,
+          pos.coords.longitude,
+          pos.coords.heading ?? 0,
+          pos.coords.accuracy,
+        )
+      },
+      (err) => {
+        console.warn('[GPS] geolocation error:', err.message)
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    )
+
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [enabled])
+
+  // ── Aircraft poll ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!enabled) return
     let mounted = true
 
     async function poll() {
-      const result = await fetchJson<Aircraft[]>('/api/aircraft/active', MOCK_AIRCRAFT)
+      const result = await fetchJson<Aircraft[]>('/api/aircraft/active', [])
       if (!mounted) return
       setData((prev) => ({
         ...prev,
-        aircraft: result,
+        aircraft: result.length > 0 ? result : prev.aircraft,
         loading: false,
         lastUpdate: Date.now(),
       }))
@@ -108,67 +127,51 @@ export function useRealtimeData(options: UseRealtimeOptions = {}): RealtimeData 
 
     poll()
     const id = setInterval(poll, aircraftInterval)
-    return () => {
-      mounted = false
-      clearInterval(id)
-    }
+    return () => { mounted = false; clearInterval(id) }
   }, [enabled, aircraftInterval, fetchJson])
 
-  // ── Reports poll ─────────────────────────────────────────────────────
-
+  // ── Reports poll — keep mock data if API returns empty ────────────────
   useEffect(() => {
     if (!enabled) return
-
     let mounted = true
 
     async function poll() {
-      const result = await fetchJson<Report[]>('/api/waze/alerts', MOCK_REPORTS)
+      const result = await fetchJson<Report[]>('/api/waze/alerts', [])
       if (!mounted) return
       setData((prev) => ({
         ...prev,
-        reports: result,
+        reports: result.length > 0 ? result : prev.reports,
         lastUpdate: Date.now(),
       }))
     }
 
     poll()
     const id = setInterval(poll, reportsInterval)
-    return () => {
-      mounted = false
-      clearInterval(id)
-    }
+    return () => { mounted = false; clearInterval(id) }
   }, [enabled, reportsInterval, fetchJson])
 
-  // ── GPS poll ─────────────────────────────────────────────────────────
-
+  // ── GPS poll (server-side position, supplements browser geolocation) ──
   useEffect(() => {
     if (!enabled) return
-
     let mounted = true
 
     async function poll() {
       const result = await fetchJson<User>('/api/gps/location', MOCK_USER)
       if (!mounted) return
-      setData((prev) => ({
-        ...prev,
-        user: result,
-        lastUpdate: Date.now(),
-      }))
+      setData((prev) => {
+        if (prev.user.accuracy < result.accuracy) return prev
+        return { ...prev, user: result, lastUpdate: Date.now() }
+      })
     }
 
     poll()
     const id = setInterval(poll, gpsInterval)
-    return () => {
-      mounted = false
-      clearInterval(id)
-    }
+    return () => { mounted = false; clearInterval(id) }
   }, [enabled, gpsInterval, fetchJson])
 
   // ── Relay status poll ────────────────────────────────────────────────
-
   useEffect(() => {
     if (!enabled) return
-
     let mounted = true
 
     async function poll() {
@@ -183,10 +186,7 @@ export function useRealtimeData(options: UseRealtimeOptions = {}): RealtimeData 
 
     poll()
     const id = setInterval(poll, relayInterval)
-    return () => {
-      mounted = false
-      clearInterval(id)
-    }
+    return () => { mounted = false; clearInterval(id) }
   }, [enabled, relayInterval, fetchJson])
 
   return data

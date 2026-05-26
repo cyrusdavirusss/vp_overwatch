@@ -204,9 +204,9 @@ export default function VPOverwatch() {
           </div>
         </div>
 
-        {/* Main content area */}
+        {/* Main content area — map + right data panel */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Map area (fills remaining space) */}
+          {/* Map area */}
           <div className="flex-1 relative">
             <VPMap
               aircraft={filteredAircraft}
@@ -226,7 +226,6 @@ export default function VPOverwatch() {
               focusTarget={focusTarget}
             />
 
-            {/* Map overlay: coordinates + zoom level */}
             <div className="absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded bg-ink-0/80 border border-border-subtle" style={{ backdropFilter: 'blur(8px)' }}>
               <span className="num text-[9px] text-fg-3">
                 {liveData.user.lat.toFixed(4)}°, {liveData.user.lng.toFixed(4)}°
@@ -235,7 +234,6 @@ export default function VPOverwatch() {
               <span className="num text-[9px] text-fg-3">HDG {String(Math.round(liveData.user.hdg)).padStart(3, '0')}°</span>
             </div>
 
-            {/* FAB Cluster */}
             <FabCluster
               onLayers={() => setFilterOpen((v) => !v)}
               onFilters={() => setFilterOpen((v) => !v)}
@@ -243,7 +241,6 @@ export default function VPOverwatch() {
               followUser={followUser}
             />
 
-            {/* Filter Panel Overlay */}
             {filterOpen && (
               <div
                 className="absolute inset-0 z-40 flex items-center justify-center"
@@ -260,43 +257,38 @@ export default function VPOverwatch() {
                 />
               </div>
             )}
-
-            {/* Desktop time scrubber docked at bottom of map */}
-            <div className="absolute left-0 right-0 bottom-0 z-20">
-              <TimeScrubber
-                aircraft={liveData.aircraft}
-                reports={liveData.reports}
-                value={scrubT}
-                onChange={setScrubT}
-              />
-            </div>
           </div>
 
-          {/* Right panel: data grid + detail */}
-          <div className="flex flex-col" style={{ width: panelW }}>
-            {/* Data grid (upper portion) */}
-            <div className={detailContent ? 'h-[45%]' : 'flex-1'}>
-              <DataGrid
-                aircraft={filteredAircraft}
-                reports={filteredReports}
-                user={liveData.user}
-                scrubT={scrubT}
-                selectedAircraftId={selectedAircraftId}
-                selectedReportId={selectedReportId}
-                onSelectAircraft={onSelectAircraft}
-                onSelectReport={onSelectReport}
-              />
-            </div>
+          {/* Right data grid panel — wider */}
+          <div className="flex-shrink-0 w-[480px]">
+            <DataGrid
+              aircraft={filteredAircraft}
+              reports={filteredReports}
+              user={liveData.user}
+              scrubT={scrubT}
+              selectedAircraftId={selectedAircraftId}
+              selectedReportId={selectedReportId}
+              onSelectAircraft={onSelectAircraft}
+              onSelectReport={onSelectReport}
+            />
+          </div>
+        </div>
 
-            {/* Detail panel (lower portion) */}
-            {detailContent && (
-              <div className="flex-1 border-t border-border overflow-y-auto bg-ink-0">
-                <div className="p-2">
-                  {detailContent}
-                </div>
+        {/* Bottom dock: detail panel + time scrubber */}
+        <div className="flex-shrink-0 border-t border-border bg-ink-1">
+          {detailContent && (
+            <div className="max-h-[280px] overflow-y-auto border-b border-border">
+              <div className="p-3 flex gap-4">
+                <div className="flex-1">{detailContent}</div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+          <TimeScrubber
+            aircraft={liveData.aircraft}
+            reports={liveData.reports}
+            value={scrubT}
+            onChange={setScrubT}
+          />
         </div>
       </div>
     )
