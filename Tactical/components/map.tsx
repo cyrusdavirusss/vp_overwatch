@@ -18,6 +18,7 @@ import {
   TrackPoint,
   sampleTrack,
   sampleTrailUntil,
+  computeDistance,
 } from '@/lib/data'
 
 interface VPMapProps {
@@ -38,7 +39,6 @@ interface VPMapProps {
   focusTarget?: { lat: number; lng: number } | null
 }
 
-// Map controller for flying to focus targets
 function MapController({
   focusTarget,
 }: {
@@ -57,7 +57,6 @@ function MapController({
   return null
 }
 
-// Custom aircraft marker icons
 function createAircraftIcon(
   role: 'rotary' | 'fixedwing',
   heading: number,
@@ -81,7 +80,6 @@ function createAircraftIcon(
   })
 }
 
-// Custom report marker icons
 function createReportIcon(
   kind: Report['kind'],
   isSelected: boolean,
@@ -92,14 +90,11 @@ function createReportIcon(
   const kindIcons: Record<Report['kind'], string> = {
     marked: 'M19 17H5V13L7 7H17L19 13ZM7.5 17V19M16.5 17V19M5 13H19',
     unmarked: 'M19 17H5V13L7 7H17L19 13ZM7.5 17V19M16.5 17V19M5 13H19',
-    hidden:
-      'M2 12S5 5 12 5s10 7 10 7-3 7-10 7S2 12 2 12ZM15 12a3 3 0 11-6 0 3 3 0 016 0',
+    hidden: 'M2 12S5 5 12 5s10 7 10 7-3 7-10 7S2 12 2 12ZM15 12a3 3 0 11-6 0 3 3 0 016 0',
     stop: 'M12 9V13M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.73 3h16.9a2 2 0 001.73-3l-8.47-14.14a2 2 0 00-3.42 0Z',
-    checkpoint:
-      'M12 9V13M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.73 3h16.9a2 2 0 001.73-3l-8.47-14.14a2 2 0 00-3.42 0Z',
+    checkpoint: 'M12 9V13M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.73 3h16.9a2 2 0 001.73-3l-8.47-14.14a2 2 0 00-3.42 0Z',
     rbt: 'M12 9V13M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.73 3h16.9a2 2 0 001.73-3l-8.47-14.14a2 2 0 00-3.42 0Z',
-    camera:
-      'M2 12S5 5 12 5s10 7 10 7-3 7-10 7S2 12 2 12ZM15 12a3 3 0 11-6 0 3 3 0 016 0',
+    camera: 'M2 12S5 5 12 5s10 7 10 7-3 7-10 7S2 12 2 12ZM15 12a3 3 0 11-6 0 3 3 0 016 0',
   }
 
   const iconPath = kindIcons[kind] || kindIcons.marked
@@ -116,7 +111,6 @@ function createReportIcon(
   })
 }
 
-// User position icon
 function createUserIcon(): L.DivIcon {
   return L.divIcon({
     html: `<div class="user-marker">
@@ -143,7 +137,6 @@ export function VPMap({
 }: VPMapProps) {
   const mapRef = useRef<L.Map | null>(null)
 
-  // Memoize aircraft positions based on scrub time
   const aircraftPositions = useMemo(() => {
     return aircraft.map((a) => {
       const pos = sampleTrack(a.track, scrubT)
@@ -151,7 +144,6 @@ export function VPMap({
     })
   }, [aircraft, scrubT])
 
-  // Memoize trails
   const aircraftTrails = useMemo(() => {
     if (!layers.trails) return []
     return aircraft.map((a) => {
@@ -162,13 +154,54 @@ export function VPMap({
     })
   }, [aircraft, scrubT, layers.trails, selectedAircraftId])
 
-  // Filter reports based on scrub time
   const visibleReports = useMemo(() => {
     return reports.filter((r) => {
       const reportAgeAtScrub = r.reportedAgo - scrubT
       return reportAgeAtScrub >= 0
     })
   }, [reports, scrubT])
+
+  // Connection lines: aircraft to nearby reports within 5km
+  const connectionLines = useMemo(() => {
+    const lines: { from: [number, number]; to: [number, number]; strength: number }[] = []
+    aircraftPositions.forEach((a) => {
+      if (!a.currentPos) return
+      visibleReports.forEach((r) => {
+        const dist = computeDistance(a.currentPos!.lat, a.currentPos!.lng, r.lat, r.lng)
+        if (dist < 5000) {
+          lines.push({
+            from: [a.currentPos!.lat, a.currentPos!.lng],
+            to: [r.lat, r.lng],
+            strength: Math.max(0.1, 1 - dist / 5000),
+          })
+        }
+      })
+    })
+    return lines
+  }, [aircraftPositions, visibleReports])
+
+  // Hex grid: density bins for reports
+  const hexCenters = useMemo(() => {
+    if (visibleReports.length < 3) return []
+    const HEX_SIZE = 0.012
+    const bins = new Map<string, { lat: number; lng: number; count: number }>()
+    visibleReports.forEach((r) => {
+      const col = Math.round(r.lng / (HEX_SIZE * 1.5))
+      const row = Math.round(r.lat / (HEX_SIZE * Math.sqrt(3)))
+      const key = `${col},${row}`
+      const existing = bins.get(key)
+      if (existing) {
+        existing.count++
+      } else {
+        bins.set(key, {
+          lat: row * HEX_SIZE * Math.sqrt(3),
+          lng: col * HEX_SIZE * 1.5,
+          count: 1,
+        })
+      }
+    })
+    return [...bins.values()].filter((b) => b.count >= 2)
+  }, [visibleReports])
 
   return (
     <div className="relative w-full h-full">
@@ -186,6 +219,37 @@ export function VPMap({
         />
 
         <MapController focusTarget={focusTarget} />
+
+        {/* Hex density overlay */}
+        {hexCenters.map((hex, i) => (
+          <Circle
+            key={`hex-${i}`}
+            center={[hex.lat, hex.lng]}
+            radius={600}
+            pathOptions={{
+              color: '#FF4757',
+              fillColor: '#FF4757',
+              fillOpacity: Math.min(0.25, hex.count * 0.08),
+              weight: 1,
+              opacity: 0.3,
+              dashArray: '4, 4',
+            }}
+          />
+        ))}
+
+        {/* Connection lines: aircraft to nearby reports */}
+        {connectionLines.map((line, i) => (
+          <Polyline
+            key={`conn-${i}`}
+            positions={[line.from, line.to]}
+            pathOptions={{
+              color: '#4D7CFF',
+              weight: 1,
+              opacity: line.strength * 0.4,
+              dashArray: '3, 6',
+            }}
+          />
+        ))}
 
         {/* User position */}
         <Marker position={[user.lat, user.lng]} icon={createUserIcon()}>
@@ -205,10 +269,7 @@ export function VPMap({
         {layers.trails &&
           aircraftTrails.map(({ id, trail, isSelected }) => {
             if (trail.length < 2) return null
-            const positions: [number, number][] = trail.map((p) => [
-              p.lat,
-              p.lng,
-            ])
+            const positions: [number, number][] = trail.map((p) => [p.lat, p.lng])
             return (
               <Polyline
                 key={`trail-${id}`}
@@ -222,31 +283,23 @@ export function VPMap({
             )
           })}
 
-        {/* Predictive vector for selected aircraft */}
+        {/* Predictive vector */}
         {layers.predictive &&
           selectedAircraftId &&
           (() => {
-            const a = aircraftPositions.find(
-              (x) => x.id === selectedAircraftId
-            )
+            const a = aircraftPositions.find((x) => x.id === selectedAircraftId)
             if (!a?.currentPos) return null
             const pos = a.currentPos
-            // Project 60s forward at current speed and heading
             const hdgRad = ((pos.hdg - 90) * Math.PI) / 180
-            const fwd60m = pos.spd * 0.514 * 60 // meters
-            // Convert to lat/lng delta (rough approximation)
+            const fwd60m = pos.spd * 0.514 * 60
             const dLat = (Math.cos(hdgRad) * fwd60m) / 111000
-            const dLng =
-              (Math.sin(hdgRad) * fwd60m) /
-              (111000 * Math.cos((pos.lat * Math.PI) / 180))
-            const endLat = pos.lat + dLat
-            const endLng = pos.lng + dLng
+            const dLng = (Math.sin(hdgRad) * fwd60m) / (111000 * Math.cos((pos.lat * Math.PI) / 180))
 
             return (
               <Polyline
                 positions={[
                   [pos.lat, pos.lng],
-                  [endLat, endLng],
+                  [pos.lat + dLat, pos.lng + dLng],
                 ]}
                 pathOptions={{
                   color: '#FFB020',
@@ -267,24 +320,14 @@ export function VPMap({
               <Marker
                 key={a.id}
                 position={[a.currentPos.lat, a.currentPos.lng]}
-                icon={createAircraftIcon(
-                  a.role,
-                  a.currentPos.hdg,
-                  isSelected
-                )}
-                eventHandlers={{
-                  click: () => onSelectAircraft(a.id),
-                }}
+                icon={createAircraftIcon(a.role, a.currentPos.hdg, isSelected)}
+                eventHandlers={{ click: () => onSelectAircraft(a.id) }}
               >
                 {isSelected && (
                   <Circle
                     center={[a.currentPos.lat, a.currentPos.lng]}
                     radius={150}
-                    pathOptions={{
-                      color: '#FFB020',
-                      fillColor: 'transparent',
-                      weight: 2,
-                    }}
+                    pathOptions={{ color: '#FFB020', fillColor: 'transparent', weight: 2 }}
                   />
                 )}
               </Marker>
@@ -301,19 +344,13 @@ export function VPMap({
                 key={r.id}
                 position={[r.lat, r.lng]}
                 icon={createReportIcon(r.kind, isSelected, isConfirmed)}
-                eventHandlers={{
-                  click: () => onSelectReport(r.id),
-                }}
+                eventHandlers={{ click: () => onSelectReport(r.id) }}
               >
                 {isSelected && (
                   <Circle
                     center={[r.lat, r.lng]}
                     radius={100}
-                    pathOptions={{
-                      color: '#4D7CFF',
-                      fillColor: 'transparent',
-                      weight: 2,
-                    }}
+                    pathOptions={{ color: '#4D7CFF', fillColor: 'transparent', weight: 2 }}
                   />
                 )}
               </Marker>
@@ -335,7 +372,6 @@ export function VPMap({
           background: var(--amber-wash);
           box-shadow: 0 0 20px var(--amber-glow);
         }
-
         .report-marker {
           display: flex;
           align-items: center;
@@ -346,53 +382,29 @@ export function VPMap({
           width: 100%;
           height: 100%;
         }
-        .report-marker.confirmed {
-          border-color: var(--green);
-        }
+        .report-marker.confirmed { border-color: var(--green); }
         .report-marker.selected {
           box-shadow: 0 0 12px var(--blue-glow);
           border-color: var(--blue);
         }
-
-        .user-marker {
-          position: relative;
-          width: 24px;
-          height: 24px;
-        }
+        .user-marker { position: relative; width: 24px; height: 24px; }
         .user-marker-dot {
-          position: absolute;
-          top: 50%;
-          left: 50%;
+          position: absolute; top: 50%; left: 50%;
           transform: translate(-50%, -50%);
-          width: 12px;
-          height: 12px;
-          background: var(--blue);
-          border: 2px solid white;
-          border-radius: 50%;
-          box-shadow: 0 0 8px var(--blue-glow);
-          z-index: 2;
+          width: 12px; height: 12px;
+          background: var(--blue); border: 2px solid white;
+          border-radius: 50%; box-shadow: 0 0 8px var(--blue-glow); z-index: 2;
         }
         .user-marker-pulse {
-          position: absolute;
-          top: 50%;
-          left: 50%;
+          position: absolute; top: 50%; left: 50%;
           transform: translate(-50%, -50%);
-          width: 24px;
-          height: 24px;
-          background: var(--blue);
-          border-radius: 50%;
-          opacity: 0.3;
-          animation: user-pulse 2s ease-out infinite;
+          width: 24px; height: 24px;
+          background: var(--blue); border-radius: 50%;
+          opacity: 0.3; animation: user-pulse 2s ease-out infinite;
         }
         @keyframes user-pulse {
-          0% {
-            transform: translate(-50%, -50%) scale(0.5);
-            opacity: 0.5;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(2);
-            opacity: 0;
-          }
+          0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0.5; }
+          100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
         }
       `}</style>
     </div>
