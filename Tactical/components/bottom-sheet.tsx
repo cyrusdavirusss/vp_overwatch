@@ -5,18 +5,19 @@ import { Icon } from './icon'
 import {
   Aircraft,
   Report,
+  User,
   sampleTrack,
   computeDistance,
   computeBearing,
   compassFromBearing,
   formatSec,
   formatHM,
-  USER,
 } from '@/lib/data'
 
 interface BottomSheetProps {
   aircraft: Aircraft[]
   reports: Report[]
+  user: User
   scrubT: number
   selectedAircraftId: string | null
   selectedReportId: string | null
@@ -31,6 +32,7 @@ interface BottomSheetProps {
 export function BottomSheet({
   aircraft,
   reports,
+  user,
   scrubT,
   selectedAircraftId,
   selectedReportId,
@@ -159,6 +161,7 @@ export function BottomSheet({
                 key={item.obj.id}
                 aircraft={item.obj}
                 pos={item.pos}
+                user={user}
                 selected={item.obj.id === selectedAircraftId}
                 onClick={() => onSelectAircraft(item.obj.id)}
               />
@@ -167,6 +170,7 @@ export function BottomSheet({
                 key={item.obj.id}
                 report={item.obj}
                 ageAtScrub={item.ageAtScrub}
+                user={user}
                 selected={item.obj.id === selectedReportId}
                 onClick={() => onSelectReport(item.obj.id)}
               />
@@ -180,13 +184,14 @@ export function BottomSheet({
 interface AircraftFeedItemProps {
   aircraft: Aircraft
   pos: NonNullable<ReturnType<typeof sampleTrack>>
+  user: User
   selected: boolean
   onClick: () => void
 }
 
-function AircraftFeedItem({ aircraft, pos, selected, onClick }: AircraftFeedItemProps) {
-  const distNm = computeDistance(USER.lat, USER.lng, pos.lat, pos.lng) / 1852
-  const bearing = computeBearing(USER.lat, USER.lng, pos.lat, pos.lng)
+function AircraftFeedItem({ aircraft, pos, user, selected, onClick }: AircraftFeedItemProps) {
+  const distNm = computeDistance(user.lat, user.lng, pos.lat, pos.lng) / 1852
+  const bearing = computeBearing(user.lat, user.lng, pos.lat, pos.lng)
   const trend = pos.vs > 50 ? 'up' : pos.vs < -50 ? 'dn' : null
 
   const airborneSec = aircraft.timeAirborneSeconds || 0
@@ -282,13 +287,14 @@ function AircraftFeedItem({ aircraft, pos, selected, onClick }: AircraftFeedItem
 interface ReportFeedItemProps {
   report: Report
   ageAtScrub: number
+  user: User
   selected: boolean
   onClick: () => void
 }
 
-function ReportFeedItem({ report, selected, onClick }: ReportFeedItemProps) {
-  const distMi = computeDistance(USER.lat, USER.lng, report.lat, report.lng) / 1609
-  const bearing = computeBearing(USER.lat, USER.lng, report.lat, report.lng)
+function ReportFeedItem({ report, user, selected, onClick }: ReportFeedItemProps) {
+  const distMi = computeDistance(user.lat, user.lng, report.lat, report.lng) / 1609
+  const bearing = computeBearing(user.lat, user.lng, report.lat, report.lng)
 
   const labelForKind = (kind: Report['kind']): string => {
     switch (kind) {
