@@ -478,3 +478,49 @@ samp,
 .leaflet-tile-pane {
   filter: grayscale(100%) invert(100%) brightness(0.35) contrast(1.1);
 }
+
+/* Scanline overlay for military CRT aesthetic */
+.scanline-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  mix-blend-mode: multiply;
+}
+
+/* Grid crosshair overlay */
+.grid-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background-image:
+    linear-gradient(var(--border-subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+  background-size: 80px 80px;
+  opacity: 0.15;
+}
+
+/* Desktop data grid styling */
+.vp-grid-row:nth-child(even) {
+  background: rgba(20, 22, 26, 0.5);
+}
+.vp-grid-row:hover {
+  background: rgba(77, 124, 255, 0.04);
+}
+
+/* Military-grade number rendering */
+.num-lg {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'ss01', 'zero';
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
