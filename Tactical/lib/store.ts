@@ -190,12 +190,6 @@ async function pollOpenSky(): Promise<void> {
       const hex = (icao24 as string).toUpperCase()
       const known = KNOWN_AIRCRAFT[hex]
 
-      // Filter: only known aircraft or low/slow helicopter-like traffic
-      const isHelicopter = baroAltitude != null && Number(baroAltitude) < 10000 && Number(velocity ?? 0) < 150
-      const isInterceptor = known || (isHelicopter && Number(velocity ?? 0) < 130)
-
-      if (!isInterceptor && !known) continue
-
       const alt = Math.round(Number(baroAltitude ?? geoAltitude ?? 0) * 3.28084)
       const speed = Math.round(Number(velocity ?? 0) * 1.94384)
       const heading = Math.round(trueTrack ?? 0)
