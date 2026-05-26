@@ -2,3 +2,10 @@ node_modules/
 .next/
 *.tsbuildinfo
 next-env.d.ts
+Tactical/out/
+Tactical/android/.gradle/
+Tactical/android/app/build/
+Tactical/android/build/
+Tactical/android/capacitor-android/build/
+Tactical/android/capacitor-cordova-android-plugins/build/
+Android/
