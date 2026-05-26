@@ -461,9 +461,8 @@ samp,
   background: var(--border-strong);
 }
 
-/* Leaflet overrides for dark mode */
 .leaflet-container {
-  background: var(--map-bg) !important;
+  background: #f2f3f5 !important;
   font-family: var(--font-ui);
 }
 
@@ -476,7 +475,7 @@ samp,
 }
 
 .leaflet-tile-pane {
-  filter: grayscale(100%) invert(100%) brightness(0.35) contrast(1.1);
+  filter: brightness(0.95) saturate(0.3);
 }
 
 /* Scanline overlay for military CRT aesthetic */
