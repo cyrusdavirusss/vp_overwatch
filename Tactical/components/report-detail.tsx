@@ -4,21 +4,22 @@ import { Icon } from './icon'
 import { Metric, Chip, Dot } from './ui'
 import {
   Report,
+  User,
   computeDistance,
   computeBearing,
   compassFromBearing,
   formatSec,
-  USER,
 } from '@/lib/data'
 
 interface ReportDetailProps {
   report: Report
+  user: User
   onClose: () => void
 }
 
-export function ReportDetail({ report, onClose }: ReportDetailProps) {
-  const distMi = computeDistance(USER.lat, USER.lng, report.lat, report.lng) / 1609
-  const bearing = computeBearing(USER.lat, USER.lng, report.lat, report.lng)
+export function ReportDetail({ report, user, onClose }: ReportDetailProps) {
+  const distMi = computeDistance(user.lat, user.lng, report.lat, report.lng) / 1609
+  const bearing = computeBearing(user.lat, user.lng, report.lat, report.lng)
   const confirmed = report.nThumbsUp >= 5 && report.lastConfirmedAgo < 120
   const decay = Math.max(0, Math.min(1, 1 - report.lastConfirmedAgo / 600))
 

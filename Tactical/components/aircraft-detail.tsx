@@ -6,6 +6,7 @@ import { Metric, Chip } from './ui'
 import {
   Aircraft,
   TrackPoint,
+  User,
   sampleTrack,
   computeDistance,
   computeBearing,
@@ -13,21 +14,21 @@ import {
   formatSec,
   formatHMS,
   formatHM,
-  USER,
 } from '@/lib/data'
 
 interface AircraftDetailProps {
   aircraft: Aircraft
+  user: User
   scrubT: number
   onClose: () => void
 }
 
-export function AircraftDetail({ aircraft, scrubT, onClose }: AircraftDetailProps) {
+export function AircraftDetail({ aircraft, user, scrubT, onClose }: AircraftDetailProps) {
   const pos = sampleTrack(aircraft.track, scrubT)
   if (!pos) return null
 
-  const distNm = computeDistance(USER.lat, USER.lng, pos.lat, pos.lng) / 1852
-  const bearing = computeBearing(USER.lat, USER.lng, pos.lat, pos.lng)
+  const distNm = computeDistance(user.lat, user.lng, pos.lat, pos.lng) / 1852
+  const bearing = computeBearing(user.lat, user.lng, pos.lat, pos.lng)
   const trackedMin = Math.floor((aircraft.track.length * 4) / 60)
   const trend = pos.vs > 50 ? 'climb' : pos.vs < -50 ? 'descend' : 'level'
 

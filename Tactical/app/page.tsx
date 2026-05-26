@@ -162,9 +162,9 @@ export default function VPOverwatch() {
 
   // Detail content for bottom sheet
   const detailContent = selectedAircraft ? (
-    <AircraftDetail aircraft={selectedAircraft} scrubT={scrubT} onClose={onCloseDetail} />
+    <AircraftDetail aircraft={selectedAircraft} user={liveData.user} scrubT={scrubT} onClose={onCloseDetail} />
   ) : selectedReport ? (
-    <ReportDetail report={selectedReport} onClose={onCloseDetail} />
+    <ReportDetail report={selectedReport} user={liveData.user} onClose={onCloseDetail} />
   ) : null
 
   return (
@@ -240,6 +240,7 @@ export default function VPOverwatch() {
             <BottomSheet
               aircraft={filteredAircraft}
               reports={filteredReports}
+              user={liveData.user}
               scrubT={scrubT}
               selectedAircraftId={selectedAircraftId}
               selectedReportId={selectedReportId}
