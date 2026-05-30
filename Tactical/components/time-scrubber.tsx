@@ -96,7 +96,7 @@ export function TimeScrubber({
           <span className="num text-[13px] font-semibold text-fg-1 tracking-[0.04em]">
             {isLive ? 'LIVE' : `−${formatSec(value)}`}
           </span>
-          <span className="num text-[11px] text-fg-3 tracking-[0.02em]">
+          <span className="num text-[11px] text-fg-3 tracking-[0.02em]" suppressHydrationWarning>
             {clockAt(value)}
           </span>
         </div>

@@ -150,14 +150,14 @@ const KNOWN_AIRCRAFT: Record<string, { registration: string; role: Aircraft['rol
   '7CF102': { registration: 'VH-AFC', role: 'fixedwing', operator: 'Australian Federal Police', operatorShort: 'AFP', type: 'C208', typeLabel: 'Cessna 208 Caravan' },
 }
 
-// ── OpenSky Network Polling ──────────────────────────────────────────────
+// ── ADSB.lol Polling ────────────────────────────────────────────────────
 
 async function pollOpenSky(): Promise<void> {
   try {
+    const s = getState()
+    const { lat, lng } = s.userGPS
     const url =
-      `https://opensky-network.org/api/states/all?` +
-      `lamin=${BBOX.lamin}&lamax=${BBOX.lamax}` +
-      `&lomin=${BBOX.lomin}&lomax=${BBOX.lomax}`
+      `https://api.adsb.lol/v2/point/${lat}/${lng}/100`
 
     const res = await fetch(url, {
       signal: AbortSignal.timeout(15_000),
@@ -165,36 +165,41 @@ async function pollOpenSky(): Promise<void> {
     })
 
     if (!res.ok) {
-      console.warn(`[OpenSky] HTTP ${res.status}`)
+      console.warn(`[ADSB.lol] HTTP ${res.status}`)
+      // fallback to mock data — don't wipe aircraft map on API fail
       return
     }
 
     const data = await res.json()
-    const states: any[] = data?.states ?? []
+    const aircraft: any[] = data?.ac ?? []
 
     const now = Date.now()
     let count = 0
-    const s = getState()
+    let matched = 0
 
-    for (const entry of states) {
-      const [
-        icao24, callsign, _originCountry, _timePosition, _lastContact,
-        longitude, latitude, baroAltitude, onGround, velocity,
-        trueTrack, verticalRate, _sensors, geoAltitude, _squawk,
-        _spi, _positionSource,
-      ] = entry
+    // Build a set of seen hexes so we can prune stale ones
+    const seenHexes = new Set<string>()
 
-      if (onGround) continue
-      if (latitude == null || longitude == null) continue
+    for (const ac of aircraft) {
+      const hex = (ac.hex as string)?.toUpperCase()
+      if (!hex) continue
+      seenHexes.add(hex)
 
-      const hex = (icao24 as string).toUpperCase()
       const known = KNOWN_AIRCRAFT[hex]
-
       if (!known) continue
 
-      const alt = Math.round(Number(baroAltitude ?? geoAltitude ?? 0) * 3.28084)
-      const speed = Math.round(Number(velocity ?? 0) * 1.94384)
-      const heading = Math.round(trueTrack ?? 0)
+      matched++
+
+      const latitude = ac.lat
+      const longitude = ac.lon
+      if (latitude == null || longitude == null) continue
+
+      // adsb.lol field mapping
+      const alt = Math.round(Number(ac.alt_geom ?? ac.alt_baro ?? 0) * 3.28084)
+      const speed = Math.round(Number(ac.gs ?? 0) * 1.94384)
+      const heading = Math.round(ac.track ?? 0)
+      const verticalRate = ac.baro_rate ?? 0
+      const callsign = ac.flight?.trim() || ''
 
       const existing = s.aircraftMap.get(hex)
       const startTime = existing?.startTime ?? now
@@ -207,18 +212,18 @@ async function pollOpenSky(): Promise<void> {
         alt,
         hdg: heading,
         spd: speed,
-        vs: Math.round(Number(verticalRate ?? 0) * 196.85),
+        vs: Math.round(Number(verticalRate) * 196.85),
       }
 
       const historicalAvg = known?.role === 'rotary' ? 42 * 60 : 95 * 60
 
-      const aircraft: Aircraft = {
+      const aircraftObj: Aircraft = {
         id: hex,
         hex,
-        registration: known?.registration ?? 'N/A',
-        callsign: (callsign as string)?.trim() || '',
-        type: known?.type ?? 'Unknown',
-        typeLabel: known?.typeLabel ?? 'Unknown',
+        registration: ac.reg || known?.registration || 'N/A',
+        callsign,
+        type: ac.type || known?.type || 'Unknown',
+        typeLabel: known?.typeLabel || ac.type || 'Unknown',
         role: known?.role ?? 'fixedwing',
         operator: known?.operator ?? 'Unknown',
         operatorShort: known?.operatorShort ?? '?',
@@ -234,27 +239,26 @@ async function pollOpenSky(): Promise<void> {
         track: existing ? [...existing.track, tp].slice(-500) : [tp],
       }
 
-      s.aircraftMap.set(hex, aircraft)
+      s.aircraftMap.set(hex, aircraftObj)
       count++
     }
 
     // Prune aircraft not seen in 5 minutes
     const stale = now - 300_000
     for (const [hex, ac] of s.aircraftMap) {
-      const lastPos = ac.track[ac.track.length - 1]
-      if (!lastPos || (ac.startTime + ac.timeAirborneSeconds * 1000) < stale) {
+      if (!seenHexes.has(hex) && (now - ac.startTime - ac.timeAirborneSeconds * 1000) > 300_000) {
         s.aircraftMap.delete(hex)
       }
     }
 
     s.lastOpenSkyPoll = now
     s.relay.lastTickAgo = 0
-    console.log(`[OpenSky] ${count} tracked, ${s.aircraftMap.size} active`)
+    console.log(`[ADSB.lol] ${count} VicPol tracked, ${s.aircraftMap.size} active (${aircraft.length} total in range)`)
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      console.warn('[OpenSky] timeout')
+      console.warn('[ADSB.lol] timeout')
     } else {
-      console.warn(`[OpenSky] error: ${err.message}`)
+      console.warn(`[ADSB.lol] error: ${err.message}`)
     }
   }
 }

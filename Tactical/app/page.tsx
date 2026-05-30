@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import dynamic from 'next/dynamic'
 import { StatusStrip } from '@/components/status-strip'
 import { TimeScrubber } from '@/components/time-scrubber'
 import { FabCluster } from '@/components/fab-cluster'
@@ -9,17 +8,10 @@ import { BottomSheet } from '@/components/bottom-sheet'
 import { AircraftDetail } from '@/components/aircraft-detail'
 import { ReportDetail } from '@/components/report-detail'
 import { FilterPanel, type Filters } from '@/components/filter-panel'
+import { LocationSetter } from '@/components/location-setter'
 import { DataGrid } from '@/components/data-grid'
+import { LazyMap } from '@/components/lazy-map'
 import { useRealtimeData, sampleTrack } from '@/hooks/useRealtimeData'
-
-const VPMap = dynamic(() => import('@/components/map').then((mod) => mod.VPMap), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-full flex items-center justify-center bg-[var(--map-bg)]">
-      <div className="text-fg-3 text-sm font-mono tracking-[0.1em]">INITIALIZING MAP...</div>
-    </div>
-  ),
-})
 
 const STRIP_H = 36
 const SCRUB_H = 64
@@ -55,6 +47,7 @@ export default function VPOverwatch() {
   const [snap, setSnap] = useState<'peek' | 'half' | 'full'>('peek')
   const [filterOpen, setFilterOpen] = useState(false)
   const [followUser, setFollowUser] = useState(false)
+  const [showLocationSetter, setShowLocationSetter] = useState(false)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lng: number } | null>(null)
   const [relayTick, setRelayTick] = useState(liveData.relay.lastTickAgo)
   const [systemClock, setSystemClock] = useState(Date.now())
@@ -156,6 +149,11 @@ export default function VPOverwatch() {
     setTimeout(() => setFollowUser(false), 100)
   }, [liveData.user])
 
+  const onManualSetLocation = useCallback((lat: number, lng: number) => {
+    setShowLocationSetter(false)
+    setFocusTarget({ lat, lng })
+  }, [])
+
   const selectedAircraft = filteredAircraft.find((a) => a.id === selectedAircraftId)
   const selectedReport = filteredReports.find((r) => r.id === selectedReportId)
 
@@ -219,7 +217,7 @@ export default function VPOverwatch() {
         <div className="flex-1 flex overflow-hidden">
           {/* Map area */}
           <div className="flex-1 relative">
-            <VPMap
+            <LazyMap
               aircraft={filteredAircraft}
               reports={filteredReports}
               user={liveData.user}
@@ -249,8 +247,16 @@ export default function VPOverwatch() {
               onLayers={() => setFilterOpen((v) => !v)}
               onFilters={() => setFilterOpen((v) => !v)}
               onRecenter={onRecenter}
+              onSetLocation={() => setShowLocationSetter(true)}
               followUser={followUser}
             />
+
+            {showLocationSetter && (
+              <LocationSetter
+                onSetLocation={onManualSetLocation}
+                onClose={() => setShowLocationSetter(false)}
+              />
+            )}
 
             {filterOpen && (
               <div
@@ -331,7 +337,7 @@ export default function VPOverwatch() {
           className="absolute left-0 right-0"
           style={{ top: MOBILE_STRIP_H, height: MAP_H }}
         >
-          <VPMap
+          <LazyMap
             aircraft={filteredAircraft}
             reports={filteredReports}
             user={liveData.user}
@@ -353,8 +359,16 @@ export default function VPOverwatch() {
             onLayers={() => setFilterOpen((v) => !v)}
             onFilters={() => setFilterOpen((v) => !v)}
             onRecenter={onRecenter}
+            onSetLocation={() => setShowLocationSetter(true)}
             followUser={followUser}
           />
+
+          {showLocationSetter && (
+            <LocationSetter
+              onSetLocation={onManualSetLocation}
+              onClose={() => setShowLocationSetter(false)}
+            />
+          )}
 
           {filterOpen && (
             <div

@@ -21,7 +21,7 @@ import {
   computeDistance,
 } from '@/lib/data'
 
-interface VPMapProps {
+export interface VPMapProps {
   aircraft: Aircraft[]
   reports: Report[]
   user: User
