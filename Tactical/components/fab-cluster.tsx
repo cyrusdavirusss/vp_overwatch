@@ -6,6 +6,7 @@ interface FabClusterProps {
   onLayers: () => void
   onFilters: () => void
   onRecenter: () => void
+  onSetLocation: () => void
   followUser?: boolean
 }
 
@@ -13,10 +14,14 @@ export function FabCluster({
   onLayers,
   onFilters,
   onRecenter,
+  onSetLocation,
   followUser,
 }: FabClusterProps) {
   return (
     <div className="absolute right-3 bottom-3 flex flex-col gap-2 z-10">
+      <FabBtn onClick={onSetLocation} label="Set Location">
+        <span className="text-base leading-none">📍</span>
+      </FabBtn>
       <FabBtn onClick={onLayers} label="Layers">
         <Icon name="layers" size={18} />
       </FabBtn>
