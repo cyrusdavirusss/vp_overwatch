@@ -37,6 +37,7 @@ export interface VPMapProps {
     predictive: boolean
   }
   focusTarget?: { lat: number; lng: number } | null
+  hasSilentAircraft?: boolean
 }
 
 function MapController({
@@ -134,6 +135,7 @@ export function VPMap({
   scrubT,
   layers,
   focusTarget,
+  hasSilentAircraft,
 }: VPMapProps) {
   const mapRef = useRef<L.Map | null>(null)
 
@@ -358,6 +360,19 @@ export function VPMap({
           })}
       </MapContainer>
 
+      {/* Pulsing amber glow for silent aircraft */}
+      {hasSilentAircraft && (
+        <div
+          className="absolute inset-0 pointer-events-none z-[1000]"
+          style={{
+            border: '2px solid var(--amber)',
+            borderRadius: 'inherit',
+            boxShadow: '0 0 12px var(--amber-glow), inset 0 0 12px var(--amber-glow)',
+            animation: 'silent-pulse 3s ease-in-out infinite',
+          }}
+        />
+      )}
+
       <style jsx global>{`
         .aircraft-marker {
           display: flex;
@@ -405,6 +420,10 @@ export function VPMap({
         @keyframes user-pulse {
           0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0.5; }
           100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
+        }
+        @keyframes silent-pulse {
+          0%, 100% { opacity: 0.3; }
+          50% { opacity: 0.7; }
         }
       `}</style>
     </div>

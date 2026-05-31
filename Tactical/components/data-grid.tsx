@@ -13,7 +13,7 @@ import {
   formatSec,
 } from '@/lib/data'
 
-type SortKey = 'id' | 'alt' | 'spd' | 'dist' | 'hdg' | 'time' | 'kind' | 'age' | 'conf'
+type SortKey = 'id' | 'alt' | 'spd' | 'dist' | 'hdg' | 'time' | 'fuel' | 'kind' | 'age' | 'conf'
 type SortDir = 'asc' | 'desc'
 
 interface DataGridProps {
@@ -63,6 +63,7 @@ export function DataGrid({
         case 'dist': va = a.dist; vb = b.dist; break
         case 'hdg': va = a.pos?.hdg ?? 0; vb = b.pos?.hdg ?? 0; break
         case 'time': va = a.a.timeAirborneSeconds; vb = b.a.timeAirborneSeconds; break
+        case 'fuel': va = a.a.fuelRemainingPercent ?? 0; vb = b.a.fuelRemainingPercent ?? 0; break
         default: va = a.dist; vb = b.dist
       }
       return sortDir === 'asc' ? va - vb : vb - va
@@ -115,6 +116,7 @@ export function DataGrid({
                 <Th onClick={() => toggleSort('hdg')}>HDG {sortIcon('hdg')}</Th>
                 <Th onClick={() => toggleSort('dist')}>DIST {sortIcon('dist')}</Th>
                 <Th onClick={() => toggleSort('time')}>AIRBORNE {sortIcon('time')}</Th>
+                <Th onClick={() => toggleSort('fuel')}>FUEL {sortIcon('fuel')}</Th>
                 <Th>BRG</Th>
                 <Th>V/S</Th>
               </tr>
@@ -143,6 +145,20 @@ export function DataGrid({
                     <Td mono>{String(pos.hdg).padStart(3, '0')}°</Td>
                     <Td mono>{dist.toFixed(1)}<span className="text-fg-4 ml-0.5">nm</span></Td>
                     <Td mono>{formatSec(a.timeAirborneSeconds)}</Td>
+                    <Td mono>
+                      <div className="flex items-center gap-1.5">
+                        <span className="num text-[11px] font-medium w-[30px]">{a.fuelRemainingPercent ?? 0}%</span>
+                        <div className="w-[30px] h-[6px] bg-ink-3 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-[width] duration-700"
+                            style={{
+                              width: `${a.fuelRemainingPercent ?? 0}%`,
+                              background: (a.fuelRemainingPercent ?? 0) > 50 ? 'var(--green)' : (a.fuelRemainingPercent ?? 0) > 20 ? 'var(--amber)' : 'var(--red)',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </Td>
                     <Td mono className="text-fg-3">{String(Math.round(brg)).padStart(3, '0')}° {compassFromBearing(brg)}</Td>
                     <Td mono className={pos.vs > 50 ? 'text-[var(--green)]' : pos.vs < -50 ? 'text-[var(--amber)]' : 'text-fg-3'}>
                       {pos.vs > 0 ? '+' : ''}{pos.vs}<span className="text-fg-4 ml-0.5">fpm</span>

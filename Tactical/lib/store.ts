@@ -37,6 +37,10 @@ export interface Aircraft {
   latitude: number
   longitude: number
   track: TrackPoint[]
+  isActive: boolean
+  lastSeen: number | null
+  fuelEnduranceMinutes: number
+  fuelRemainingPercent: number
 }
 
 export interface Report {
@@ -71,6 +75,19 @@ export interface Relay {
   lastIngested: number
   lastRaw: number
   coverageRegions: number
+}
+
+export interface SortieEntry {
+  id: string
+  hex: string
+  callsign: string
+  type: string
+  operatorShort: string
+  startTime: number
+  endTime: number | null
+  durationSeconds: number
+  maxAltitude: number
+  status: 'active' | 'landed'
 }
 
 // ── Map Kind Helpers ──────────────────────────────────────────────────────
@@ -112,6 +129,8 @@ interface StoreState {
   userGPS: User
   relay: Relay
   lastOpenSkyPoll: number
+  sortieHistory: SortieEntry[]
+  sortieMaxAlt: Map<string, number>
 }
 
 const GLOBAL_KEY = '__VP_STORE__'
@@ -132,6 +151,8 @@ function getState(): StoreState {
         coverageRegions: 6,
       },
       lastOpenSkyPoll: 0,
+      sortieHistory: [],
+      sortieMaxAlt: new Map(),
     }
   }
   return g[GLOBAL_KEY]
@@ -143,12 +164,49 @@ const OPENSKY_POLL_INTERVAL = 60_000
 const BBOX = { lamin: -38.5, lamax: -36.5, lomin: 144.0, lomax: 146.0 }
 
 // VicPol-known aircraft hex codes
-const KNOWN_AIRCRAFT: Record<string, { registration: string; role: Aircraft['role']; operator: string; operatorShort: string; type: string; typeLabel: string }> = {
-  '7C7F8C': { registration: 'VH-PVH', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139' },
-  '7C2B22': { registration: 'VH-PVI', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'EC135', typeLabel: 'Eurocopter EC135' },
-  '7C1F40': { registration: 'VH-PVK', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139' },
-  '7CF102': { registration: 'VH-AFC', role: 'fixedwing', operator: 'Australian Federal Police', operatorShort: 'AFP', type: 'C208', typeLabel: 'Cessna 208 Caravan' },
+const KNOWN_AIRCRAFT: Record<string, { registration: string; role: Aircraft['role']; operator: string; operatorShort: string; type: string; typeLabel: string; fuelEnduranceMinutes: number }> = {
+  '7C7F8C': { registration: 'VH-PVH', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
+  '7C2B22': { registration: 'VH-PVI', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'EC135', typeLabel: 'Eurocopter EC135', fuelEnduranceMinutes: 210 },
+  '7C1F40': { registration: 'VH-PVK', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
+  '7CF102': { registration: 'VH-AFC', role: 'fixedwing', operator: 'Australian Federal Police', operatorShort: 'AFP', type: 'C208', typeLabel: 'Cessna 208 Caravan', fuelEnduranceMinutes: 360 },
 }
+
+// ── Pre-populate known airframes on startup ─────────────────────────────
+// Silent (not seen on ADSB) aircraft stay in the map with isActive=false —
+// frontend renders them as amber.
+function initKnownAircraft(): void {
+  const s = getState()
+  for (const [hex, info] of Object.entries(KNOWN_AIRCRAFT)) {
+    if (!s.aircraftMap.has(hex)) {
+      s.aircraftMap.set(hex, {
+        id: hex,
+        hex,
+        registration: info.registration,
+        callsign: '',
+        type: info.type,
+        typeLabel: info.typeLabel,
+        role: info.role,
+        operator: info.operator,
+        operatorShort: info.operatorShort,
+        startTime: 0,
+        timeAirborneSeconds: 0,
+        historicalAverageSeconds: info.role === 'rotary' ? 42 * 60 : 95 * 60,
+        estimatedReturnSeconds: info.role === 'rotary' ? 42 * 60 : 95 * 60,
+        altitude: 0,
+        speed: 0,
+        heading: 0,
+        latitude: 0,
+        longitude: 0,
+        track: [],
+        isActive: false,
+        lastSeen: null,
+        fuelEnduranceMinutes: info.fuelEnduranceMinutes,
+        fuelRemainingPercent: 100,
+      })
+    }
+  }
+}
+initKnownAircraft()
 
 // ── ADSB.lol Polling ────────────────────────────────────────────────────
 
@@ -176,6 +234,14 @@ async function pollOpenSky(): Promise<void> {
     const now = Date.now()
     let count = 0
     let matched = 0
+
+    // Capture previous active states for sortie transition tracking
+    const prevActiveStates = new Map<string, boolean>()
+    for (const [hex, ac] of s.aircraftMap) {
+      if (KNOWN_AIRCRAFT[hex]) {
+        prevActiveStates.set(hex, ac.isActive)
+      }
+    }
 
     // Build a set of seen hexes so we can prune stale ones
     const seenHexes = new Set<string>()
@@ -217,13 +283,16 @@ async function pollOpenSky(): Promise<void> {
 
       const historicalAvg = known?.role === 'rotary' ? 42 * 60 : 95 * 60
 
+      const fuelEndurance = known?.fuelEnduranceMinutes ?? 270
+      const fuelPct = Math.max(0, Math.min(100, Math.round((1 - timeAirborne / (fuelEndurance * 60)) * 100)))
+
       const aircraftObj: Aircraft = {
         id: hex,
         hex,
-        registration: ac.reg || known?.registration || 'N/A',
+        registration: ac.r || known?.registration || 'N/A',
         callsign,
-        type: ac.type || known?.type || 'Unknown',
-        typeLabel: known?.typeLabel || ac.type || 'Unknown',
+        type: ac.t || known?.type || 'Unknown',
+        typeLabel: known?.typeLabel || ac.t || 'Unknown',
         role: known?.role ?? 'fixedwing',
         operator: known?.operator ?? 'Unknown',
         operatorShort: known?.operatorShort ?? '?',
@@ -237,17 +306,65 @@ async function pollOpenSky(): Promise<void> {
         latitude,
         longitude,
         track: existing ? [...existing.track, tp].slice(-500) : [tp],
+        isActive: true,
+        lastSeen: now,
+        fuelEnduranceMinutes: fuelEndurance,
+        fuelRemainingPercent: fuelPct,
       }
 
       s.aircraftMap.set(hex, aircraftObj)
+
+      // Detect sortie start: was inactive, now active
+      const wasActiveHex = prevActiveStates.get(hex)
+      if (wasActiveHex === false) {
+        const entry: SortieEntry = {
+          id: `sortie-${hex}-${now}`,
+          hex,
+          callsign,
+          type: known?.type || ac.t || 'Unknown',
+          operatorShort: known?.operatorShort ?? '?',
+          startTime: now,
+          endTime: null,
+          durationSeconds: 0,
+          maxAltitude: alt,
+          status: 'active',
+        }
+        s.sortieHistory.push(entry)
+        s.sortieMaxAlt.set(hex, alt)
+      } else if (wasActiveHex === true) {
+        // Update max altitude for ongoing sortie
+        const currentMax = s.sortieMaxAlt.get(hex) ?? 0
+        if (alt > currentMax) {
+          s.sortieMaxAlt.set(hex, alt)
+        }
+      }
+
       count++
     }
 
-    // Prune aircraft not seen in 5 minutes
-    const stale = now - 300_000
+    // Prune only NON-known hexes — known aircraft stay forever (silent = amber)
     for (const [hex, ac] of s.aircraftMap) {
-      if (!seenHexes.has(hex) && (now - ac.startTime - ac.timeAirborneSeconds * 1000) > 300_000) {
+      if (!KNOWN_AIRCRAFT[hex] && (now - ac.startTime - ac.timeAirborneSeconds * 1000) > 300_000) {
         s.aircraftMap.delete(hex)
+      }
+    }
+
+    // Mark known aircraft not seen in this poll as inactive and record sortie end
+    for (const [hex, ac] of s.aircraftMap) {
+      if (KNOWN_AIRCRAFT[hex] && !seenHexes.has(hex)) {
+        const wasActiveHex = prevActiveStates.get(hex)
+        if (wasActiveHex === true) {
+          ac.isActive = false
+          // Find active sortie entry and close it
+          const activeIdx = s.sortieHistory.findIndex(e => e.hex === hex && e.status === 'active')
+          if (activeIdx !== -1) {
+            const entry = s.sortieHistory[activeIdx]
+            entry.endTime = now
+            entry.durationSeconds = Math.round((now - entry.startTime) / 1000)
+            entry.maxAltitude = s.sortieMaxAlt.get(hex) ?? ac.altitude
+            entry.status = 'landed'
+          }
+        }
       }
     }
 
@@ -295,6 +412,11 @@ export function getStore() {
     /** Get breadcrumb track for a specific hex */
     getBreadcrumbs(hex: string): TrackPoint[] {
       return s.aircraftMap.get(hex)?.track ?? []
+    },
+
+    /** Get sortie history (newest first) */
+    getSortieHistory(): SortieEntry[] {
+      return [...s.sortieHistory].reverse()
     },
 
     /** Upsert Waze alert from relay */
