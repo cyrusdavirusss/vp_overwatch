@@ -81,6 +81,13 @@ export function AircraftDetail({ aircraft, user, scrubT, onClose }: AircraftDeta
         historicalAverageSeconds={aircraft.historicalAverageSeconds}
       />
 
+      {/* Fuel Bar */}
+      <FuelBar
+        fuelRemainingPercent={aircraft.fuelRemainingPercent}
+        fuelEnduranceMinutes={aircraft.fuelEnduranceMinutes}
+        timeAirborneSeconds={aircraft.timeAirborneSeconds}
+      />
+
       {/* Primary metrics grid */}
       <div
         className="grid grid-cols-4 gap-px rounded-md overflow-hidden mb-3.5"
@@ -178,6 +185,69 @@ function Sparkline({ data, height = 48 }: { data: number[]; height?: number }) {
         fill="var(--amber)"
       />
     </svg>
+  )
+}
+
+// Fuel Bar component
+function FuelBar({
+  fuelRemainingPercent,
+  fuelEnduranceMinutes,
+  timeAirborneSeconds,
+}: {
+  fuelRemainingPercent: number
+  fuelEnduranceMinutes: number
+  timeAirborneSeconds: number
+}) {
+  const remainingMinutes = Math.max(0, fuelEnduranceMinutes - (timeAirborneSeconds / 60))
+  const remainingHours = Math.floor(remainingMinutes / 60)
+  const remainingMins = Math.round(remainingMinutes % 60)
+  const remainingStr = remainingHours > 0
+    ? `~${remainingHours}h${String(remainingMins).padStart(2, '0')}m remaining`
+    : `~${remainingMins}m remaining`
+
+  let barColor: string
+  if (fuelRemainingPercent > 50) {
+    barColor = 'var(--green)'
+  } else if (fuelRemainingPercent > 20) {
+    barColor = 'var(--amber)'
+  } else {
+    barColor = 'var(--red)'
+  }
+
+  return (
+    <div className="bg-ink-2 border border-border rounded-md p-3 mb-3.5">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-2.5">
+        <div className="flex-1">
+          <div className="font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-fg-3 mb-0.5">
+            fuel
+          </div>
+          <div className="num text-lg font-semibold text-fg-1 leading-none tracking-[-0.01em]">
+            {fuelRemainingPercent}%
+          </div>
+        </div>
+        <div className="flex-1 text-right">
+          <div className="font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-fg-3 mb-0.5">
+            endurance
+          </div>
+          <div className="num text-[13px] font-medium text-fg-2 leading-tight">
+            {remainingStr}
+          </div>
+        </div>
+      </div>
+
+      {/* Fuel bar */}
+      <div className="relative h-2 bg-ink-3 rounded-full overflow-hidden">
+        <div
+          className="absolute top-0 left-0 bottom-0 rounded-full transition-[width] duration-700"
+          style={{
+            width: `${fuelRemainingPercent}%`,
+            background: barColor,
+            boxShadow: `0 0 8px ${barColor}`,
+          }}
+        />
+      </div>
+    </div>
   )
 }
 

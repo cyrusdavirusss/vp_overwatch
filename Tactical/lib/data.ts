@@ -21,6 +21,10 @@ export interface Aircraft {
   latitude: number
   longitude: number
   track: TrackPoint[]
+  isActive: boolean
+  lastSeen: number | null
+  fuelEnduranceMinutes: number
+  fuelRemainingPercent: number
 }
 
 export interface TrackPoint {
@@ -156,6 +160,10 @@ export const AIRCRAFT: Aircraft[] = [
       alt: 1250,
       minutes: 14,
     }),
+    isActive: true,
+    lastSeen: NOW - 14_000,
+    fuelEnduranceMinutes: 270,
+    fuelRemainingPercent: 95,
   },
   {
     id: '7C2B22',
@@ -185,6 +193,10 @@ export const AIRCRAFT: Aircraft[] = [
       minutes: 9,
       orbit: { lat: -37.79, lng: 145.01, radius: 0.008 },
     }),
+    isActive: true,
+    lastSeen: NOW - 9_000,
+    fuelEnduranceMinutes: 210,
+    fuelRemainingPercent: 97,
   },
   {
     id: '7CF102',
@@ -213,6 +225,10 @@ export const AIRCRAFT: Aircraft[] = [
       alt: 2800,
       minutes: 18,
     }),
+    isActive: true,
+    lastSeen: NOW - 18_000,
+    fuelEnduranceMinutes: 360,
+    fuelRemainingPercent: 97,
   },
   {
     id: '7C1F40',
@@ -241,6 +257,10 @@ export const AIRCRAFT: Aircraft[] = [
       alt: 1100,
       minutes: 6,
     }),
+    isActive: true,
+    lastSeen: NOW - 6_000,
+    fuelEnduranceMinutes: 270,
+    fuelRemainingPercent: 98,
   },
 ]
 
