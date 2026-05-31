@@ -33,18 +33,12 @@ export function LocationSetter({ onSetLocation, onClose }: LocationSetterProps) 
       return
     }
 
-    // Post to server-side GPS set endpoint
-    fetch('/api/gps/set', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-gps-secret': 'gps-dev' },
-      body: JSON.stringify({ action: 'set', lat, lng, hdg: 0, accuracy: 1 }),
-    }).catch(() => {})
-
+    // Client-only — no network POST. Position is held in React state.
     onSetLocation(lat, lng)
   }
 
   function handleUseCurrent() {
-    // Try browser geolocation
+    // Browser geolocation only — no IP geo fallback, no network calls.
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -54,18 +48,9 @@ export function LocationSetter({ onSetLocation, onClose }: LocationSetterProps) 
           setLngStr(lng.toFixed(6))
         },
         () => {
-          // Fallback: try IP geo
-          fetch('/api/gps/geoip')
-            .then((r) => r.json())
-            .then((data) => {
-              if (data.lat && data.lng) {
-                setLatStr(data.lat.toFixed(6))
-                setLngStr(data.lng.toFixed(6))
-              }
-            })
-            .catch(() => setError('Could not get current location'))
+          setError('Could not get current location')
         },
-        { enableHighAccuracy: true, timeout: 5000 }
+        { enableHighAccuracy: false, timeout: 5000 }
       )
     }
   }

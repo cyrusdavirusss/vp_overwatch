@@ -5,7 +5,8 @@
 
 /* All @imports MUST come first in Tailwind v4 */
 @import 'tailwindcss';
-/* JetBrains Mono and Leaflet CSS imported via <link> in layout.tsx */
+/* JetBrains Mono imported via <link> in layout.tsx; MapLibre GL CSS is
+   imported by components/map.tsx so it ships with the lazy-loaded map. */
 
 @theme inline {
   --font-ui: 'Aktiv Grotesk', ui-sans-serif, -apple-system, system-ui, sans-serif;
@@ -461,21 +462,105 @@ samp,
   background: var(--border-strong);
 }
 
-.leaflet-container {
-  background: #f2f3f5 !important;
+/* =========================================================================
+   MAP — MapLibre GL canvas + custom DOM markers
+   ========================================================================= */
+
+.maplibregl-map {
+  background: var(--map-bg);
   font-family: var(--font-ui);
 }
-
-.leaflet-control-attribution {
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-logo,
+.maplibregl-ctrl-bottom-right,
+.maplibregl-ctrl-bottom-left {
   display: none !important;
 }
-
-.leaflet-control-zoom {
-  display: none !important;
+.maplibregl-canvas {
+  outline: none;
 }
 
-.leaflet-tile-pane {
-  filter: brightness(0.95) saturate(0.3);
+/* User position — signal blue dot with a soft accuracy pulse */
+.user-marker {
+  position: relative;
+  width: 24px;
+  height: 24px;
+}
+.user-marker-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  background: var(--blue);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--blue-glow);
+  z-index: 2;
+}
+.user-marker-pulse {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  background: var(--blue);
+  border-radius: 50%;
+  opacity: 0.3;
+  animation: user-pulse 2s ease-out infinite;
+}
+@keyframes user-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.5);
+    opacity: 0.5;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2);
+    opacity: 0;
+  }
+}
+
+/* Aircraft silhouettes — amber, rotated to heading, scaled when selected */
+.vp-ac-marker {
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  transition: transform var(--dur-hover) var(--ease-spring);
+  filter: drop-shadow(0 0 6px var(--amber-glow));
+}
+.vp-ac-marker.selected {
+  transform: scale(1.18);
+  filter: drop-shadow(0 0 12px var(--amber-glow));
+}
+.vp-ac-rot {
+  width: 100%;
+  height: 100%;
+  transition: transform var(--dur-panel) var(--ease-out);
+}
+
+/* Ground-report glyphs — self-contained chips, ring on select */
+.vp-rp-marker {
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+  transition: transform var(--dur-hover) var(--ease-spring);
+}
+.vp-rp-marker.selected {
+  transform: scale(1.22);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--blue), 0 0 12px var(--blue-glow);
+}
+
+@keyframes silent-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 /* Scanline overlay for military CRT aesthetic */
