@@ -1,25 +1,23 @@
 'use client'
 
-import { useEffect, useRef, useMemo } from 'react'
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Polyline,
-  Circle,
-  CircleMarker,
-  useMap,
-} from 'react-leaflet'
-import L from 'leaflet'
+import { useEffect, useRef, useState } from 'react'
+import maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   Aircraft,
   Report,
   User,
-  TrackPoint,
   sampleTrack,
   sampleTrailUntil,
   computeDistance,
 } from '@/lib/data'
+import { buildMapStyle, registerPmtilesProtocol } from '@/lib/map-style'
+import { aircraftMarkerSVG, reportMarkerSVG, RED, GREEN } from '@/lib/markers'
+
+// Register the pmtiles:// protocol once, at the map module root. This module
+// is only ever loaded client-side (via the lazy map loader), so it is safe to
+// run at evaluation time; the call is idempotent.
+registerPmtilesProtocol()
 
 export interface VPMapProps {
   aircraft: Aircraft[]
@@ -40,88 +38,62 @@ export interface VPMapProps {
   hasSilentAircraft?: boolean
 }
 
-function MapController({
-  focusTarget,
-}: {
-  focusTarget?: { lat: number; lng: number } | null
-}) {
-  const map = useMap()
+// Motion: 400ms camera-focus duration with the design system's spring ease
+// (cubic-bezier(0.32,0.72,0,1) ≈ stiffness 260 / damping 28). Aircraft
+// positions interpolate over ~900ms so live polls never snap.
+const FOCUS_MS = 400
+const FOCUS_ZOOM = 14
+const AIRCRAFT_TWEEN_MS = 900
 
-  useEffect(() => {
-    if (focusTarget) {
-      map.flyTo([focusTarget.lat, focusTarget.lng], 14, {
-        duration: 0.7,
-      })
-    }
-  }, [focusTarget, map])
+const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 
-  return null
+// cubic-bezier(0.32, 0.72, 0, 1) — the --ease-spring token, sampled for flyTo.
+function springEase(t: number): number {
+  return easeBezier(0.32, 0.72, 0, 1, t)
 }
-
-function createAircraftIcon(
-  role: 'rotary' | 'fixedwing',
-  heading: number,
-  isSelected: boolean
-): L.DivIcon {
-  const size = isSelected ? 44 : 36
-  const iconSvg =
-    role === 'rotary'
-      ? `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="#FFB020" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(${heading}deg);">
-          <path d="M5 8 H19 M12 8 V14 M9 14 H15 M7 17 H17 M11 14 V17 M13 14 V17 M12 5 V8"/>
-        </svg>`
-      : `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="#FFB020" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(${heading + 90}deg);">
-          <path d="M17.8 19.2 L16 11 L8.59 12.42 M21 8 L7 22 L6 11 L4 9 V5 L21 8 Z"/>
-        </svg>`
-
-  return L.divIcon({
-    html: `<div class="aircraft-marker ${isSelected ? 'selected' : ''}">${iconSvg}</div>`,
-    className: '',
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-  })
-}
-
-function createReportIcon(
-  kind: Report['kind'],
-  isSelected: boolean,
-  isConfirmed: boolean
-): L.DivIcon {
-  const size = isSelected ? 32 : 26
-  const color = isConfirmed ? '#5BD68A' : '#FF4757'
-  const kindIcons: Record<Report['kind'], string> = {
-    marked: 'M19 17H5V13L7 7H17L19 13ZM7.5 17V19M16.5 17V19M5 13H19',
-    unmarked: 'M19 17H5V13L7 7H17L19 13ZM7.5 17V19M16.5 17V19M5 13H19',
-    hidden: 'M2 12S5 5 12 5s10 7 10 7-3 7-10 7S2 12 2 12ZM15 12a3 3 0 11-6 0 3 3 0 016 0',
-    stop: 'M12 9V13M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.73 3h16.9a2 2 0 001.73-3l-8.47-14.14a2 2 0 00-3.42 0Z',
-    checkpoint: 'M12 9V13M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.73 3h16.9a2 2 0 001.73-3l-8.47-14.14a2 2 0 00-3.42 0Z',
-    rbt: 'M12 9V13M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.73 3h16.9a2 2 0 001.73-3l-8.47-14.14a2 2 0 00-3.42 0Z',
-    camera: 'M2 12S5 5 12 5s10 7 10 7-3 7-10 7S2 12 2 12ZM15 12a3 3 0 11-6 0 3 3 0 016 0',
+function easeBezier(x1: number, y1: number, x2: number, y2: number, x: number): number {
+  if (x <= 0) return 0
+  if (x >= 1) return 1
+  // Solve t for the given x via bisection, then evaluate y(t).
+  const bx = (t: number) =>
+    3 * (1 - t) * (1 - t) * t * x1 + 3 * (1 - t) * t * t * x2 + t * t * t
+  const by = (t: number) =>
+    3 * (1 - t) * (1 - t) * t * y1 + 3 * (1 - t) * t * t * y2 + t * t * t
+  let lo = 0
+  let hi = 1
+  let t = x
+  for (let i = 0; i < 24; i++) {
+    const cx = bx(t)
+    if (Math.abs(cx - x) < 1e-4) break
+    if (cx < x) lo = t
+    else hi = t
+    t = (lo + hi) / 2
   }
-
-  const iconPath = kindIcons[kind] || kindIcons.marked
-
-  return L.divIcon({
-    html: `<div class="report-marker ${isSelected ? 'selected' : ''} ${isConfirmed ? 'confirmed' : ''}">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="${iconPath}"/>
-      </svg>
-    </div>`,
-    className: '',
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-  })
+  return by(t)
 }
 
-function createUserIcon(): L.DivIcon {
-  return L.divIcon({
-    html: `<div class="user-marker">
-      <div class="user-marker-dot"></div>
-      <div class="user-marker-pulse"></div>
-    </div>`,
-    className: '',
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-  })
+// Geodesic-ish circle polygon (metres) for accuracy / density overlays.
+function circlePolygon(
+  lng: number,
+  lat: number,
+  radiusM: number,
+  steps = 48
+): GeoJSON.Feature<GeoJSON.Polygon> {
+  const coords: [number, number][] = []
+  const dLat = radiusM / 111_320
+  const dLng = radiusM / (111_320 * Math.cos((lat * Math.PI) / 180))
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * 2 * Math.PI
+    coords.push([lng + dLng * Math.cos(a), lat + dLat * Math.sin(a)])
+  }
+  return { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [coords] } }
+}
+
+interface AircraftMarkerEntry {
+  marker: maplibregl.Marker
+  rot: HTMLDivElement
+  cur: [number, number]
+  raf: number | null
 }
 
 export function VPMap({
@@ -137,295 +109,389 @@ export function VPMap({
   focusTarget,
   hasSilentAircraft,
 }: VPMapProps) {
-  const mapRef = useRef<L.Map | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const mapRef = useRef<maplibregl.Map | null>(null)
+  const [ready, setReady] = useState(false)
 
-  const aircraftPositions = useMemo(() => {
-    return aircraft.map((a) => {
-      const pos = sampleTrack(a.track, scrubT)
-      return { ...a, currentPos: pos }
+  const userMarker = useRef<maplibregl.Marker | null>(null)
+  const aircraftMarkers = useRef<Map<string, AircraftMarkerEntry>>(new Map())
+  const reportMarkers = useRef<Map<string, maplibregl.Marker>>(new Map())
+  const lastScrubT = useRef(scrubT)
+
+  // ── Initialise map once ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return
+
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: buildMapStyle(),
+      center: [user.lng, user.lat],
+      zoom: 13,
+      pitch: 0, // pitch/bearing enabled but default flat, north up
+      bearing: 0,
+      attributionControl: false,
+      dragRotate: true,
+      pitchWithRotate: true,
     })
-  }, [aircraft, scrubT])
+    mapRef.current = map
 
-  const aircraftTrails = useMemo(() => {
-    if (!layers.trails) return []
-    return aircraft.map((a) => {
-      const isSelected = a.id === selectedAircraftId
-      const trailMinutes = isSelected ? 15 : 4
-      const trail = sampleTrailUntil(a.track, scrubT, trailMinutes * 60)
-      return { id: a.id, trail, isSelected }
-    })
-  }, [aircraft, scrubT, layers.trails, selectedAircraftId])
+    map.on('load', () => {
+      // ── Data-overlay sources (updated imperatively below) ──────────────
+      const addSrc = (id: string) =>
+        map.addSource(id, { type: 'geojson', data: EMPTY })
+      addSrc('vp-hex')
+      addSrc('vp-conn')
+      addSrc('vp-trails')
+      addSrc('vp-acc')
+      addSrc('vp-predict')
 
-  const visibleReports = useMemo(() => {
-    return reports.filter((r) => {
-      const reportAgeAtScrub = r.reportedAgo - scrubT
-      return reportAgeAtScrub >= 0
-    })
-  }, [reports, scrubT])
-
-  // Connection lines: aircraft to nearby reports within 5km
-  const connectionLines = useMemo(() => {
-    const lines: { from: [number, number]; to: [number, number]; strength: number }[] = []
-    aircraftPositions.forEach((a) => {
-      if (!a.currentPos) return
-      visibleReports.forEach((r) => {
-        const dist = computeDistance(a.currentPos!.lat, a.currentPos!.lng, r.lat, r.lng)
-        if (dist < 5000) {
-          lines.push({
-            from: [a.currentPos!.lat, a.currentPos!.lng],
-            to: [r.lat, r.lng],
-            strength: Math.max(0.1, 1 - dist / 5000),
-          })
-        }
+      // Threat density (red, sparse, dashed) — sits lowest.
+      map.addLayer({
+        id: 'vp-hex-fill',
+        type: 'fill',
+        source: 'vp-hex',
+        paint: { 'fill-color': RED, 'fill-opacity': ['get', 'o'] },
       })
-    })
-    return lines
-  }, [aircraftPositions, visibleReports])
+      map.addLayer({
+        id: 'vp-hex-line',
+        type: 'line',
+        source: 'vp-hex',
+        paint: { 'line-color': RED, 'line-opacity': 0.3, 'line-width': 1, 'line-dasharray': [4, 4] },
+      })
 
-  // Hex grid: density bins for reports
-  const hexCenters = useMemo(() => {
-    if (visibleReports.length < 3) return []
-    const HEX_SIZE = 0.012
-    const bins = new Map<string, { lat: number; lng: number; count: number }>()
-    visibleReports.forEach((r) => {
-      const col = Math.round(r.lng / (HEX_SIZE * 1.5))
-      const row = Math.round(r.lat / (HEX_SIZE * Math.sqrt(3)))
-      const key = `${col},${row}`
-      const existing = bins.get(key)
-      if (existing) {
-        existing.count++
-      } else {
-        bins.set(key, {
-          lat: row * HEX_SIZE * Math.sqrt(3),
-          lng: col * HEX_SIZE * 1.5,
-          count: 1,
+      // Aircraft → nearby report connection lines (signal blue, dashed).
+      map.addLayer({
+        id: 'vp-conn-line',
+        type: 'line',
+        source: 'vp-conn',
+        layout: { 'line-cap': 'round' },
+        paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': ['get', 'o'], 'line-dasharray': [3, 6] },
+      })
+
+      // Aircraft trails (aviation amber).
+      map.addLayer({
+        id: 'vp-trails-line',
+        type: 'line',
+        source: 'vp-trails',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#FFB020', 'line-width': ['get', 'w'], 'line-opacity': ['get', 'o'] },
+      })
+
+      // GPS accuracy disc (signal blue).
+      map.addLayer({
+        id: 'vp-acc-fill',
+        type: 'fill',
+        source: 'vp-acc',
+        paint: { 'fill-color': '#4D7CFF', 'fill-opacity': 0.12 },
+      })
+      map.addLayer({
+        id: 'vp-acc-line',
+        type: 'line',
+        source: 'vp-acc',
+        paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': 0.4 },
+      })
+
+      // Predictive vector for the selected aircraft (amber, dashed).
+      map.addLayer({
+        id: 'vp-predict-line',
+        type: 'line',
+        source: 'vp-predict',
+        layout: { 'line-cap': 'round' },
+        paint: { 'line-color': '#FFB020', 'line-width': 2, 'line-opacity': 0.6, 'line-dasharray': [8, 6] },
+      })
+
+      // User position marker (DOM) — dot + pulse.
+      const uel = document.createElement('div')
+      uel.className = 'user-marker'
+      uel.innerHTML =
+        '<div class="user-marker-dot"></div><div class="user-marker-pulse"></div>'
+      userMarker.current = new maplibregl.Marker({ element: uel, anchor: 'center' })
+        .setLngLat([user.lng, user.lat])
+        .addTo(map)
+
+      setReady(true)
+    })
+
+    const ro = new ResizeObserver(() => map.resize())
+    ro.observe(containerRef.current)
+
+    return () => {
+      ro.disconnect()
+      aircraftMarkers.current.forEach((e) => {
+        if (e.raf) cancelAnimationFrame(e.raf)
+        e.marker.remove()
+      })
+      aircraftMarkers.current.clear()
+      reportMarkers.current.forEach((m) => m.remove())
+      reportMarkers.current.clear()
+      userMarker.current?.remove()
+      userMarker.current = null
+      map.remove()
+      mapRef.current = null
+      setReady(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Camera focus (flyTo with momentum + spring ease) ───────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map || !focusTarget) return
+    map.flyTo({
+      center: [focusTarget.lng, focusTarget.lat],
+      zoom: Math.max(map.getZoom(), FOCUS_ZOOM),
+      duration: FOCUS_MS,
+      easing: springEase,
+      essential: true,
+    })
+  }, [ready, focusTarget])
+
+  // ── User marker + accuracy disc ────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    userMarker.current?.setLngLat([user.lng, user.lat])
+    const src = map.getSource('vp-acc') as maplibregl.GeoJSONSource | undefined
+    src?.setData({
+      type: 'FeatureCollection',
+      features: user.accuracy > 0 ? [circlePolygon(user.lng, user.lat, user.accuracy)] : [],
+    })
+  }, [ready, user.lat, user.lng, user.accuracy])
+
+  // ── Aircraft markers, trails, predictive vector, connections, density ──
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+
+    const scrubbing = !(scrubT === 0 && lastScrubT.current === 0)
+    lastScrubT.current = scrubT
+
+    const positions = aircraft.map((a) => ({ a, pos: sampleTrack(a.track, scrubT) }))
+
+    // Aircraft markers (create / update / interpolate / prune).
+    const live = new Set<string>()
+    if (layers.aircraft) {
+      for (const { a, pos } of positions) {
+        if (!pos) continue
+        live.add(a.id)
+        const target: [number, number] = [pos.lng, pos.lat]
+        const isSel = a.id === selectedAircraftId
+
+        let entry = aircraftMarkers.current.get(a.id)
+        if (!entry) {
+          const el = document.createElement('div')
+          el.className = 'vp-ac-marker'
+          const rot = document.createElement('div')
+          rot.className = 'vp-ac-rot'
+          rot.innerHTML = aircraftMarkerSVG(a.role, 36)
+          el.appendChild(rot)
+          const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+            .setLngLat(target)
+            .addTo(map)
+          entry = { marker, rot, cur: target, raf: null }
+          aircraftMarkers.current.set(a.id, entry)
+        }
+
+        entry.rot.style.transform = `rotate(${pos.hdg}deg)`
+        ;(entry.marker.getElement() as HTMLDivElement).classList.toggle('selected', isSel)
+        moveMarker(entry, target, !scrubbing)
+      }
+    }
+    for (const [id, entry] of aircraftMarkers.current) {
+      if (!live.has(id)) {
+        if (entry.raf) cancelAnimationFrame(entry.raf)
+        entry.marker.remove()
+        aircraftMarkers.current.delete(id)
+      }
+    }
+
+    // Trails.
+    const trailFeatures: GeoJSON.Feature[] = []
+    if (layers.trails) {
+      for (const a of aircraft) {
+        const isSel = a.id === selectedAircraftId
+        const trail = sampleTrailUntil(a.track, scrubT, (isSel ? 15 : 4) * 60)
+        if (trail.length < 2) continue
+        trailFeatures.push({
+          type: 'Feature',
+          properties: { w: isSel ? 3 : 2, o: isSel ? 0.8 : 0.5 },
+          geometry: { type: 'LineString', coordinates: trail.map((p) => [p.lng, p.lat]) },
         })
       }
-    })
-    return [...bins.values()].filter((b) => b.count >= 2)
-  }, [visibleReports])
+    }
+    setData(map, 'vp-trails', trailFeatures)
+
+    // Predictive vector (selected aircraft, 60s ahead).
+    const predictFeatures: GeoJSON.Feature[] = []
+    if (layers.predictive && selectedAircraftId) {
+      const sel = positions.find((p) => p.a.id === selectedAircraftId)
+      if (sel?.pos) {
+        const { lat, lng, hdg, spd } = sel.pos
+        const hdgRad = ((hdg - 90) * Math.PI) / 180
+        const fwd = spd * 0.514 * 60
+        const dLat = (Math.cos(hdgRad) * fwd) / 111_000
+        const dLng = (Math.sin(hdgRad) * fwd) / (111_000 * Math.cos((lat * Math.PI) / 180))
+        predictFeatures.push({
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: [[lng, lat], [lng + dLng, lat + dLat]] },
+        })
+      }
+    }
+    setData(map, 'vp-predict', predictFeatures)
+
+    // Visible reports (respecting the scrubber).
+    const visibleReports = reports.filter((r) => r.reportedAgo - scrubT >= 0)
+
+    // Connection lines: aircraft to nearby reports within 5km.
+    const connFeatures: GeoJSON.Feature[] = []
+    for (const { pos } of positions) {
+      if (!pos) continue
+      for (const r of visibleReports) {
+        const dist = computeDistance(pos.lat, pos.lng, r.lat, r.lng)
+        if (dist < 5000) {
+          connFeatures.push({
+            type: 'Feature',
+            properties: { o: Math.max(0.1, 1 - dist / 5000) * 0.4 },
+            geometry: { type: 'LineString', coordinates: [[pos.lng, pos.lat], [r.lng, r.lat]] },
+          })
+        }
+      }
+    }
+    setData(map, 'vp-conn', connFeatures)
+
+    // Threat-density bins.
+    const hexFeatures: GeoJSON.Feature[] = []
+    if (visibleReports.length >= 3) {
+      const HEX = 0.012
+      const bins = new Map<string, { lat: number; lng: number; count: number }>()
+      for (const r of visibleReports) {
+        const col = Math.round(r.lng / (HEX * 1.5))
+        const row = Math.round(r.lat / (HEX * Math.sqrt(3)))
+        const key = `${col},${row}`
+        const ex = bins.get(key)
+        if (ex) ex.count++
+        else bins.set(key, { lat: row * HEX * Math.sqrt(3), lng: col * HEX * 1.5, count: 1 })
+      }
+      for (const b of bins.values()) {
+        if (b.count < 2) continue
+        const f = circlePolygon(b.lng, b.lat, 600)
+        f.properties = { o: Math.min(0.25, b.count * 0.08) }
+        hexFeatures.push(f)
+      }
+    }
+    setData(map, 'vp-hex', hexFeatures)
+  }, [
+    ready,
+    aircraft,
+    reports,
+    scrubT,
+    layers.aircraft,
+    layers.trails,
+    layers.predictive,
+    selectedAircraftId,
+    onSelectAircraft,
+  ])
+
+  // ── Report markers ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+
+    const visible = layers.reports ? reports.filter((r) => r.reportedAgo - scrubT >= 0) : []
+    const live = new Set<string>()
+
+    for (const r of visible) {
+      live.add(r.id)
+      const isSel = r.id === selectedReportId
+      // CONFIRMED ground threat → threat red; single-source Reported → softer green.
+      const confirmed = r.nThumbsUp >= 5 && r.lastConfirmedAgo < 120
+      const color = confirmed ? RED : GREEN
+
+      let marker = reportMarkers.current.get(r.id)
+      if (!marker) {
+        const el = document.createElement('div')
+        el.className = 'vp-rp-marker'
+        marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([r.lng, r.lat])
+          .addTo(map)
+        reportMarkers.current.set(r.id, marker)
+      }
+      const el = marker.getElement() as HTMLDivElement
+      el.innerHTML = reportMarkerSVG(r.kind, color, 26)
+      el.classList.toggle('selected', isSel)
+      el.onclick = () => onSelectReport(r.id)
+      marker.setLngLat([r.lng, r.lat])
+    }
+
+    for (const [id, marker] of reportMarkers.current) {
+      if (!live.has(id)) {
+        marker.remove()
+        reportMarkers.current.delete(id)
+      }
+    }
+  }, [ready, reports, scrubT, layers.reports, selectedReportId, onSelectReport])
+
+  // Aircraft marker click handlers are bound here so they always see the
+  // latest callback identity without recreating markers.
+  useEffect(() => {
+    if (!ready) return
+    for (const [id, entry] of aircraftMarkers.current) {
+      ;(entry.marker.getElement() as HTMLDivElement).onclick = () => onSelectAircraft(id)
+    }
+  }, [ready, aircraft, onSelectAircraft])
 
   return (
     <div className="relative w-full h-full">
-      <MapContainer
-        center={[user.lat, user.lng]}
-        zoom={13}
-        className="w-full h-full"
-        zoomControl={false}
-        attributionControl={false}
-        ref={mapRef}
-      >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          maxZoom={19}
-        />
+      <div ref={containerRef} className="w-full h-full" />
 
-        <MapController focusTarget={focusTarget} />
-
-        {/* Hex density overlay */}
-        {hexCenters.map((hex, i) => (
-          <Circle
-            key={`hex-${i}`}
-            center={[hex.lat, hex.lng]}
-            radius={600}
-            pathOptions={{
-              color: '#FF4757',
-              fillColor: '#FF4757',
-              fillOpacity: Math.min(0.25, hex.count * 0.08),
-              weight: 1,
-              opacity: 0.3,
-              dashArray: '4, 4',
-            }}
-          />
-        ))}
-
-        {/* Connection lines: aircraft to nearby reports */}
-        {connectionLines.map((line, i) => (
-          <Polyline
-            key={`conn-${i}`}
-            positions={[line.from, line.to]}
-            pathOptions={{
-              color: '#4D7CFF',
-              weight: 1,
-              opacity: line.strength * 0.4,
-              dashArray: '3, 6',
-            }}
-          />
-        ))}
-
-        {/* User position */}
-        <Marker position={[user.lat, user.lng]} icon={createUserIcon()}>
-          <Circle
-            center={[user.lat, user.lng]}
-            radius={user.accuracy}
-            pathOptions={{
-              color: '#4D7CFF',
-              fillColor: '#4D7CFF',
-              fillOpacity: 0.15,
-              weight: 1,
-            }}
-          />
-        </Marker>
-
-        {/* Aircraft trails */}
-        {layers.trails &&
-          aircraftTrails.map(({ id, trail, isSelected }) => {
-            if (trail.length < 2) return null
-            const positions: [number, number][] = trail.map((p) => [p.lat, p.lng])
-            return (
-              <Polyline
-                key={`trail-${id}`}
-                positions={positions}
-                pathOptions={{
-                  color: '#FFB020',
-                  weight: isSelected ? 3 : 2,
-                  opacity: isSelected ? 0.8 : 0.5,
-                }}
-              />
-            )
-          })}
-
-        {/* Predictive vector */}
-        {layers.predictive &&
-          selectedAircraftId &&
-          (() => {
-            const a = aircraftPositions.find((x) => x.id === selectedAircraftId)
-            if (!a?.currentPos) return null
-            const pos = a.currentPos
-            const hdgRad = ((pos.hdg - 90) * Math.PI) / 180
-            const fwd60m = pos.spd * 0.514 * 60
-            const dLat = (Math.cos(hdgRad) * fwd60m) / 111000
-            const dLng = (Math.sin(hdgRad) * fwd60m) / (111000 * Math.cos((pos.lat * Math.PI) / 180))
-
-            return (
-              <Polyline
-                positions={[
-                  [pos.lat, pos.lng],
-                  [pos.lat + dLat, pos.lng + dLng],
-                ]}
-                pathOptions={{
-                  color: '#FFB020',
-                  weight: 2,
-                  opacity: 0.6,
-                  dashArray: '8, 6',
-                }}
-              />
-            )
-          })()}
-
-        {/* Aircraft markers */}
-        {layers.aircraft &&
-          aircraftPositions.map((a) => {
-            if (!a.currentPos) return null
-            const isSelected = a.id === selectedAircraftId
-            return (
-              <Marker
-                key={a.id}
-                position={[a.currentPos.lat, a.currentPos.lng]}
-                icon={createAircraftIcon(a.role, a.currentPos.hdg, isSelected)}
-                eventHandlers={{ click: () => onSelectAircraft(a.id) }}
-              >
-                {isSelected && (
-                  <Circle
-                    center={[a.currentPos.lat, a.currentPos.lng]}
-                    radius={150}
-                    pathOptions={{ color: '#FFB020', fillColor: 'transparent', weight: 2 }}
-                  />
-                )}
-              </Marker>
-            )
-          })}
-
-        {/* Report markers */}
-        {layers.reports &&
-          visibleReports.map((r) => {
-            const isSelected = r.id === selectedReportId
-            const isConfirmed = r.nThumbsUp >= 5 && r.lastConfirmedAgo < 120
-            return (
-              <Marker
-                key={r.id}
-                position={[r.lat, r.lng]}
-                icon={createReportIcon(r.kind, isSelected, isConfirmed)}
-                eventHandlers={{ click: () => onSelectReport(r.id) }}
-              >
-                {isSelected && (
-                  <Circle
-                    center={[r.lat, r.lng]}
-                    radius={100}
-                    pathOptions={{ color: '#4D7CFF', fillColor: 'transparent', weight: 2 }}
-                  />
-                )}
-              </Marker>
-            )
-          })}
-      </MapContainer>
-
-      {/* Pulsing amber glow for silent aircraft */}
+      {/* Pulsing amber edge glow when known aircraft are silent (off-ADS-B). */}
       {hasSilentAircraft && (
         <div
           className="absolute inset-0 pointer-events-none z-[1000]"
           style={{
             border: '2px solid var(--amber)',
-            borderRadius: 'inherit',
             boxShadow: '0 0 12px var(--amber-glow), inset 0 0 12px var(--amber-glow)',
             animation: 'silent-pulse 3s ease-in-out infinite',
           }}
         />
       )}
-
-      <style jsx global>{`
-        .aircraft-marker {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: var(--ink-0);
-          border: 2px solid var(--amber);
-          border-radius: 50%;
-          box-shadow: 0 0 12px var(--amber-glow);
-        }
-        .aircraft-marker.selected {
-          background: var(--amber-wash);
-          box-shadow: 0 0 20px var(--amber-glow);
-        }
-        .report-marker {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: var(--ink-0);
-          border: 2px solid var(--red);
-          border-radius: 50%;
-          width: 100%;
-          height: 100%;
-        }
-        .report-marker.confirmed { border-color: var(--green); }
-        .report-marker.selected {
-          box-shadow: 0 0 12px var(--blue-glow);
-          border-color: var(--blue);
-        }
-        .user-marker { position: relative; width: 24px; height: 24px; }
-        .user-marker-dot {
-          position: absolute; top: 50%; left: 50%;
-          transform: translate(-50%, -50%);
-          width: 12px; height: 12px;
-          background: var(--blue); border: 2px solid white;
-          border-radius: 50%; box-shadow: 0 0 8px var(--blue-glow); z-index: 2;
-        }
-        .user-marker-pulse {
-          position: absolute; top: 50%; left: 50%;
-          transform: translate(-50%, -50%);
-          width: 24px; height: 24px;
-          background: var(--blue); border-radius: 50%;
-          opacity: 0.3; animation: user-pulse 2s ease-out infinite;
-        }
-        @keyframes user-pulse {
-          0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0.5; }
-          100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
-        }
-        @keyframes silent-pulse {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 0.7; }
-        }
-      `}</style>
     </div>
   )
+}
+
+// Update a GeoJSON source's features.
+function setData(map: maplibregl.Map, id: string, features: GeoJSON.Feature[]) {
+  const src = map.getSource(id) as maplibregl.GeoJSONSource | undefined
+  src?.setData({ type: 'FeatureCollection', features })
+}
+
+// Move an aircraft marker, optionally tweening from its current visual
+// position (live polls interpolate; scrubbing snaps).
+function moveMarker(entry: AircraftMarkerEntry, to: [number, number], animate: boolean) {
+  if (entry.raf) {
+    cancelAnimationFrame(entry.raf)
+    entry.raf = null
+  }
+  if (!animate || (entry.cur[0] === to[0] && entry.cur[1] === to[1])) {
+    entry.cur = to
+    entry.marker.setLngLat(to)
+    return
+  }
+  const from: [number, number] = [entry.cur[0], entry.cur[1]]
+  const start = performance.now()
+  const step = (now: number) => {
+    const t = Math.min(1, (now - start) / AIRCRAFT_TWEEN_MS)
+    const e = 1 - Math.pow(1 - t, 3) // easeOutCubic
+    const lng = from[0] + (to[0] - from[0]) * e
+    const lat = from[1] + (to[1] - from[1]) * e
+    entry.cur = [lng, lat]
+    entry.marker.setLngLat([lng, lat])
+    if (t < 1) entry.raf = requestAnimationFrame(step)
+    else {
+      entry.cur = to
+      entry.raf = null
+    }
+  }
+  entry.raf = requestAnimationFrame(step)
 }

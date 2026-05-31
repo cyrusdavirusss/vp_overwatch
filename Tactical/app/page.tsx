@@ -12,6 +12,8 @@ import { LocationSetter } from '@/components/location-setter'
 import { DataGrid } from '@/components/data-grid'
 import { LazyMap } from '@/components/lazy-map'
 import { useRealtimeData, sampleTrack } from '@/hooks/useRealtimeData'
+import { useClientLocation } from '@/hooks/useClientLocation'
+import type { User } from '@/lib/data'
 
 const STRIP_H = 36
 const SCRUB_H = 64
@@ -37,9 +39,19 @@ export default function VPOverwatch() {
   const liveData = useRealtimeData({
     aircraftInterval: 30_000,
     reportsInterval: 15_000,
-    gpsInterval: 10_000,
     relayInterval: 3_000,
   })
+
+  const clientLocation = useClientLocation()
+
+  // Derive a User object from the client-held position
+  // Never sent over the network — lives only in React state.
+  const userPosition: User = useMemo(() => ({
+    lat: clientLocation.position?.lat ?? -37.8136,
+    lng: clientLocation.position?.lng ?? 144.9631,
+    hdg: 0,
+    accuracy: clientLocation.position?.accuracy ?? 5000,
+  }), [clientLocation.position])
 
   const [scrubT, setScrubT] = useState(0)
   const [selectedAircraftId, setSelectedAircraftId] = useState<string | null>(null)
@@ -61,16 +73,14 @@ export default function VPOverwatch() {
     return () => clearInterval(id)
   }, [])
 
-  // Auto-center map on user's real location when geolocation first arrives
+  // Auto-center map on client position once when first acquired
   const hasAutocentered = useRef(false)
   useEffect(() => {
-    const defaultLat = -37.8136
-    const isDefault = Math.abs(liveData.user.lat - defaultLat) < 0.001
-    if (!isDefault && !hasAutocentered.current) {
+    if (clientLocation.position && !hasAutocentered.current) {
       hasAutocentered.current = true
-      setFocusTarget({ lat: liveData.user.lat, lng: liveData.user.lng })
+      setFocusTarget({ lat: clientLocation.position.lat, lng: clientLocation.position.lng })
     }
-  }, [liveData.user.lat, liveData.user.lng])
+  }, [clientLocation.position])
 
   const [filters, setFilters] = useState<Filters>({
     aircraft: true,
@@ -149,29 +159,42 @@ export default function VPOverwatch() {
   }, [])
 
   const onRecenter = useCallback(() => {
-    setFollowUser(true)
-    setFocusTarget({ lat: liveData.user.lat, lng: liveData.user.lng })
-    setTimeout(() => setFollowUser(false), 100)
-  }, [liveData.user])
+    if (clientLocation.position) {
+      setFollowUser(true)
+      setFocusTarget({ lat: clientLocation.position.lat, lng: clientLocation.position.lng })
+      setTimeout(() => setFollowUser(false), 100)
+    } else {
+      // No position held yet — trigger a fresh geolocation request
+      clientLocation.requestLocation()
+    }
+  }, [clientLocation])
 
   const onManualSetLocation = useCallback((lat: number, lng: number) => {
     setShowLocationSetter(false)
+    clientLocation.setManualLocation(lat, lng)
     setFocusTarget({ lat, lng })
-  }, [])
+  }, [clientLocation])
 
   const selectedAircraft = filteredAircraft.find((a) => a.id === selectedAircraftId)
   const selectedReport = filteredReports.find((r) => r.id === selectedReportId)
 
   const detailContent = selectedAircraft ? (
-    <AircraftDetail aircraft={selectedAircraft} user={liveData.user} scrubT={scrubT} onClose={onCloseDetail} />
+    <AircraftDetail aircraft={selectedAircraft} user={userPosition} scrubT={scrubT} onClose={onCloseDetail} />
   ) : selectedReport ? (
-    <ReportDetail report={selectedReport} user={liveData.user} onClose={onCloseDetail} />
+    <ReportDetail report={selectedReport} user={userPosition} onClose={onCloseDetail} />
   ) : null
 
   const clockStr = useMemo(() => {
     const d = new Date(systemClock)
     return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`
   }, [systemClock])
+
+  const locationStr = useMemo(() => {
+    if (clientLocation.position) {
+      return `${clientLocation.position.lat.toFixed(3)}°, ${clientLocation.position.lng.toFixed(3)}°`
+    }
+    return clientLocation.permissionState === 'denied' ? 'LOCATION OFF' : 'NO FIX'
+  }, [clientLocation.position, clientLocation.permissionState])
 
   // ── Desktop: full Palantir multi-panel layout ──────────────────────────
   if (isDesktop) {
@@ -245,7 +268,7 @@ export default function VPOverwatch() {
             <LazyMap
               aircraft={filteredAircraft}
               reports={filteredReports}
-              user={liveData.user}
+              user={userPosition}
               selectedAircraftId={selectedAircraftId}
               selectedReportId={selectedReportId}
               onSelectAircraft={onSelectAircraft}
@@ -262,11 +285,11 @@ export default function VPOverwatch() {
             />
 
             <div className="absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded bg-ink-0/80 border border-border-subtle" style={{ backdropFilter: 'blur(8px)' }}>
-              <span className="num text-[9px] text-fg-3">
-                {liveData.user.lat.toFixed(4)}°, {liveData.user.lng.toFixed(4)}°
+              <span className={`num text-[9px] ${clientLocation.position ? 'text-fg-3' : 'text-[var(--amber)] font-semibold'}`}>
+                {locationStr}
               </span>
               <span className="w-px h-3 bg-border" />
-              <span className="num text-[9px] text-fg-3">HDG {String(Math.round(liveData.user.hdg)).padStart(3, '0')}°</span>
+              <span className="num text-[9px] text-fg-3">HDG ---°</span>
             </div>
 
             <FabCluster
@@ -307,7 +330,7 @@ export default function VPOverwatch() {
             <DataGrid
               aircraft={filteredAircraft}
               reports={filteredReports}
-              user={liveData.user}
+              user={userPosition}
               scrubT={scrubT}
               selectedAircraftId={selectedAircraftId}
               selectedReportId={selectedReportId}
@@ -367,7 +390,7 @@ export default function VPOverwatch() {
           <LazyMap
             aircraft={filteredAircraft}
             reports={filteredReports}
-            user={liveData.user}
+            user={userPosition}
             selectedAircraftId={selectedAircraftId}
             selectedReportId={selectedReportId}
             onSelectAircraft={onSelectAircraft}
@@ -419,7 +442,7 @@ export default function VPOverwatch() {
             <BottomSheet
               aircraft={filteredAircraft}
               reports={filteredReports}
-              user={liveData.user}
+              user={userPosition}
               scrubT={scrubT}
               selectedAircraftId={selectedAircraftId}
               selectedReportId={selectedReportId}
