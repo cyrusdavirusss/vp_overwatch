@@ -114,6 +114,11 @@ export default function VPOverwatch() {
     })
   }, [liveData.reports, filters])
 
+  const silentCount = useMemo(() => {
+    return liveData.aircraft.filter((a) => a.isActive === false && a.lastSeen !== null).length
+  }, [liveData.aircraft])
+  const hasSilentAircraft = silentCount > 0
+
   const onSelectAircraft = useCallback((id: string | null) => {
     setSelectedAircraftId(id)
     setSelectedReportId(null)
@@ -196,6 +201,26 @@ export default function VPOverwatch() {
 
             <div className="w-px h-5 bg-border" />
 
+            {/* Secret aircraft indicator */}
+            {silentCount > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[8px] font-semibold tracking-[0.12em] uppercase" style={{ color: 'var(--amber)' }}>SILENT</span>
+                <span className="num text-[11px] font-bold" style={{ color: 'var(--amber)' }}>{silentCount}</span>
+              </div>
+            )}
+
+            {silentCount > 0 && <div className="w-px h-5 bg-border" />}
+
+            {/* History link */}
+            <a
+              href="/vicpol-history"
+              className="px-2 py-1 font-mono text-[9px] font-semibold tracking-[0.12em] uppercase text-fg-3 bg-ink-2 border border-border rounded hover:bg-ink-3 hover:text-fg-1 transition-colors"
+            >
+              HISTORY
+            </a>
+
+            <div className="w-px h-5 bg-border" />
+
             {/* Clock */}
             <div className="flex items-center gap-2">
               <span className="num text-[12px] font-semibold text-fg-1 tracking-[0.04em]">{clockStr}</span>
@@ -233,6 +258,7 @@ export default function VPOverwatch() {
                 predictive: filters.predictive,
               }}
               focusTarget={focusTarget}
+              hasSilentAircraft={hasSilentAircraft}
             />
 
             <div className="absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded bg-ink-0/80 border border-border-subtle" style={{ backdropFilter: 'blur(8px)' }}>
@@ -331,6 +357,7 @@ export default function VPOverwatch() {
           reportsCount={filteredReports.length}
           scrubT={scrubT}
           relay={{ ...liveData.relay, lastTickAgo: relayTick }}
+          silentCount={silentCount}
         />
 
         <div
@@ -353,6 +380,7 @@ export default function VPOverwatch() {
               predictive: filters.predictive,
             }}
             focusTarget={focusTarget}
+            hasSilentAircraft={hasSilentAircraft}
           />
 
           <FabCluster

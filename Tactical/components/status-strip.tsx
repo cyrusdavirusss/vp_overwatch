@@ -10,6 +10,7 @@ interface StatusStripProps {
   scrubT: number
   relay: Relay
   onThemeToggle?: () => void
+  silentCount?: number
 }
 
 export function StatusStrip({
@@ -18,6 +19,7 @@ export function StatusStrip({
   scrubT,
   relay,
   onThemeToggle,
+  silentCount = 0,
 }: StatusStripProps) {
   const scrubbed = scrubT > 0
 
@@ -88,8 +90,28 @@ export function StatusStrip({
         <div className="flex items-center gap-1.5">
           <Stat n={aircraftCount} label="airborne" tone="amber" />
           <Stat n={reportsCount} label="ground" tone="red" />
+          {silentCount !== undefined && silentCount > 0 && (
+            <div className="flex items-center gap-1 px-1">
+              <span className="num text-base font-semibold leading-none" style={{ color: 'var(--amber)' }}>
+                {silentCount}
+              </span>
+              <span className="font-mono text-[9.5px] tracking-[0.08em] uppercase text-fg-3 leading-none">
+                SILENT
+              </span>
+            </div>
+          )}
+          <a
+            href="/vicpol-history"
+            className="w-7 h-7 ml-1 flex items-center justify-center bg-ink-2 border border-border text-fg-2 rounded-md hover:bg-ink-3 hover:text-fg-1 transition-colors"
+            aria-label="Sortie history"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+          </a>
           <button
-            className="w-8 h-8 ml-1.5 flex items-center justify-center bg-ink-2 border border-border text-fg-2 rounded-md hover:bg-ink-3 hover:text-fg-1 transition-colors"
+            className="w-8 h-8 ml-0.5 flex items-center justify-center bg-ink-2 border border-border text-fg-2 rounded-md hover:bg-ink-3 hover:text-fg-1 transition-colors"
             onClick={onThemeToggle}
             aria-label="Toggle theme"
           >
