@@ -44,14 +44,20 @@ export default function VPOverwatch() {
 
   const clientLocation = useClientLocation()
 
+  // Home / default location. Desktop browsers can't GPS-locate, so when no
+  // precise fix is available the map centers here instead of a generic
+  // Melbourne CBD point. Configure via NEXT_PUBLIC_HOME_LAT/LNG (.env.local).
+  const HOME_LAT = Number(process.env.NEXT_PUBLIC_HOME_LAT) || -37.8136
+  const HOME_LNG = Number(process.env.NEXT_PUBLIC_HOME_LNG) || 144.9631
+
   // Derive a User object from the client-held position
   // Never sent over the network — lives only in React state.
   const userPosition: User = useMemo(() => ({
-    lat: clientLocation.position?.lat ?? -37.8136,
-    lng: clientLocation.position?.lng ?? 144.9631,
+    lat: clientLocation.position?.lat ?? HOME_LAT,
+    lng: clientLocation.position?.lng ?? HOME_LNG,
     hdg: 0,
     accuracy: clientLocation.position?.accuracy ?? 5000,
-  }), [clientLocation.position])
+  }), [clientLocation.position, HOME_LAT, HOME_LNG])
 
   const [scrubT, setScrubT] = useState(0)
   const [selectedAircraftId, setSelectedAircraftId] = useState<string | null>(null)
@@ -60,6 +66,7 @@ export default function VPOverwatch() {
   const [filterOpen, setFilterOpen] = useState(false)
   const [followUser, setFollowUser] = useState(false)
   const [showLocationSetter, setShowLocationSetter] = useState(false)
+  const [picking, setPicking] = useState(false)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lng: number } | null>(null)
   const [relayTick, setRelayTick] = useState(liveData.relay.lastTickAgo)
   const [systemClock, setSystemClock] = useState(Date.now())
@@ -175,6 +182,19 @@ export default function VPOverwatch() {
     setFocusTarget({ lat, lng })
   }, [clientLocation])
 
+  // Switch from the coords modal into tap-the-map mode.
+  const onPickOnMap = useCallback(() => {
+    setShowLocationSetter(false)
+    setPicking(true)
+  }, [])
+
+  // A map tap while picking sets the exact position, then exits pick mode.
+  const onMapClickSetLocation = useCallback((lat: number, lng: number) => {
+    setPicking(false)
+    clientLocation.setManualLocation(lat, lng)
+    setFocusTarget({ lat, lng })
+  }, [clientLocation])
+
   const selectedAircraft = filteredAircraft.find((a) => a.id === selectedAircraftId)
   const selectedReport = filteredReports.find((r) => r.id === selectedReportId)
 
@@ -191,10 +211,11 @@ export default function VPOverwatch() {
 
   const locationStr = useMemo(() => {
     if (clientLocation.position) {
-      return `${clientLocation.position.lat.toFixed(3)}°, ${clientLocation.position.lng.toFixed(3)}°`
+      const coords = `${clientLocation.position.lat.toFixed(3)}°, ${clientLocation.position.lng.toFixed(3)}°`
+      return clientLocation.isManual ? `${coords} · PIN` : coords
     }
     return clientLocation.permissionState === 'denied' ? 'LOCATION OFF' : 'NO FIX'
-  }, [clientLocation.position, clientLocation.permissionState])
+  }, [clientLocation.position, clientLocation.permissionState, clientLocation.isManual])
 
   // ── Desktop: full Palantir multi-panel layout ──────────────────────────
   if (isDesktop) {
@@ -282,6 +303,8 @@ export default function VPOverwatch() {
               }}
               focusTarget={focusTarget}
               hasSilentAircraft={hasSilentAircraft}
+              pickMode={picking}
+              onMapClick={onMapClickSetLocation}
             />
 
             <div className="absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded bg-ink-0/80 border border-border-subtle" style={{ backdropFilter: 'blur(8px)' }}>
@@ -300,9 +323,25 @@ export default function VPOverwatch() {
               followUser={followUser}
             />
 
+            {picking && (
+              <div
+                className="absolute top-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-3 py-1.5 rounded-md border border-[var(--blue)]"
+                style={{ background: 'color-mix(in srgb, var(--ink-1) 95%, transparent)', backdropFilter: 'blur(8px)', boxShadow: 'var(--shadow-fab)' }}
+              >
+                <span className="font-mono text-[10px] font-semibold tracking-[0.1em] uppercase text-[var(--blue)]">Tap your location</span>
+                <button
+                  onClick={() => setPicking(false)}
+                  className="font-mono text-[10px] tracking-[0.08em] uppercase text-fg-3 hover:text-fg-1"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
             {showLocationSetter && (
               <LocationSetter
                 onSetLocation={onManualSetLocation}
+                onPickOnMap={onPickOnMap}
                 onClose={() => setShowLocationSetter(false)}
               />
             )}
@@ -417,6 +456,7 @@ export default function VPOverwatch() {
           {showLocationSetter && (
             <LocationSetter
               onSetLocation={onManualSetLocation}
+              onPickOnMap={onPickOnMap}
               onClose={() => setShowLocationSetter(false)}
             />
           )}
