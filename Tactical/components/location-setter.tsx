@@ -4,10 +4,11 @@ import { useState, useRef, useEffect } from 'react'
 
 interface LocationSetterProps {
   onSetLocation: (lat: number, lng: number) => void
+  onPickOnMap: () => void
   onClose: () => void
 }
 
-export function LocationSetter({ onSetLocation, onClose }: LocationSetterProps) {
+export function LocationSetter({ onSetLocation, onPickOnMap, onClose }: LocationSetterProps) {
   const [latStr, setLatStr] = useState('-37.8136')
   const [lngStr, setLngStr] = useState('144.9631')
   const [error, setError] = useState('')
@@ -50,7 +51,7 @@ export function LocationSetter({ onSetLocation, onClose }: LocationSetterProps) 
         () => {
           setError('Could not get current location')
         },
-        { enableHighAccuracy: false, timeout: 5000 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       )
     }
   }
@@ -112,6 +113,14 @@ export function LocationSetter({ onSetLocation, onClose }: LocationSetterProps) 
           {error && (
             <div className="font-mono text-[10px] text-[var(--red)] tracking-[0.04em]">{error}</div>
           )}
+
+          <button
+            type="button"
+            onClick={onPickOnMap}
+            className="w-full font-mono text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--blue)] bg-[var(--blue-wash)] border border-[var(--blue)] rounded-md py-2 mt-1 hover:bg-[var(--blue-glow)] transition-colors"
+          >
+            Tap location on map
+          </button>
 
           <div className="flex gap-2 mt-1">
             <button

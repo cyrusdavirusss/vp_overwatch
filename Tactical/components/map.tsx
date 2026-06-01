@@ -36,6 +36,10 @@ export interface VPMapProps {
   }
   focusTarget?: { lat: number; lng: number } | null
   hasSilentAircraft?: boolean
+  /** When true, the map shows a crosshair and a click sets the position. */
+  pickMode?: boolean
+  /** Called with the clicked coordinate while pickMode is active. */
+  onMapClick?: (lat: number, lng: number) => void
 }
 
 // Motion: 400ms camera-focus duration with the design system's spring ease
@@ -108,10 +112,14 @@ export function VPMap({
   layers,
   focusTarget,
   hasSilentAircraft,
+  pickMode,
+  onMapClick,
 }: VPMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const [ready, setReady] = useState(false)
+  const onMapClickRef = useRef(onMapClick)
+  useEffect(() => { onMapClickRef.current = onMapClick }, [onMapClick])
 
   const userMarker = useRef<maplibregl.Marker | null>(null)
   const aircraftMarkers = useRef<Map<string, AircraftMarkerEntry>>(new Map())
@@ -134,6 +142,11 @@ export function VPMap({
       pitchWithRotate: true,
     })
     mapRef.current = map
+
+    // Tap-to-set position (only acts when pickMode is on, via the live callback).
+    map.on('click', (e) => {
+      onMapClickRef.current?.(e.lngLat.lat, e.lngLat.lng)
+    })
 
     map.on('load', () => {
       // ── Data-overlay sources (updated imperatively below) ──────────────
@@ -245,6 +258,13 @@ export function VPMap({
       essential: true,
     })
   }, [ready, focusTarget])
+
+  // ── Pick-location cursor ───────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    map.getCanvas().style.cursor = pickMode ? 'crosshair' : ''
+  }, [ready, pickMode])
 
   // ── User marker + accuracy disc ────────────────────────────────────────
   useEffect(() => {

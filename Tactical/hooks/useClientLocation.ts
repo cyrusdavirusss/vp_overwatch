@@ -15,68 +15,138 @@ interface UseClientLocationResult {
   permissionState: PermissionState
   requestLocation: () => void
   setManualLocation: (lat: number, lng: number) => void
+  clearManualLocation: () => void
+  isManual: boolean
   hasLocation: boolean
 }
+
+const PIN_KEY = 'vp-manual-location'
 
 /**
  * Client-only geolocation hook.
  *
- * - Requests browser geolocation once on mount via getCurrentPosition.
- * - Rounds coordinates to 3 decimal places (~100m) — approximate, not pinpoint.
- * - Never sends coordinates over the network, logs them, or persists them.
- * - Permission denied / unavailable → no hard fail, caller decides how to handle.
+ * Two modes:
+ *  - Auto: watchPosition with enableHighAccuracy, keeping the tightest fix.
+ *    Good on devices with GPS (phones). On a desktop browser this is only as
+ *    accurate as the OS/IP can manage — often kilometres off, which no setting
+ *    can fix.
+ *  - Manual pin: a deliberately-set location that PERSISTS (localStorage) and
+ *    LOCKS — auto geolocation will not override it. This is the reliable path
+ *    for desktop. Cleared explicitly via clearManualLocation().
+ *
+ * Coordinates are never sent over the network; the only persistence is the
+ * manual pin the user sets on purpose.
  */
 export function useClientLocation(): UseClientLocationResult {
   const [position, setPosition] = useState<ClientLocation | null>(null)
   const [permissionState, setPermissionState] = useState<PermissionState>('prompt')
-  const requestedOnce = useRef(false)
+  const [isManual, setIsManual] = useState(false)
+  const watchId = useRef<number | null>(null)
+  const bestAccuracy = useRef<number>(Infinity)
+  const manualLock = useRef(false)
+  const startedOnce = useRef(false)
+
+  const stopWatch = useCallback(() => {
+    if (watchId.current !== null) {
+      navigator.geolocation.clearWatch(watchId.current)
+      watchId.current = null
+    }
+  }, [])
 
   const handlePosition = useCallback((pos: GeolocationPosition) => {
-    // Round to 3 decimal places (~111m at equator) — approximate, not pinpoint
-    const lat = Math.round(pos.coords.latitude * 1000) / 1000
-    const lng = Math.round(pos.coords.longitude * 1000) / 1000
-    setPosition({ lat, lng, accuracy: pos.coords.accuracy })
+    if (manualLock.current) return // a manual pin always wins
+    const acc = pos.coords.accuracy
+    // Keep the tightest fix; ignore a later, much coarser reading (e.g. an IP
+    // fallback arriving after a good GPS lock).
+    if (acc > bestAccuracy.current * 1.5 && bestAccuracy.current < 100) return
+    bestAccuracy.current = Math.min(bestAccuracy.current, acc)
+    setPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: acc })
     setPermissionState('granted')
   }, [])
 
   const handleError = useCallback((err: GeolocationPositionError) => {
     console.warn('[GPS] geolocation error:', err.message)
-    if (err.code === err.PERMISSION_DENIED) {
-      setPermissionState('denied')
-    } else {
-      setPermissionState('unavailable')
-    }
+    setPermissionState(err.code === err.PERMISSION_DENIED ? 'denied' : 'unavailable')
   }, [])
 
+  // Start (or restart) the live auto watch. Clears any manual lock.
   const requestLocation = useCallback(() => {
     if (!navigator.geolocation) {
       setPermissionState('unavailable')
       return
     }
-    navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
-      enableHighAccuracy: false,
-      timeout: 10000,
-      maximumAge: 60000,
+    manualLock.current = false
+    setIsManual(false)
+    try { localStorage.removeItem(PIN_KEY) } catch {}
+    stopWatch()
+    bestAccuracy.current = Infinity
+    watchId.current = navigator.geolocation.watchPosition(handlePosition, handleError, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0,
     })
-  }, [handlePosition, handleError])
+  }, [handlePosition, handleError, stopWatch])
 
-  // Request location on first mount — one shot, never re-requests unless asked
-  useEffect(() => {
-    if (requestedOnce.current) return
-    requestedOnce.current = true
+  const setManualLocation = useCallback((lat: number, lng: number) => {
+    stopWatch()
+    manualLock.current = true
+    setIsManual(true)
+    try { localStorage.setItem(PIN_KEY, JSON.stringify({ lat, lng })) } catch {}
+    setPosition({ lat, lng, accuracy: 1 })
+    setPermissionState('granted')
+  }, [stopWatch])
+
+  const clearManualLocation = useCallback(() => {
+    try { localStorage.removeItem(PIN_KEY) } catch {}
     requestLocation()
   }, [requestLocation])
 
-  const setManualLocation = useCallback((lat: number, lng: number) => {
-    setPosition({ lat, lng, accuracy: 1 })
-    setPermissionState('granted')
-  }, [])
+  // On first mount: a saved pin wins and locks; otherwise start the auto watch.
+  useEffect(() => {
+    if (startedOnce.current) return
+    startedOnce.current = true
+
+    let saved: { lat: number; lng: number } | null = null
+    try {
+      const raw = localStorage.getItem(PIN_KEY)
+      if (raw) {
+        const p = JSON.parse(raw)
+        if (typeof p?.lat === 'number' && typeof p?.lng === 'number') saved = p
+      }
+    } catch {}
+
+    if (saved) {
+      manualLock.current = true
+      setIsManual(true)
+      setPosition({ lat: saved.lat, lng: saved.lng, accuracy: 1 })
+      setPermissionState('granted')
+      return // do not start auto-watch; the pin is authoritative
+    }
+
+    if (!navigator.geolocation) {
+      setPermissionState('unavailable')
+      return
+    }
+    bestAccuracy.current = Infinity
+    watchId.current = navigator.geolocation.watchPosition(handlePosition, handleError, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0,
+    })
+
+    return () => stopWatch()
+  }, [handlePosition, handleError, stopWatch])
+
+  // Always clean up the watch on unmount.
+  useEffect(() => stopWatch, [stopWatch])
 
   return {
     position,
     permissionState,
     requestLocation,
     setManualLocation,
+    clearManualLocation,
+    isManual,
     hasLocation: position !== null,
   }
 }
