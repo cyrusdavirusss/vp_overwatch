@@ -1,3 +1,5 @@
+import https from 'https'
+
 /**
  * In-memory data store for VP-Overwatch
  *
@@ -95,6 +97,8 @@ export interface SortieEntry {
 const KIND_MAP: Record<string, Report['kind']> = {
   POLICE_VISIBLE: 'marked',
   POLICE_HIDDEN: 'hidden',
+  POLICE_WITH_MOBILE_CAMERA: 'camera',
+  MOBILE_CAMERA: 'camera',
   ROADSIDE_STOP: 'stop',
   CHECKPOINT: 'checkpoint',
   RBT: 'rbt',
@@ -168,6 +172,8 @@ const KNOWN_AIRCRAFT: Record<string, { registration: string; role: Aircraft['rol
   '7C7F8C': { registration: 'VH-PVH', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
   '7C2B22': { registration: 'VH-PVI', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'EC135', typeLabel: 'Eurocopter EC135', fuelEnduranceMinutes: 210 },
   '7C1F40': { registration: 'VH-PVK', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
+  '7C4EF4': { registration: 'VH-PVQ', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
+  '7C4EF5': { registration: 'VH-PVR', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
   '7CF102': { registration: 'VH-AFC', role: 'fixedwing', operator: 'Australian Federal Police', operatorShort: 'AFP', type: 'C208', typeLabel: 'Cessna 208 Caravan', fuelEnduranceMinutes: 360 },
 }
 
@@ -210,6 +216,21 @@ initKnownAircraft()
 
 // ── ADSB.lol Polling ────────────────────────────────────────────────────
 
+function fetchJsonHttps(url: string, timeout: number): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { timeout }, (res) => {
+      let data = ''
+      res.on('data', (chunk) => { data += chunk })
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)) }
+        catch (e) { reject(new Error('Invalid JSON')) }
+      })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')) })
+  })
+}
+
 async function pollOpenSky(): Promise<void> {
   try {
     const s = getState()
@@ -217,18 +238,7 @@ async function pollOpenSky(): Promise<void> {
     const url =
       `https://api.adsb.lol/v2/point/${lat}/${lng}/100`
 
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(15_000),
-      headers: { 'Accept': 'application/json' },
-    })
-
-    if (!res.ok) {
-      console.warn(`[ADSB.lol] HTTP ${res.status}`)
-      // fallback to mock data — don't wipe aircraft map on API fail
-      return
-    }
-
-    const data = await res.json()
+    const data = await fetchJsonHttps(url, 15_000)
     const aircraft: any[] = data?.ac ?? []
 
     const now = Date.now()
@@ -260,11 +270,12 @@ async function pollOpenSky(): Promise<void> {
       const longitude = ac.lon
       if (latitude == null || longitude == null) continue
 
-      // adsb.lol field mapping
-      const alt = Math.round(Number(ac.alt_geom ?? ac.alt_baro ?? 0) * 3.28084)
+      // adsb.lol field mapping — alt_geom is often 0 for MLAT, fallback to alt_baro
+      const altRaw = (ac.alt_geom != null && Number(ac.alt_geom) > 0) ? Number(ac.alt_geom) : (ac.alt_baro != null ? Number(ac.alt_baro) : 0)
+      const alt = Math.round(altRaw * 3.28084)
       const speed = Math.round(Number(ac.gs ?? 0) * 1.94384)
       const heading = Math.round(ac.track ?? 0)
-      const verticalRate = ac.baro_rate ?? 0
+      const verticalRate = ac.baro_rate ?? ac.geom_rate ?? 0
       const callsign = ac.flight?.trim() || ''
 
       const existing = s.aircraftMap.get(hex)
@@ -406,7 +417,9 @@ export function getStore() {
       if (Date.now() - s.lastOpenSkyPoll > OPENSKY_POLL_INTERVAL) {
         await pollOpenSky()
       }
-      return [...s.aircraftMap.values()]
+      return [...s.aircraftMap.values()].filter(
+        (a) => a.latitude !== 0 || a.longitude !== 0 || a.callsign !== ''
+      )
     },
 
     /** Get breadcrumb track for a specific hex */

@@ -24,13 +24,6 @@ export interface RealtimeData {
   lastUpdate: number
 }
 
-import {
-  AIRCRAFT as MOCK_AIRCRAFT,
-  REPORTS as MOCK_REPORTS,
-  USER as MOCK_USER,
-  RELAY as MOCK_RELAY,
-} from '@/lib/data'
-
 interface UseRealtimeOptions {
   aircraftInterval?: number
   reportsInterval?: number
@@ -47,10 +40,10 @@ export function useRealtimeData(options: UseRealtimeOptions = {}): RealtimeData 
   } = options
 
   const [data, setData] = useState<RealtimeData>({
-    aircraft: MOCK_AIRCRAFT,
-    reports: MOCK_REPORTS,
-    user: MOCK_USER,
-    relay: MOCK_RELAY,
+    aircraft: [],
+    reports: [],
+    user: { lat: -37.8136, lng: 144.9631, hdg: 0, accuracy: 5000 },
+    relay: { connected: false, lastTickAgo: 0, pollIntervalSec: 60, lastIngested: 0, lastRaw: 0, coverageRegions: 0 },
     loading: true,
     error: null,
     lastUpdate: Date.now(),
@@ -94,7 +87,7 @@ export function useRealtimeData(options: UseRealtimeOptions = {}): RealtimeData 
     return () => { mounted = false; clearInterval(id) }
   }, [enabled, aircraftInterval, fetchJson])
 
-  // ── Reports poll — keep mock data if API returns empty ────────────────
+  // ── Reports poll — stays empty until relay pushes real data ────────────
   useEffect(() => {
     if (!enabled) return
     let mounted = true
@@ -120,7 +113,10 @@ export function useRealtimeData(options: UseRealtimeOptions = {}): RealtimeData 
     let mounted = true
 
     async function poll() {
-      const result = await fetchJson<Relay>('/api/relay/status', MOCK_RELAY)
+      const result = await fetchJson<Relay>('/api/relay/status', {
+        connected: false, lastTickAgo: 0, pollIntervalSec: 60,
+        lastIngested: 0, lastRaw: 0, coverageRegions: 0,
+      })
       if (!mounted) return
       setData((prev) => ({
         ...prev,

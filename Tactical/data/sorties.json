@@ -1,0 +1,38 @@
+{
+  "7C4EF5": {
+    "callsign": "POL32",
+    "registration": "VH-PVR",
+    "type": "A139",
+    "role": "rotary",
+    "startTime": 1780329650978,
+    "lastSeen": 1780346732337,
+    "firstLat": -37.665642,
+    "firstLon": 144.920518,
+    "latestLat": -37.926766,
+    "latestLon": 145.197654,
+    "peakAlt": 9843,
+    "status": "ended",
+    "endTime": 1780347633924,
+    "distKm": 128.11,
+    "lastLat": -37.926766,
+    "lastLon": 145.197654
+  },
+  "7C4EF4": {
+    "callsign": "POL31",
+    "registration": "VH-PVQ",
+    "type": "A139",
+    "role": "rotary",
+    "startTime": 1780380917393,
+    "lastSeen": 1780424134242,
+    "firstLat": -37.85701,
+    "firstLon": 144.733595,
+    "latestLat": -37.742832,
+    "latestLon": 145.069925,
+    "peakAlt": 13780,
+    "distKm": 353.36,
+    "lastLat": -37.742832,
+    "lastLon": 145.069925,
+    "status": "ended",
+    "endTime": 1780425936735
+  }
+}
