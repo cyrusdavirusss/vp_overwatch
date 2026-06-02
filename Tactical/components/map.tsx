@@ -40,6 +40,10 @@ export interface VPMapProps {
   pickMode?: boolean
   /** Called with the clicked coordinate while pickMode is active. */
   onMapClick?: (lat: number, lng: number) => void
+  /** Live-follow: re-center smoothly (pan only, keep zoom) on focus changes. */
+  followMode?: boolean
+  /** Fired when the user drags the map, so follow mode can be paused. */
+  onUserPan?: () => void
 }
 
 // Motion: 400ms camera-focus duration with the design system's spring ease
@@ -114,12 +118,18 @@ export function VPMap({
   hasSilentAircraft,
   pickMode,
   onMapClick,
+  followMode,
+  onUserPan,
 }: VPMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const [ready, setReady] = useState(false)
   const onMapClickRef = useRef(onMapClick)
   useEffect(() => { onMapClickRef.current = onMapClick }, [onMapClick])
+  const onUserPanRef = useRef(onUserPan)
+  useEffect(() => { onUserPanRef.current = onUserPan }, [onUserPan])
+  const followModeRef = useRef(followMode)
+  useEffect(() => { followModeRef.current = followMode }, [followMode])
 
   const userMarker = useRef<maplibregl.Marker | null>(null)
   const aircraftMarkers = useRef<Map<string, AircraftMarkerEntry>>(new Map())
@@ -147,6 +157,9 @@ export function VPMap({
     map.on('click', (e) => {
       onMapClickRef.current?.(e.lngLat.lat, e.lngLat.lng)
     })
+
+    // User dragging the map pauses live-follow.
+    map.on('dragstart', () => onUserPanRef.current?.())
 
     map.on('load', () => {
       // ── Data-overlay sources (updated imperatively below) ──────────────
@@ -250,13 +263,24 @@ export function VPMap({
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map || !focusTarget) return
-    map.flyTo({
-      center: [focusTarget.lng, focusTarget.lat],
-      zoom: Math.max(map.getZoom(), FOCUS_ZOOM),
-      duration: FOCUS_MS,
-      easing: springEase,
-      essential: true,
-    })
+    if (followModeRef.current) {
+      // Live follow: pan only, keep the user's current zoom, gentle ease.
+      map.easeTo({
+        center: [focusTarget.lng, focusTarget.lat],
+        duration: 800,
+        easing: springEase,
+        essential: true,
+      })
+    } else {
+      // Deliberate focus (recenter / select a unit): fly in with momentum.
+      map.flyTo({
+        center: [focusTarget.lng, focusTarget.lat],
+        zoom: Math.max(map.getZoom(), FOCUS_ZOOM),
+        duration: FOCUS_MS,
+        easing: springEase,
+        essential: true,
+      })
+    }
   }, [ready, focusTarget])
 
   // ── Pick-location cursor ───────────────────────────────────────────────

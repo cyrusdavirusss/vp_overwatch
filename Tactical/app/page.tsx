@@ -64,7 +64,7 @@ export default function VPOverwatch() {
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
   const [snap, setSnap] = useState<'peek' | 'half' | 'full'>('peek')
   const [filterOpen, setFilterOpen] = useState(false)
-  const [followUser, setFollowUser] = useState(false)
+  const [followUser, setFollowUser] = useState(true)
   const [showLocationSetter, setShowLocationSetter] = useState(false)
   const [picking, setPicking] = useState(false)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lng: number } | null>(null)
@@ -80,14 +80,14 @@ export default function VPOverwatch() {
     return () => clearInterval(id)
   }, [])
 
-  // Auto-center map on client position once when first acquired
-  const hasAutocentered = useRef(false)
+  // Live-follow: while follow is on, re-center on every position update so the
+  // map tracks the user as they move (GPS devices). Panning the map or
+  // selecting a unit turns follow off; the recenter FAB turns it back on.
   useEffect(() => {
-    if (clientLocation.position && !hasAutocentered.current) {
-      hasAutocentered.current = true
+    if (followUser && clientLocation.position) {
       setFocusTarget({ lat: clientLocation.position.lat, lng: clientLocation.position.lng })
     }
-  }, [clientLocation.position])
+  }, [followUser, clientLocation.position])
 
   const [filters, setFilters] = useState<Filters>({
     aircraft: true,
@@ -140,6 +140,7 @@ export default function VPOverwatch() {
     setSelectedAircraftId(id)
     setSelectedReportId(null)
     if (id) {
+      setFollowUser(false)
       setSnap('half')
       const a = liveData.aircraft.find((x) => x.id === id)
       if (a) {
@@ -153,6 +154,7 @@ export default function VPOverwatch() {
     setSelectedReportId(id)
     setSelectedAircraftId(null)
     if (id) {
+      setFollowUser(false)
       setSnap('half')
       const r = liveData.reports.find((x) => x.id === id)
       if (r) setFocusTarget({ lat: r.lat, lng: r.lng })
@@ -166,15 +168,15 @@ export default function VPOverwatch() {
   }, [])
 
   const onRecenter = useCallback(() => {
+    setFollowUser(true)
     if (clientLocation.position) {
-      setFollowUser(true)
       setFocusTarget({ lat: clientLocation.position.lat, lng: clientLocation.position.lng })
-      setTimeout(() => setFollowUser(false), 100)
     } else {
-      // No position held yet — trigger a fresh geolocation request
+      // No precise fix yet — re-arm geolocation and center on home meanwhile.
       clientLocation.requestLocation()
+      setFocusTarget({ lat: HOME_LAT, lng: HOME_LNG })
     }
-  }, [clientLocation])
+  }, [clientLocation, HOME_LAT, HOME_LNG])
 
   const onManualSetLocation = useCallback((lat: number, lng: number) => {
     setShowLocationSetter(false)
@@ -304,7 +306,9 @@ export default function VPOverwatch() {
               focusTarget={focusTarget}
               hasSilentAircraft={hasSilentAircraft}
               pickMode={picking}
-              onMapClick={onMapClickSetLocation}
+              onMapClick={picking ? onMapClickSetLocation : undefined}
+              followMode={followUser}
+              onUserPan={() => setFollowUser(false)}
             />
 
             <div className="absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded bg-ink-0/80 border border-border-subtle" style={{ backdropFilter: 'blur(8px)' }}>
