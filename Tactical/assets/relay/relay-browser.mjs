@@ -50,6 +50,8 @@ let ws, msgId = 0
 const pending = new Map()
 const isPoliceCamera = (a) => /POLICE|CAMERA/i.test((a.type || '') + ' ' + (a.subtype || ''))
 let sweep = new Map()
+let georssHits = 0, totalAlerts = 0, bodyFails = 0
+const typeHist = {}
 
 const cdp = (method, params = {}) => new Promise((res) => { const i = ++msgId; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })) })
 
@@ -67,14 +69,22 @@ async function connect() {
           if (m.id && pending.has(m.id)) { pending.get(m.id)(m.result); pending.delete(m.id); return }
           if (m.method === 'Network.responseReceived') {
             const r = m.params.response
-            if (/georss/i.test(r.url) && r.status === 200) {
+            if (r.url.includes('waze.com') && !/\.(js|css|png|jpg|jpeg|gif|svg|woff|ttf|ico)/i.test(r.url))
+              console.error('WAZE URL:', r.status, r.url)
+            if (/georss|alert|rtsi/i.test(r.url) && r.status === 200) {
+              georssHits++
               // grab the body NOW, before it is evicted
               cdp('Network.getResponseBody', { requestId: m.params.requestId }).then((b) => {
                 try {
                   const j = JSON.parse(b.body)
-                  for (const a of (j?.alerts || [])) if (a?.uuid && isPoliceCamera(a)) sweep.set(a.uuid, a)
+                  const arr = j?.alerts || []
+                  totalAlerts += arr.length
+                  for (const a of arr) typeHist[a.type] = (typeHist[a.type] || 0) + 1
+                  for (const a of arr)
+                    if (a?.uuid && isPoliceCamera(a))
+                      sweep.set(a.uuid, a)
                 } catch {}
-              }).catch(() => {})
+              }).catch(() => { bodyFails++ })
             }
           }
         }
@@ -91,7 +101,7 @@ async function connect() {
 async function doSweep() {
   sweep = new Map()
   for (const c of CENTRES) {
-    const url = `https://www.waze.com/en-GB/live-map/directions?latlng=${c.lat}%2C${c.lng}&zoom=${ZOOM}`
+    const url = `https://www.waze.com/en-GB/live-map?latlng=${c.lat},${c.lng}&zoom=${ZOOM}`
     await cdp('Page.navigate', { url })
     await sleep(7000) // load + georss fetch + body grab
   }
@@ -118,6 +128,8 @@ console.log(`Victoria relay → ${API_URL}, ${CENTRES.length} centres z${ZOOM}, 
 await connect()
 const first = await tick()
 if (ONESHOT) {
+  console.log(`georss responses: ${georssHits}, total alerts: ${totalAlerts}, body-grab fails: ${bodyFails}`)
+  console.log('types:', typeHist)
   console.log('--- sample ---')
   for (const a of first.slice(0, 30)) console.log(`  ${a.type}/${a.subtype || '-'} @ ${a.location?.y?.toFixed(4)},${a.location?.x?.toFixed(4)} "${a.street || ''}"`)
   chrome.kill(); process.exit(0)

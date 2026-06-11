@@ -19,19 +19,22 @@ interface UseClientLocationResult {
   hasLocation: boolean
 }
 
-// Fixes coarser than this (metres) are treated as IP/network guesses, not a
-// real GPS lock, and are ignored — so a desktop (no GPS) rests on the home
-// default instead of jumping to the ISP's city, while a phone tracks live.
-const ACCURACY_MAX_M = 200
+// Grid size for coordinate snapping. Truncating lat/lng to 3 decimal places
+// rounds each accepted fix to roughly a 110 m cell, so the stored point is a
+// neighbourhood-level grid square rather than the exact device position.
+const GRID_DECIMALS = 3
+
+const snapToGrid = (n: number) => Math.trunc(n * 10 ** GRID_DECIMALS) / 10 ** GRID_DECIMALS
 
 /**
  * Client-only live geolocation hook.
  *
- * - watchPosition + enableHighAccuracy + maximumAge 0: continuous fresh fixes,
- *   so the position tracks the device as it moves (phones with GPS).
- * - Coarse fixes (> ACCURACY_MAX_M) are dropped; the caller then keeps its
- *   home default. This is why a desktop stays put and only a real GPS device
- *   tracks.
+ * - watchPosition with maximumAge 0 gives continuous fresh fixes, so the
+ *   position tracks the device as it moves.
+ * - enableHighAccuracy is false: the browser may answer from the coarser
+ *   network/IP source, and all fixes are accepted regardless of accuracy.
+ * - Every accepted fix is snapped to a ~110 m grid (GRID_DECIMALS), so the
+ *   exact device position is never stored.
  * - A manual pin briefly (60s) suppresses live updates, then GPS resumes.
  * - Coordinates are never sent over the network or persisted.
  */
@@ -45,11 +48,10 @@ export function useClientLocation(): UseClientLocationResult {
   const handlePosition = useCallback((pos: GeolocationPosition) => {
     setPermissionState('granted')
     if (Date.now() < manualUntil.current) return // honour a fresh manual pin
-    if (pos.coords.accuracy > ACCURACY_MAX_M) return // coarse IP/network fix — ignore
     setIsManual(false)
     setPosition({
-      lat: pos.coords.latitude,
-      lng: pos.coords.longitude,
+      lat: snapToGrid(pos.coords.latitude),
+      lng: snapToGrid(pos.coords.longitude),
       accuracy: pos.coords.accuracy,
     })
   }, [])
@@ -68,7 +70,7 @@ export function useClientLocation(): UseClientLocationResult {
     manualUntil.current = 0
     setIsManual(false)
     watchId.current = navigator.geolocation.watchPosition(handlePosition, handleError, {
-      enableHighAccuracy: true,
+      enableHighAccuracy: false,
       timeout: 15000,
       maximumAge: 0,
     })
