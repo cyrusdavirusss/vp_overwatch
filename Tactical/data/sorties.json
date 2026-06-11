@@ -23,15 +23,15 @@
     "type": "A139",
     "role": "rotary",
     "startTime": 1781145333373,
-    "lastSeen": 1781149811912,
+    "lastSeen": 1781151144962,
     "firstLat": -37.753738,
     "firstLon": 144.901019,
-    "latestLat": -37.933548,
-    "latestLon": 144.822888,
+    "latestLat": -37.822128,
+    "latestLon": 144.976463,
     "peakAlt": 6644,
-    "distKm": 120.46,
-    "lastLat": -37.933548,
-    "lastLon": 144.822888,
+    "distKm": 152.76,
+    "lastLat": -37.822128,
+    "lastLon": 144.976463,
     "status": "active"
   }
 }
