@@ -12,3 +12,8 @@ Tactical/android/build/
 Tactical/android/capacitor-android/build/
 Tactical/android/capacitor-cordova-android-plugins/build/
 Android/
+
+# runtime artifacts
+Tactical/data/tracker.log
+Tactical/data/tracker.pid
+Tactical/scripts/__pycache__/
