@@ -5,6 +5,12 @@ next-env.d.ts
 .env*.local
 Tactical/.env*.local
 Tactical/public/*.pmtiles
+
+# Tactical (Next.js app) build artifacts & deps
+Tactical/node_modules/
+Tactical/.next/
+Tactical/*.tsbuildinfo
+Tactical/next-env.d.ts
 Tactical/out/
 Tactical/android/.gradle/
 Tactical/android/app/build/
