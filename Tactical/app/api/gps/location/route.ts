@@ -4,6 +4,9 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const store = getStore()
-  const gps = store.getGPS()
-  return Response.json(gps)
+  // Prefer the live browser-pushed position; fall back to the GPS default
+  // so the endpoint always returns a usable point.
+  const userLocation = store.getUserLocation()
+  if (userLocation) return Response.json(userLocation)
+  return Response.json(store.getGPS())
 }

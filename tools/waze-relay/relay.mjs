@@ -1,22 +1,17 @@
 #!/usr/bin/env node
 /**
- * Victoria Police Tracker — Waze relay
+ * VP-Overwatch — Waze ground-units relay
  *
- * Runs on a residential internet connection (your laptop, a Raspberry Pi,
- * an old phone in Termux, etc). Polls Waze's live-map alert feed for the
- * Victoria bounding box every POLL_SECONDS and forwards alerts to the
- * tracker API, which renders them on the map.
+ * Polls Waze's live-map alert feed for Victoria and forwards alerts to the
+ * VP-Overwatch app (POST /api/waze/ingest). Must run from a residential ISP
+ * IP — Waze blocks datacenter ranges. No dependencies (Node 18+ only).
  *
- * Waze's edge firewall blocks all datacenter IP ranges, so this relay has
- * to run from a real ISP IP. There are no dependencies — Node 18+ only.
+ * Two run modes:
+ *   node relay.mjs           → loop forever, polling every POLL_SECONDS
+ *   node relay.mjs --once    → single poll then exit (use with a scheduler)
  *
- * Setup:
- *   1. Install Node 18 or newer.
- *   2. Copy .env.example to .env and fill in API_URL + RELAY_SECRET.
- *   3. Run: node relay.mjs
- *
- * The relay logs every tick. If you see HTTP 403 from Waze, your IP is
- * blocked (rare on home connections); try again from a different network.
+ * The Windows Scheduled Task installed by install-task.ps1 uses --once and
+ * fires every 10 minutes, so the app self-updates on that cadence.
  */
 
 import fs from "node:fs";
@@ -24,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ONCE = process.argv.includes("--once");
 
 /* ── Load .env (no dotenv dependency) ──────────────────────────────────── */
 const envFile = path.join(__dirname, ".env");
@@ -44,29 +40,28 @@ if (fs.existsSync(envFile)) {
 
 const API_URL = (process.env.API_URL || "").replace(/\/+$/, "");
 const RELAY_SECRET = process.env.RELAY_SECRET || "";
-const POLL_SECONDS = Math.max(30, Number(process.env.POLL_SECONDS) || 60);
+const POLL_SECONDS = Math.max(30, Number(process.env.POLL_SECONDS) || 600);
 
 if (!API_URL) {
-  console.error("Missing API_URL (e.g. https://your-app.replit.app)");
+  console.error("Missing API_URL (e.g. http://100.94.31.125:3100)");
   process.exit(1);
 }
 if (!RELAY_SECRET) {
-  console.error("Missing RELAY_SECRET — must match WAZE_RELAY_SECRET set in Replit Secrets");
+  console.error("Missing RELAY_SECRET — must match WAZE_RELAY_SECRET on the app side");
   process.exit(1);
 }
 
-/* ── Victoria bounding box (covers entire state, focus on Greater Melb) ── */
+/* ── Victoria bounding box, tiled (Waze caps results per request) ───────── */
 const BOUNDS = [
-  // [top, bottom, left, right] — split into tiles because Waze caps results.
-  { name: "Melbourne metro",      top: -37.55, bottom: -38.30, left: 144.50, right: 145.60 },
-  { name: "Geelong / Bellarine",  top: -37.95, bottom: -38.55, left: 143.85, right: 144.60 },
-  { name: "Ballarat / Bendigo",   top: -36.50, bottom: -37.95, left: 143.50, right: 144.80 },
-  { name: "Gippsland",            top: -37.30, bottom: -38.95, left: 145.50, right: 148.50 },
-  { name: "NE Victoria",          top: -35.90, bottom: -37.20, left: 145.00, right: 147.90 },
-  { name: "Wimmera / Mallee",     top: -34.10, bottom: -37.30, left: 140.95, right: 143.80 },
+  { name: "Melbourne metro",     top: -37.55, bottom: -38.30, left: 144.50, right: 145.60 },
+  { name: "Geelong / Bellarine", top: -37.95, bottom: -38.55, left: 143.85, right: 144.60 },
+  { name: "Ballarat / Bendigo",  top: -36.50, bottom: -37.95, left: 143.50, right: 144.80 },
+  { name: "Gippsland",           top: -37.30, bottom: -38.95, left: 145.50, right: 148.50 },
+  { name: "NE Victoria",         top: -35.90, bottom: -37.20, left: 145.00, right: 147.90 },
+  { name: "Wimmera / Mallee",    top: -34.10, bottom: -37.30, left: 140.95, right: 143.80 },
 ];
 
-const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 async function fetchTile(b) {
   const url = `https://www.waze.com/live-map/api/georss?top=${b.top}&bottom=${b.bottom}&left=${b.left}&right=${b.right}&env=row&types=alerts`;
@@ -95,13 +90,10 @@ async function fetchTile(b) {
 async function pushAlerts(alerts) {
   const r = await fetch(`${API_URL}/api/waze/ingest`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-relay-secret": RELAY_SECRET,
-    },
+    headers: { "Content-Type": "application/json", "x-relay-secret": RELAY_SECRET },
     body: JSON.stringify({ alerts }),
   });
-  if (!r.ok) throw new Error(`Tracker ingest: HTTP ${r.status} ${await r.text().catch(() => "")}`);
+  if (!r.ok) throw new Error(`Ingest: HTTP ${r.status} ${await r.text().catch(() => "")}`);
   return r.json();
 }
 
@@ -120,18 +112,25 @@ async function tick() {
   }
   const unique = [...merged.values()];
   if (unique.length === 0) {
-    console.log(`[tick] no alerts (Waze returned 0)`);
+    console.log(`[${new Date().toISOString()}] no alerts (Waze returned 0)`);
     return;
   }
   try {
     const result = await pushAlerts(unique);
     const ms = Date.now() - startedAt;
-    console.log(`[tick] ${result.ingested}/${unique.length} ingested (raw ${total}) in ${ms}ms`);
+    console.log(`[${new Date().toISOString()}] ${result.ingested}/${unique.length} ingested (raw ${total}) in ${ms}ms`);
   } catch (e) {
     console.error(`[push] ${e.message}`);
+    if (ONCE) process.exitCode = 1;
   }
 }
 
-console.log(`Waze relay starting → ${API_URL}, every ${POLL_SECONDS}s`);
-tick();
-setInterval(tick, POLL_SECONDS * 1000);
+if (ONCE) {
+  console.log(`Waze relay (one-shot) → ${API_URL}`);
+  await tick();
+  process.exit(process.exitCode || 0);
+} else {
+  console.log(`Waze relay (loop) → ${API_URL}, every ${POLL_SECONDS}s`);
+  await tick();
+  setInterval(tick, POLL_SECONDS * 1000);
+}

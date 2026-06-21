@@ -7,13 +7,16 @@ const RELAY_SECRET = process.env.WAZE_RELAY_SECRET || 'dev-secret'
 export async function POST(request: Request) {
   // Verify relay secret
   const secret = request.headers.get('x-relay-secret')
+  const src = request.headers.get('x-forwarded-for') || 'lan'
   if (secret !== RELAY_SECRET) {
+    console.warn(`[ingest] 401 unauthorized from=${src}`)
     return Response.json({ error: 'unauthorized' }, { status: 401 })
   }
 
   try {
     const body = await request.json()
     const alerts: any[] = body?.alerts ?? []
+    console.log(`[ingest] ${alerts.length} alerts from=${src}`)
 
     if (!Array.isArray(alerts) || alerts.length === 0) {
       return Response.json({ ingested: 0 })

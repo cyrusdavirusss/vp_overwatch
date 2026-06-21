@@ -40,12 +40,10 @@ PID_FILE = os.path.join(DATA_DIR, 'tracker.pid')
 
 # ── Known VicPol/AFP aircraft (hex -> metadata) ─────────────────────────────────
 KNOWN_AIRCRAFT = {
-    '7C7F8C': {'callsign': 'POL61', 'registration': 'VH-PVH', 'type': 'AW139', 'role': 'rotary'},
-    '7C2B22': {'callsign': 'POL64', 'registration': 'VH-PVI', 'type': 'EC135', 'role': 'rotary'},
-    '7C1F40': {'callsign': 'POL67', 'registration': 'VH-PVK', 'type': 'AW139', 'role': 'rotary'},
-    '7C4EF4': {'callsign': 'POL31', 'registration': 'VH-PVQ', 'type': 'A139', 'role': 'rotary'},
-    '7C4EF5': {'callsign': 'POL32', 'registration': 'VH-PVR', 'type': 'A139', 'role': 'rotary'},
-    '7CF102': {'callsign': 'AFP21', 'registration': 'VH-AFC', 'type': 'C208', 'role': 'fixed'},
+    '7C4EF2': {'callsign': 'POL30', 'registration': 'VH-PVO', 'type': 'AW139', 'role': 'rotary'},
+    '7C4EF4': {'callsign': 'POL31', 'registration': 'VH-PVQ', 'type': 'AW139', 'role': 'rotary'},
+    '7C4EF5': {'callsign': 'POL32', 'registration': 'VH-PVR', 'type': 'AW139', 'role': 'rotary'},
+    '7C4EE8': {'callsign': 'POL35', 'registration': 'VH-PVE', 'type': 'B350', 'role': 'fixed'},
 }
 
 # ── Polling config ──────────────────────────────────────────────────────────────
@@ -54,6 +52,7 @@ DEFAULT_LON = 144.96
 RADIUS_KM = 100
 TIMEOUT_SEC = 20
 ADSB_URL = f'https://api.adsb.lol/v2/point/{DEFAULT_LAT}/{DEFAULT_LON}/{RADIUS_KM}'
+HEX_URL = 'https://api.adsb.lol/v2/hex/{}'
 
 SORTIE_TIMEOUT_SEC = 900       # 15 min absence ends a sortie
 BACKOFF_START_SEC = 60
@@ -140,6 +139,20 @@ def fetch_adsb() -> list[dict]:
             raise RateLimited('HTTP 429 rate limited')
         raise
     return data.get('ac', []) or []
+
+
+def fetch_hex(hex_code: str) -> dict | None:
+    """Directly query a single hex. Returns the aircraft dict or None."""
+    req = Request(HEX_URL.format(hex_code.lower()),
+                  headers={'Accept': 'application/json',
+                           'User-Agent': 'vicpol-tracker/1.0'})
+    try:
+        with urlopen(req, timeout=TIMEOUT_SEC) as resp:
+            data = json.loads(resp.read().decode())
+            ac = data.get('ac', [])
+            return ac[0] if ac else None
+    except (HTTPError, URLError, OSError, ValueError):
+        return None
 
 
 # ── Core tick ──────────────────────────────────────────────────────────────────
@@ -242,6 +255,76 @@ def process_tick(verbose: bool = False):
         dur_min = round((now_ts - s['startTime']) / 60000)
         log(f'SEEN {callsign}/{registration} @ {alt}ft {gs}kt hdg={heading} '
             f'vr={vr:+d}fpm — {dur_min}m flown, {s["distKm"]}km')
+
+    # ── Secondary pass: hex API lookup for known hexes missed by point query ──
+    for hex_code, known in KNOWN_AIRCRAFT.items():
+        if hex_code in found:
+            continue
+        ac = fetch_hex(hex_code)
+        if ac is None:
+            continue
+
+        found.add(hex_code)
+        callsign = (ac.get('flight') or '').strip() or known['callsign']
+        alt_raw = float(ac.get('alt_geom', 0) or 0)
+        if alt_raw <= 0:
+            alt_raw = float(ac.get('alt_baro', 0) or 0)
+        alt = round(alt_raw * M_TO_FEET)
+        gs = round(float(ac.get('gs', 0) or 0) * MS_TO_KNOTS)
+        heading = round(float(ac.get('track', 0) or 0))
+        registration = ac.get('r') or known['registration']
+        vr = round(float(ac.get('baro_rate', 0) or 0) * MS_TO_FPM)
+
+        append_history({
+            'ts': now_ts,
+            'hex': hex_code,
+            'callsign': callsign,
+            'lat': None,
+            'lon': None,
+            'alt': alt,
+            'gs': gs,
+            'heading': heading,
+            'vr': vr,
+            'registration': registration,
+            'type': known['type'],
+            'source': 'adsb.lol',
+        })
+
+        existing = sorties.get(hex_code)
+        if existing is None or existing.get('status') == 'ended':
+            sorties[hex_code] = {
+                'callsign': callsign,
+                'registration': registration,
+                'type': known['type'],
+                'role': known['role'],
+                'startTime': now_ts,
+                'lastSeen': now_ts,
+                'firstLat': None,
+                'firstLon': None,
+                'latestLat': None,
+                'latestLon': None,
+                'peakAlt': alt,
+                'distKm': 0.0,
+                'lastLat': None,
+                'lastLon': None,
+                'status': 'active',
+            }
+            log(f'SORTIE_START {callsign} (no_fix) — now={now_utc}')
+        else:
+            s = existing
+            s['lastSeen'] = now_ts
+            s['callsign'] = callsign
+            s['registration'] = registration
+            if alt > s.get('peakAlt', 0):
+                s['peakAlt'] = alt
+            s.pop('endTime', None)
+            s['firstLat'] = s.get('firstLat')  # preserve None if never had one
+        mutated = True
+
+        s = sorties[hex_code]
+        dur_min = round((now_ts - s['startTime']) / 60000)
+        log(f'SEEN {callsign}/{registration} @ {alt}ft {gs}kt hdg={heading} '
+            f'vr={vr:+d}fpm (no_fix) — {dur_min}m flown')
 
     # End sorties for aircraft absent > 15 minutes.
     for hex_code, s in sorties.items():
