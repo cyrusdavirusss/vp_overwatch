@@ -8,6 +8,7 @@ interface FabClusterProps {
   onRecenter: () => void
   onSetLocation: () => void
   followUser?: boolean
+  onFitAll: () => void
 }
 
 export function FabCluster({
@@ -16,11 +17,15 @@ export function FabCluster({
   onRecenter,
   onSetLocation,
   followUser,
+  onFitAll,
 }: FabClusterProps) {
   return (
     <div className="absolute right-3 bottom-3 flex flex-col gap-2 z-10">
       <FabBtn onClick={onSetLocation} label="Set Location">
         <Icon name="pin" size={18} />
+      </FabBtn>
+      <FabBtn onClick={onFitAll} label="Fit All Aircraft">
+        <Icon name="maximize" size={18} />
       </FabBtn>
       <FabBtn onClick={onLayers} label="Layers">
         <Icon name="layers" size={18} />

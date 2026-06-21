@@ -19,6 +19,10 @@ Tactical/android/capacitor-android/build/
 Tactical/android/capacitor-cordova-android-plugins/build/
 Android/
 
+# web deployable synced from the Next.js standalone build (the tracked
+# platform release bundles in dist/android, dist/ios, dist/windows stay)
+dist/web/
+
 # runtime artifacts
 Tactical/data/tracker.log
 Tactical/data/tracker.pid

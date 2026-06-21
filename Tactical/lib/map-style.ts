@@ -5,9 +5,10 @@
 //   - Basemap: self-hosted Protomaps PMTiles, read through the pmtiles
 //     protocol registered once at the map root.
 //   - Style: start from the Protomaps "dark" Flavor, then override its
-//     Flavor colours so the basemap reads near-black with hairline roads.
-//     Signal blue / aviation amber / threat red are reserved for data
-//     overlays and never appear in the basemap.
+//     Flavor colours into a tactical RADAR look — a near-black ground with
+//     electric-cyan / signal-blue roads, labels and boundaries, echoing an
+//     ADS-B radar scope. The basemap reads monochrome cyan-on-black so the
+//     data overlays (aviation amber / threat red) still stand apart from it.
 //   - All external URLs come from NEXT_PUBLIC_* env vars; when the PMTiles
 //     URL is unset we fall back to the hosted Protomaps demo basemap so the
 //     app still renders in preview.
@@ -33,21 +34,31 @@ const FALLBACK_GLYPHS =
 const FALLBACK_SPRITE =
   'https://protomaps.github.io/basemaps-assets/sprites/v4/dark'
 
-// ── Ink palette (mirrors colors_and_type.css; style JSON can't read CSS vars) ──
-const INK = {
-  ink0: '#0A0B0D', // page base — water/casings sink to here
-  ink1: '#14161A',
-  ink2: '#1C1F24', // buildings
-  ink3: '#262A31',
-  border: '#2A2F37', // arterial hairlines
-  borderStrong: '#3A4049', // highways / boundaries
-  borderSubtle: '#1E2229', // locals
-  fg2: '#A6ADBB', // city labels
-  fg3: '#6B7280', // road / minor labels
-  label: '#5A6270', // ocean / muted labels (--map-label)
-  water: '#07090C', // --map-water, the darkest surface
-  land: '#11141A', // --map-land
-  natural: '#0F1318', // parks / wood / scrub — barely above land, no green
+// ── Radar palette ──────────────────────────────────────────────────────────
+// A monochrome cyan-on-black scope. The ground stays near-black; everything
+// drawn over it climbs a single electric-cyan ramp (dim → signal). Casings
+// sink to the page base so lit roads read as hairline radar traces.
+const RADAR = {
+  base: '#03070C', // page base — casings sink to here
+  ground: '#060C12', // earth / land — black scope, very slightly lifted
+  water: '#020509', // darkest surface
+  surface1: '#0A1B26', // glacier / sand / fill surfaces
+  building: '#0C2230', // building fill — faintly visible
+  fill2: '#12303F', // runway / raised fills
+  natural: '#06121A', // parks / wood / scrub — near-black, no green
+
+  // Cyan road ramp (dim locals → bright highways). Tuned bright so traces
+  // read like the radar-scope reference: glowing electric cyan on black,
+  // visible even on a phone in daylight (the previous ramp was near-invisible).
+  traceDim: '#1E6E8C', // locals / service
+  trace: '#2E9CBE', // minor / arterial hairline
+  traceLit: '#46C2E6', // highways / boundaries
+  signal: '#5FE0FF', // major arterials — brightest road trace (scope sweep)
+
+  // Labels — cyan foreground tokens, halos sink to black.
+  labelBright: '#9DF2FF', // city labels
+  label: '#5AC8E5', // road / minor labels
+  labelMuted: '#3A8AA5', // ocean / state / muted labels
 } as const
 
 let protocolRegistered = false
@@ -64,121 +75,121 @@ export function registerPmtilesProtocol(): void {
 }
 
 /**
- * Derive the VP-Overwatch ink Flavor from the Protomaps DARK flavor by
- * overriding every visible colour with a near-black ink token. Roads are
- * desaturated greys (hairline read), labels are muted foreground tokens,
- * and no saturated colour survives into the basemap.
+ * Derive the VP-Overwatch radar Flavor from the Protomaps DARK flavor by
+ * overriding every visible colour onto a cyan-on-black ramp. The ground is
+ * near-black, roads are graded electric-cyan traces, labels are cyan, and no
+ * other hue survives into the basemap.
  */
-function inkFlavor(): Flavor {
+function radarFlavor(): Flavor {
   return {
     ...DARK,
 
-    background: INK.ink0,
-    earth: INK.land,
-    water: INK.water,
+    background: RADAR.base,
+    earth: RADAR.ground,
+    water: RADAR.water,
 
     // Natural cover — kept near-black, no green/saturation.
-    park_a: INK.natural,
-    park_b: INK.natural,
-    wood_a: INK.natural,
-    wood_b: INK.natural,
-    scrub_a: INK.natural,
-    scrub_b: INK.natural,
-    glacier: INK.ink1,
-    sand: INK.ink1,
-    beach: INK.ink1,
-    pedestrian: INK.ink1,
-    zoo: INK.ink1,
-    industrial: INK.ink1,
-    hospital: INK.ink1,
-    school: INK.ink1,
-    military: INK.ink1,
-    aerodrome: '#0E1217',
-    runway: INK.ink3,
-    pier: INK.ink2,
+    park_a: RADAR.natural,
+    park_b: RADAR.natural,
+    wood_a: RADAR.natural,
+    wood_b: RADAR.natural,
+    scrub_a: RADAR.natural,
+    scrub_b: RADAR.natural,
+    glacier: RADAR.surface1,
+    sand: RADAR.surface1,
+    beach: RADAR.surface1,
+    pedestrian: RADAR.surface1,
+    zoo: RADAR.surface1,
+    industrial: RADAR.surface1,
+    hospital: RADAR.surface1,
+    school: RADAR.surface1,
+    military: RADAR.surface1,
+    aerodrome: '#08222E',
+    runway: RADAR.fill2,
+    pier: RADAR.building,
 
-    buildings: INK.ink2,
+    buildings: RADAR.building,
 
-    // Roads — desaturated greys, casings sink to the page base for a hairline.
-    other: INK.borderSubtle,
-    minor_service_casing: INK.ink0,
-    minor_service: INK.borderSubtle,
-    minor_casing: INK.ink0,
-    minor_a: INK.border,
-    minor_b: INK.borderSubtle,
-    link_casing: INK.ink0,
-    link: INK.border,
-    major_casing_early: INK.ink0,
-    major_casing_late: INK.ink0,
-    major: '#343A44',
-    highway_casing_early: INK.ink0,
-    highway_casing_late: INK.ink0,
-    highway: INK.borderStrong,
+    // Roads — cyan traces, casings sink to the page base for a hairline glow.
+    other: RADAR.traceDim,
+    minor_service_casing: RADAR.base,
+    minor_service: RADAR.traceDim,
+    minor_casing: RADAR.base,
+    minor_a: RADAR.trace,
+    minor_b: RADAR.traceDim,
+    link_casing: RADAR.base,
+    link: RADAR.trace,
+    major_casing_early: RADAR.base,
+    major_casing_late: RADAR.base,
+    major: RADAR.signal,
+    highway_casing_early: RADAR.base,
+    highway_casing_late: RADAR.base,
+    highway: RADAR.traceLit,
 
-    // Tunnels — dimmer than surface roads.
-    tunnel_other_casing: INK.ink0,
-    tunnel_minor_casing: INK.ink0,
-    tunnel_link_casing: INK.ink0,
-    tunnel_major_casing: INK.ink0,
-    tunnel_highway_casing: INK.ink0,
-    tunnel_other: '#181C22',
-    tunnel_minor: '#181C22',
-    tunnel_link: '#1B1F26',
-    tunnel_major: '#1B1F26',
-    tunnel_highway: '#1F242B',
+    // Tunnels — dimmer than surface traces.
+    tunnel_other_casing: RADAR.base,
+    tunnel_minor_casing: RADAR.base,
+    tunnel_link_casing: RADAR.base,
+    tunnel_major_casing: RADAR.base,
+    tunnel_highway_casing: RADAR.base,
+    tunnel_other: '#0A2A38',
+    tunnel_minor: '#0A2A38',
+    tunnel_link: '#0C3242',
+    tunnel_major: '#0C3242',
+    tunnel_highway: '#103E52',
 
     // Bridges — match their surface-road counterparts.
-    bridges_other_casing: INK.ink0,
-    bridges_minor_casing: INK.ink0,
-    bridges_link_casing: INK.ink0,
-    bridges_major_casing: INK.ink0,
-    bridges_highway_casing: INK.ink0,
-    bridges_other: INK.borderSubtle,
-    bridges_minor: INK.border,
-    bridges_link: INK.border,
-    bridges_major: '#343A44',
-    bridges_highway: INK.borderStrong,
+    bridges_other_casing: RADAR.base,
+    bridges_minor_casing: RADAR.base,
+    bridges_link_casing: RADAR.base,
+    bridges_major_casing: RADAR.base,
+    bridges_highway_casing: RADAR.base,
+    bridges_other: RADAR.traceDim,
+    bridges_minor: RADAR.trace,
+    bridges_link: RADAR.trace,
+    bridges_major: RADAR.signal,
+    bridges_highway: RADAR.traceLit,
 
-    railway: INK.border,
-    boundaries: INK.borderStrong,
+    railway: RADAR.trace,
+    boundaries: RADAR.traceLit,
 
-    // Labels — muted foreground tokens, halos sink to the page base.
-    roads_label_minor: INK.fg3,
-    roads_label_minor_halo: INK.ink0,
-    roads_label_major: INK.fg3,
-    roads_label_major_halo: INK.ink0,
-    ocean_label: INK.label,
-    subplace_label: INK.fg3,
-    subplace_label_halo: INK.ink0,
-    city_label: INK.fg2,
-    city_label_halo: INK.ink0,
-    state_label: INK.label,
-    state_label_halo: INK.ink0,
-    country_label: '#7A828F',
-    address_label: INK.fg3,
-    address_label_halo: INK.ink0,
+    // Labels — cyan foreground tokens, halos sink to the page base.
+    roads_label_minor: RADAR.label,
+    roads_label_minor_halo: RADAR.base,
+    roads_label_major: RADAR.label,
+    roads_label_major_halo: RADAR.base,
+    ocean_label: RADAR.labelMuted,
+    subplace_label: RADAR.label,
+    subplace_label_halo: RADAR.base,
+    city_label: RADAR.labelBright,
+    city_label_halo: RADAR.base,
+    state_label: RADAR.labelMuted,
+    state_label_halo: RADAR.base,
+    country_label: '#4FB3CE',
+    address_label: RADAR.label,
+    address_label_halo: RADAR.base,
 
-    // POI markers — neutralised to a single muted grey, never semantic colour.
+    // POI markers — neutralised to a single muted cyan, never semantic colour.
     pois: {
-      blue: INK.label,
-      green: INK.label,
-      lapis: INK.label,
-      pink: INK.label,
-      red: INK.label,
-      slategray: INK.label,
-      tangerine: INK.label,
-      turquoise: INK.label,
+      blue: RADAR.labelMuted,
+      green: RADAR.labelMuted,
+      lapis: RADAR.labelMuted,
+      pink: RADAR.labelMuted,
+      red: RADAR.labelMuted,
+      slategray: RADAR.labelMuted,
+      tangerine: RADAR.labelMuted,
+      turquoise: RADAR.labelMuted,
     },
 
     // Landcover raster tint — collapse to near-black so nothing reads coloured.
     landcover: {
-      barren: INK.natural,
-      farmland: INK.natural,
-      forest: INK.natural,
-      glacier: INK.ink1,
-      grassland: INK.natural,
-      scrub: INK.natural,
-      urban_area: INK.land,
+      barren: RADAR.natural,
+      farmland: RADAR.natural,
+      forest: RADAR.natural,
+      glacier: RADAR.surface1,
+      grassland: RADAR.natural,
+      scrub: RADAR.natural,
+      urban_area: RADAR.ground,
     },
   }
 }
@@ -207,6 +218,6 @@ export function buildMapStyle(): StyleSpecification {
           '<a href="https://protomaps.com">Protomaps</a> © <a href="https://openstreetmap.org">OpenStreetMap</a>',
       },
     },
-    layers: layers(SOURCE, inkFlavor(), { lang: 'en' }),
+    layers: layers(SOURCE, radarFlavor(), { lang: 'en' }),
   }
 }

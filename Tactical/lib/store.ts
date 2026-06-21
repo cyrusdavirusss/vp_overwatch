@@ -1,11 +1,132 @@
 import https from 'https'
+import fs from 'fs'
+import path from 'path'
 
 /**
- * In-memory data store for VP-Overwatch
+ * Persistent data store for VP-Overwatch
  *
  * Singleton stored on globalThis — survives Next.js hot-reloads so all
- * API routes share the same in-memory state. No database dependency.
+ * API routes share the same in-memory state. Periodically snapshots to
+ * disk so data (sortie history, aircraft state) survives server restarts.
+ * No database dependency.
  */
+
+// ── Disk snapshot path ────────────────────────────────────────────────────
+const SNAPSHOT_DIR = path.join(process.env.HOME || '/tmp', '.vp-overwatch')
+const SNAPSHOT_PATH = path.join(SNAPSHOT_DIR, 'store.json')
+const WATCHDOG_PATH = path.join(SNAPSHOT_DIR, 'last-ingest.txt')
+let lastSave = 0
+const SAVE_THROTTLE_MS = 5_000
+const LAST_INGEST_TS_PATH = WATCHDOG_PATH
+
+/**
+ * Throttled save of essential state to disk so data survives restarts.
+ * Saves: sortieHistory, relay state, aircraft startTime/isActive (for
+ * sortie continuity), and reports (Waze alerts).
+ */
+function saveToDisk(): void {
+  const now = Date.now()
+  if (now - lastSave < SAVE_THROTTLE_MS) return
+  lastSave = now
+  const s = getState()
+  const snapshot = {
+    ts: now,
+    sortieHistory: s.sortieHistory,
+    relay: { lastIngested: s.relay.lastIngested, lastRaw: s.relay.lastRaw },
+    aircraftState: [...s.aircraftMap.entries()].map(([hex, ac]) => ({
+      hex, startTime: ac.startTime, isActive: ac.isActive,
+      callsign: ac.callsign, latitude: ac.latitude, longitude: ac.longitude,
+      altitude: ac.altitude, heading: ac.heading, speed: ac.speed,
+      lastSeen: ac.lastSeen, track: ac.track.slice(-100),
+    })),
+    reports: [...s.reportsMap.entries()].map(([uuid, r]) => ({ uuid, ...r })),
+  }
+  try {
+    if (!fs.existsSync(SNAPSHOT_DIR)) fs.mkdirSync(SNAPSHOT_DIR, { recursive: true })
+    fs.writeFileSync(SNAPSHOT_PATH, JSON.stringify(snapshot), 'utf-8')
+  } catch (e: any) {
+    console.error('[store] save failed:', e.message)
+  }
+}
+
+/**
+ * Load disk snapshot into a fresh store. Called once on module init.
+ * Restores sortie history, aircraft continuity, and unexpired reports.
+ */
+function loadFromDisk(): void {
+  try {
+    if (!fs.existsSync(SNAPSHOT_PATH)) return
+    const raw = fs.readFileSync(SNAPSHOT_PATH, 'utf-8')
+    const snap = JSON.parse(raw)
+    const s = getState()
+    const now = Date.now()
+
+    // Restore sortie history
+    if (Array.isArray(snap.sortieHistory)) {
+      s.sortieHistory = snap.sortieHistory
+      console.log(`[store] loaded ${s.sortieHistory.length} sortie entries`)
+    }
+
+    // Restore aircraft state (startTime, tracks) so polling doesn't reset
+    if (Array.isArray(snap.aircraftState)) {
+      let restored = 0
+      for (const ac of snap.aircraftState) {
+        const existing = s.aircraftMap.get(ac.hex)
+        if (existing) {
+          existing.startTime = ac.startTime || existing.startTime
+          existing.callsign = ac.callsign || existing.callsign
+          existing.track = (ac.track || []).slice(-500)
+          // Mark as last-seen so we don't immediately create a new sortie
+          existing.lastSeen = now
+          restored++
+        }
+      }
+      console.log(`[store] restored ${restored} aircraft states`)
+    }
+
+    // Restore relay ingest counters
+    if (snap.relay) {
+      s.relay.lastIngested = snap.relay.lastIngested ?? 0
+      s.relay.lastRaw = snap.relay.lastRaw ?? 0
+    }
+
+    // Restore reports that aren't stale yet
+    if (Array.isArray(snap.reports)) {
+      let restored = 0
+      for (const r of snap.reports) {
+        if (r.uuid && r.reportedAgo != null && r.reportedAgo < 7200) {
+          s.reportsMap.set(r.uuid, r)
+          restored++
+        }
+      }
+      console.log(`[store] restored ${restored} reports`)
+    }
+  } catch (e: any) {
+    console.error('[store] load failed:', e.message)
+  }
+}
+
+/**
+ * Write a watchdog timestamp so external monitors (cron) can detect when
+ * the Waze scraper has stopped sending data.
+ */
+function touchWatchdog(): void {
+  try {
+    if (!fs.existsSync(SNAPSHOT_DIR)) fs.mkdirSync(SNAPSHOT_DIR, { recursive: true })
+    fs.writeFileSync(WATCHDOG_PATH, String(Date.now()), 'utf-8')
+  } catch { /* best-effort */ }
+}
+
+/**
+ * Returns seconds since the last ingest watchdog write. NaN if never written.
+ */
+function secondsSinceLastIngest(): number {
+  try {
+    const raw = fs.readFileSync(WATCHDOG_PATH, 'utf-8').trim()
+    const ts = parseInt(raw, 10)
+    return isNaN(ts) ? NaN : Math.round((Date.now() - ts) / 1000)
+  } catch { return NaN }
+}
 
 // ── Types matching what the frontend expects ──────────────────────────────
 
@@ -70,6 +191,15 @@ export interface User {
   accuracy: number
 }
 
+/** Live position pushed by the browser client every ~10s. */
+export interface UserLocation {
+  lat: number
+  lng: number
+  accuracy: number
+  heading: number
+  updatedAt: number
+}
+
 export interface Relay {
   connected: boolean
   lastTickAgo: number
@@ -131,6 +261,7 @@ interface StoreState {
   aircraftMap: Map<string, Aircraft>
   reportsMap: Map<string, Report>
   userGPS: User
+  userLocation: UserLocation | null
   relay: Relay
   lastOpenSkyPoll: number
   sortieHistory: SortieEntry[]
@@ -146,6 +277,7 @@ function getState(): StoreState {
       aircraftMap: new Map<string, Aircraft>(),
       reportsMap: new Map<string, Report>(),
       userGPS: { lat: -37.8136, lng: 144.9631, hdg: 0, accuracy: 25 },
+      userLocation: null,
       relay: {
         connected: false,
         lastTickAgo: 0,
@@ -172,10 +304,26 @@ const KNOWN_AIRCRAFT: Record<string, { registration: string; role: Aircraft['rol
   '7C7F8C': { registration: 'VH-PVH', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
   '7C2B22': { registration: 'VH-PVI', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'EC135', typeLabel: 'Eurocopter EC135', fuelEnduranceMinutes: 210 },
   '7C1F40': { registration: 'VH-PVK', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
-  '7C4EF4': { registration: 'VH-PVQ', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
-  '7C4EF5': { registration: 'VH-PVR', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
+  '7C4EF2': { registration: 'VH-PVO', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
+  '7C4EF4': { registration: 'VH-PVQ', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
+  '7C4EF5': { registration: 'VH-PVR', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
+  '7C4EE8': { registration: 'VH-PVE', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
   '7CF102': { registration: 'VH-AFC', role: 'fixedwing', operator: 'Australian Federal Police', operatorShort: 'AFP', type: 'C208', typeLabel: 'Cessna 208 Caravan', fuelEnduranceMinutes: 360 },
 }
+
+// ── VicPol police aircraft polled on a dedicated fast (3s) loop ───────────
+// These 4 hexes are queried directly by ICAO hex (batch) every 3 seconds so
+// active police helicopters update near-real-time, independent of the slower
+// area-wide ADS-B poll. Merged results are forced to role "rotary" /
+// operator "Victoria Police".
+const POLICE_HEXES = ['7C4EF2', '7C4EF4', '7C4EF5', '7C4EE8']
+const POLICE_CALLSIGNS: Record<string, string> = {
+  '7C4EF2': 'POL30',
+  '7C4EF4': 'POL31',
+  '7C4EF5': 'POL32',
+  '7C4EE8': 'POL35',
+}
+const FAST_POLICE_INTERVAL = 3_000
 
 // ── Pre-populate known airframes on startup ─────────────────────────────
 // Silent (not seen on ADSB) aircraft stay in the map with isActive=false —
@@ -213,6 +361,23 @@ function initKnownAircraft(): void {
   }
 }
 initKnownAircraft()
+loadFromDisk()
+
+/**
+ * Compute rolling average flight duration from completed sorties.
+ * Uses the last 10 landed sorties for this hex. Falls back to the
+ * hardcoded role default if no sortie history exists yet.
+ */
+function computeHistoricalAverage(hex: string, roleDefault: number): number {
+  const s = getState()
+  const completed = s.sortieHistory
+    .filter((e) => e.hex === hex && e.status === 'landed' && e.durationSeconds > 60)
+    .slice(-10)
+  if (completed.length === 0) return roleDefault
+  return Math.round(
+    completed.reduce((sum, e) => sum + e.durationSeconds, 0) / completed.length
+  )
+}
 
 // ── ADSB.lol Polling ────────────────────────────────────────────────────
 
@@ -292,7 +457,7 @@ async function pollOpenSky(): Promise<void> {
         vs: Math.round(Number(verticalRate) * 196.85),
       }
 
-      const historicalAvg = known?.role === 'rotary' ? 42 * 60 : 95 * 60
+      const historicalAvg = computeHistoricalAverage(hex, known?.role === 'rotary' ? 42 * 60 : 95 * 60)
 
       const fuelEndurance = known?.fuelEnduranceMinutes ?? 270
       const fuelPct = Math.max(0, Math.min(100, Math.round((1 - timeAirborne / (fuelEndurance * 60)) * 100)))
@@ -342,6 +507,7 @@ async function pollOpenSky(): Promise<void> {
         }
         s.sortieHistory.push(entry)
         s.sortieMaxAlt.set(hex, alt)
+        saveToDisk()
       } else if (wasActiveHex === true) {
         // Update max altitude for ongoing sortie
         const currentMax = s.sortieMaxAlt.get(hex) ?? 0
@@ -374,6 +540,7 @@ async function pollOpenSky(): Promise<void> {
             entry.durationSeconds = Math.round((now - entry.startTime) / 1000)
             entry.maxAltitude = s.sortieMaxAlt.get(hex) ?? ac.altitude
             entry.status = 'landed'
+            saveToDisk()
           }
         }
       }
@@ -391,6 +558,120 @@ async function pollOpenSky(): Promise<void> {
   }
 }
 
+// ── Fast police loop (every 3s, batch hex query) ─────────────────────────
+
+// Try the ADSB.lol hex endpoints in order until one returns a usable payload.
+// Different deployments expose v3 (adsb.lol) or v2 (api.adsb.lol); we accept
+// whichever responds with an { ac: [...] } shape.
+async function fetchPoliceAdsb(): Promise<any[]> {
+  const hexes = POLICE_HEXES.map((h) => h.toLowerCase()).join(',')
+  const candidates = [
+    `https://adsb.lol/v3/ac/hex/${hexes}`,
+    `https://api.adsb.lol/v2/icao/${hexes}`,
+    `https://api.adsb.lol/v2/hex/${hexes}`,
+  ]
+  for (const url of candidates) {
+    try {
+      const data = await fetchJsonHttps(url, 5_000)
+      if (Array.isArray(data?.ac)) return data.ac
+    } catch {
+      // try next candidate
+    }
+  }
+  return []
+}
+
+async function pollFastPolice(): Promise<void> {
+  try {
+    const s = getState()
+    const aircraft = await fetchPoliceAdsb()
+    const now = Date.now()
+
+    for (const ac of aircraft) {
+      const hex = (ac.hex as string)?.toUpperCase()
+      if (!hex || !POLICE_HEXES.includes(hex)) continue
+
+      const latitude = ac.lat
+      const longitude = ac.lon
+      if (latitude == null || longitude == null) continue
+
+      const altRaw = (ac.alt_geom != null && Number(ac.alt_geom) > 0)
+        ? Number(ac.alt_geom)
+        : (ac.alt_baro != null ? Number(ac.alt_baro) : 0)
+      const alt = Math.round(altRaw * 3.28084)
+      const speed = Math.round(Number(ac.gs ?? 0) * 1.94384)
+      const heading = Math.round(ac.track ?? 0)
+      const verticalRate = ac.baro_rate ?? ac.geom_rate ?? 0
+      const callsign = ac.flight?.trim() || POLICE_CALLSIGNS[hex] || ''
+
+      const known = KNOWN_AIRCRAFT[hex]
+      const existing = s.aircraftMap.get(hex)
+      const startTime = (existing && existing.startTime > 0) ? existing.startTime : now
+      const timeAirborne = Math.round((now - startTime) / 1000)
+
+      const tp: TrackPoint = {
+        t: -timeAirborne,
+        lat: latitude,
+        lng: longitude,
+        alt,
+        hdg: heading,
+        spd: speed,
+        vs: Math.round(Number(verticalRate) * 196.85),
+      }
+
+      const fuelEndurance = known?.fuelEnduranceMinutes ?? 270
+      const fuelPct = Math.max(0, Math.min(100, Math.round((1 - timeAirborne / (fuelEndurance * 60)) * 100)))
+      const historicalAvg = computeHistoricalAverage(hex, 42 * 60)
+
+      // Avoid duplicating breadcrumb points when nothing moved between ticks.
+      const last = existing?.track[existing.track.length - 1]
+      const moved = !last || last.lat !== latitude || last.lng !== longitude
+      const track = existing
+        ? (moved ? [...existing.track, tp].slice(-500) : existing.track)
+        : [tp]
+
+      s.aircraftMap.set(hex, {
+        id: hex,
+        hex,
+        registration: ac.r || known?.registration || 'N/A',
+        callsign,
+        type: ac.t || known?.type || 'A139',
+        typeLabel: known?.typeLabel || ac.t || 'AgustaWestland AW139',
+        role: 'rotary',
+        operator: 'Victoria Police',
+        operatorShort: 'VICPOL',
+        startTime,
+        timeAirborneSeconds: timeAirborne,
+        historicalAverageSeconds: historicalAvg,
+        estimatedReturnSeconds: Math.max(0, historicalAvg - timeAirborne),
+        altitude: alt,
+        speed,
+        heading,
+        latitude,
+        longitude,
+        track,
+        isActive: true,
+        lastSeen: now,
+        fuelEnduranceMinutes: fuelEndurance,
+        fuelRemainingPercent: fuelPct,
+      })
+    }
+  } catch (err: any) {
+    console.warn(`[ADSB.lol fast-police] error: ${err.message}`)
+  }
+}
+
+function ensureFastPoliceLoop(): void {
+  const g = globalThis as any
+  if (g.__VP_FAST_POLICE_SET) return
+  g.__VP_FAST_POLICE_SET = true
+  // Kick off immediately, then poll the 4 police hexes every 3 seconds.
+  pollFastPolice()
+  setInterval(() => { pollFastPolice() }, FAST_POLICE_INTERVAL)
+}
+
+ensureFastPoliceLoop()
+
 // ── Internal relay ticker (only set up once per globalThis lifecycle) ─────
 
 function ensureTicker(): void {
@@ -402,6 +683,9 @@ function ensureTicker(): void {
     s.relay.lastTickAgo++
     if (s.relay.lastTickAgo > 300) s.relay.connected = false
   }, 1000)
+
+  // Periodic disk snapshot (every 30s) — catches any state we didn't save inline
+  setInterval(() => { saveToDisk() }, 30_000)
 }
 
 ensureTicker()
@@ -463,6 +747,8 @@ export function getStore() {
       }
 
       s.reportsMap.set(uuid, report)
+      saveToDisk()
+      touchWatchdog()
     },
 
     /** Delete stale Waze alerts older than 2 hours (7200s) */
@@ -486,9 +772,9 @@ export function getStore() {
       s.relay.connected = true
     },
 
-    /** Get relay status */
-    getRelay(): Relay {
-      return { ...s.relay }
+    /** Get relay status (includes watchdog seconds-since-last-ingest) */
+    getRelay(): Relay & { secondsSinceLastIngest: number } {
+      return { ...s.relay, secondsSinceLastIngest: secondsSinceLastIngest() || 9999 }
     },
 
     /** Set user GPS position */
@@ -499,6 +785,20 @@ export function getStore() {
     /** Get user GPS position */
     getGPS(): User {
       return { ...s.userGPS }
+    },
+
+    /**
+     * Store the live browser-reported position (pushed every ~10s). Also
+     * updates userGPS so the area-wide ADS-B poll re-centres on the user.
+     */
+    setUserLocation(lat: number, lng: number, accuracy: number = 25, heading: number = 0): void {
+      s.userLocation = { lat, lng, accuracy, heading, updatedAt: Date.now() }
+      s.userGPS = { lat, lng, hdg: heading, accuracy }
+    },
+
+    /** Get the most recent live browser position (null if never reported). */
+    getUserLocation(): UserLocation | null {
+      return s.userLocation ? { ...s.userLocation } : null
     },
   }
 }

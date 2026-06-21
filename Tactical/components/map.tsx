@@ -44,13 +44,15 @@ export interface VPMapProps {
   followMode?: boolean
   /** Fired when the user drags the map, so follow mode can be paused. */
   onUserPan?: () => void
+  /** Increment to trigger fit-all-aircraft bounds. */
+  fitAllTrigger?: number
 }
 
 // Motion: 400ms camera-focus duration with the design system's spring ease
 // (cubic-bezier(0.32,0.72,0,1) ≈ stiffness 260 / damping 28). Aircraft
 // positions interpolate over ~900ms so live polls never snap.
 const FOCUS_MS = 400
-const FOCUS_ZOOM = 14
+const FOCUS_ZOOM = 10
 const AIRCRAFT_TWEEN_MS = 900
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
@@ -100,6 +102,7 @@ function circlePolygon(
 interface AircraftMarkerEntry {
   marker: maplibregl.Marker
   rot: HTMLDivElement
+  callout: HTMLDivElement
   cur: [number, number]
   raf: number | null
 }
@@ -120,6 +123,7 @@ export function VPMap({
   onMapClick,
   followMode,
   onUserPan,
+  fitAllTrigger,
 }: VPMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -144,7 +148,7 @@ export function VPMap({
       container: containerRef.current,
       style: buildMapStyle(),
       center: [user.lng, user.lat],
-      zoom: 13,
+      zoom: 9,
       pitch: 0, // pitch/bearing enabled but default flat, north up
       bearing: 0,
       attributionControl: false,
@@ -160,6 +164,18 @@ export function VPMap({
 
     // User dragging the map pauses live-follow.
     map.on('dragstart', () => onUserPanRef.current?.())
+
+    // Ground-report callouts only render when zoomed in enough to read them
+    // without clutter. Class toggle on the container, CSS does the rest.
+    const REPORT_CALLOUT_MIN_ZOOM = 12
+    const syncCalloutZoom = () => {
+      containerRef.current?.classList.toggle(
+        'vp-callouts-tight',
+        map.getZoom() < REPORT_CALLOUT_MIN_ZOOM
+      )
+    }
+    map.on('zoom', syncCalloutZoom)
+    syncCalloutZoom()
 
     map.on('load', () => {
       // ── Data-overlay sources (updated imperatively below) ──────────────
@@ -283,6 +299,17 @@ export function VPMap({
     }
   }, [ready, focusTarget])
 
+  // ── Fit all aircraft into view ─────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map || fitAllTrigger === undefined || aircraft.length === 0) return
+    const coords = aircraft
+      .map((a) => [a.longitude, a.latitude] as [number, number])
+    if (coords.length === 0) return
+    const bounds = coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]))
+    map.fitBounds(bounds, { padding: 60, duration: 600, easing: springEase, essential: true })
+  }, [ready, fitAllTrigger, aircraft])
+
   // ── Pick-location cursor ───────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current
@@ -329,12 +356,25 @@ export function VPMap({
           rot.className = 'vp-ac-rot'
           rot.innerHTML = aircraftMarkerSVG(a.role, 36)
           el.appendChild(rot)
+          // Floating callout above the icon — callsign + live alt/spd.
+          // Lives outside the rotating wrapper so it never tilts with heading.
+          const callout = document.createElement('div')
+          callout.className = 'vp-ac-callout'
+          callout.innerHTML =
+            `<div class="vp-co-callsign"></div><div class="vp-co-data"></div><div class="vp-co-stem"></div>`
+          el.appendChild(callout)
           const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
             .setLngLat(target)
             .addTo(map)
-          entry = { marker, rot, cur: target, raf: null }
+          entry = { marker, rot, callout, cur: target, raf: null }
           aircraftMarkers.current.set(a.id, entry)
         }
+
+        // Callout content refreshes every data pass.
+        const cs = entry.callout.querySelector('.vp-co-callsign') as HTMLDivElement
+        const cd = entry.callout.querySelector('.vp-co-data') as HTMLDivElement
+        if (cs) cs.textContent = a.callsign || a.registration
+        if (cd) cd.textContent = `${pos.alt.toLocaleString()}ft · ${Math.round(pos.spd)}kts`
 
         entry.rot.style.transform = `rotate(${pos.hdg}deg)`
         ;(entry.marker.getElement() as HTMLDivElement).classList.toggle('selected', isSel)
@@ -462,7 +502,14 @@ export function VPMap({
         reportMarkers.current.set(r.id, marker)
       }
       const el = marker.getElement() as HTMLDivElement
-      el.innerHTML = reportMarkerSVG(r.kind, color, 26)
+      const ageMin = Math.max(0, Math.round((r.reportedAgo - scrubT) / 60))
+      const ageStr = ageMin < 1 ? '<1m' : ageMin < 60 ? `${ageMin}m` : '>1h'
+      el.innerHTML =
+        reportMarkerSVG(r.kind, color, 26) +
+        `<div class="vp-rp-callout${confirmed ? ' confirmed' : ''}">` +
+        `<span class="vp-co-kind">${r.kind.toUpperCase()}</span>` +
+        `<span class="vp-co-age">${ageStr}</span>` +
+        `<div class="vp-co-stem"></div></div>`
       el.classList.toggle('selected', isSel)
       el.onclick = () => onSelectReport(r.id)
       marker.setLngLat([r.lng, r.lat])
