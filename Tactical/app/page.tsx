@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { StatusStrip } from '@/components/status-strip'
+import { OnAirBar } from '@/components/onair-bar'
 import { TimeScrubber } from '@/components/time-scrubber'
 import { FabCluster } from '@/components/fab-cluster'
 import { BottomSheet } from '@/components/bottom-sheet'
@@ -68,6 +69,7 @@ export default function VPOverwatch() {
   const [showLocationSetter, setShowLocationSetter] = useState(false)
   const [picking, setPicking] = useState(false)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lng: number } | null>(null)
+  const [fitAllCounter, setFitAllCounter] = useState(0)
   const [relayTick, setRelayTick] = useState(liveData.relay.lastTickAgo)
   const [systemClock, setSystemClock] = useState(Date.now())
 
@@ -178,6 +180,10 @@ export default function VPOverwatch() {
     }
   }, [clientLocation, HOME_LAT, HOME_LNG])
 
+  const onFitAll = useCallback(() => {
+    setFitAllCounter((c) => c + 1)
+  }, [])
+
   const onManualSetLocation = useCallback((lat: number, lng: number) => {
     setShowLocationSetter(false)
     clientLocation.setManualLocation(lat, lng)
@@ -284,6 +290,15 @@ export default function VPOverwatch() {
           </div>
         </div>
 
+        {/* ON AIR bar — persistent airframe indicator, never filtered */}
+        <OnAirBar
+          aircraft={liveData.aircraft}
+          user={userPosition}
+          selectedAircraftId={selectedAircraftId}
+          onSelectAircraft={onSelectAircraft}
+          now={systemClock}
+        />
+
         {/* Main content area — map + right data panel */}
         <div className="flex-1 flex overflow-hidden">
           {/* Map area */}
@@ -309,6 +324,7 @@ export default function VPOverwatch() {
               onMapClick={picking ? onMapClickSetLocation : undefined}
               followMode={followUser}
               onUserPan={() => setFollowUser(false)}
+              fitAllTrigger={fitAllCounter}
             />
 
             <div className="absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded bg-ink-0/80 border border-border-subtle" style={{ backdropFilter: 'blur(8px)' }}>
@@ -325,6 +341,7 @@ export default function VPOverwatch() {
               onRecenter={onRecenter}
               onSetLocation={() => setShowLocationSetter(true)}
               followUser={followUser}
+              onFitAll={onFitAll}
             />
 
             {picking && (
@@ -405,8 +422,9 @@ export default function VPOverwatch() {
 
   // ── Mobile layout (original) ──────────────────────────────────────────
   const MOBILE_STRIP_H = 110
+  const MOBILE_ONAIR_H = 52
   const MOBILE_SCRUB_H = 96
-  const MAP_H = screenDims.h - MOBILE_STRIP_H - MOBILE_SCRUB_H
+  const MAP_H = screenDims.h - MOBILE_STRIP_H - MOBILE_ONAIR_H - MOBILE_SCRUB_H
 
   return (
     <div className="min-h-screen bg-ink-0 flex items-center justify-center">
@@ -426,9 +444,24 @@ export default function VPOverwatch() {
           silentCount={silentCount}
         />
 
+        {/* ON AIR bar — persistent airframe indicator, never filtered */}
+        <div
+          className="absolute left-0 right-0 z-10"
+          style={{ top: MOBILE_STRIP_H, height: MOBILE_ONAIR_H }}
+        >
+          <OnAirBar
+            aircraft={liveData.aircraft}
+            user={userPosition}
+            selectedAircraftId={selectedAircraftId}
+            onSelectAircraft={onSelectAircraft}
+            now={systemClock}
+            compact
+          />
+        </div>
+
         <div
           className="absolute left-0 right-0"
-          style={{ top: MOBILE_STRIP_H, height: MAP_H }}
+          style={{ top: MOBILE_STRIP_H + MOBILE_ONAIR_H, height: MAP_H }}
         >
           <LazyMap
             aircraft={filteredAircraft}
@@ -447,6 +480,7 @@ export default function VPOverwatch() {
             }}
             focusTarget={focusTarget}
             hasSilentAircraft={hasSilentAircraft}
+            fitAllTrigger={fitAllCounter}
           />
 
           <FabCluster
@@ -455,6 +489,7 @@ export default function VPOverwatch() {
             onRecenter={onRecenter}
             onSetLocation={() => setShowLocationSetter(true)}
             followUser={followUser}
+            onFitAll={onFitAll}
           />
 
           {showLocationSetter && (

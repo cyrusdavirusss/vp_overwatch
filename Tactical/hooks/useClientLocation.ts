@@ -36,24 +36,34 @@ const snapToGrid = (n: number) => Math.trunc(n * 10 ** GRID_DECIMALS) / 10 ** GR
  * - Every accepted fix is snapped to a ~110 m grid (GRID_DECIMALS), so the
  *   exact device position is never stored.
  * - A manual pin briefly (60s) suppresses live updates, then GPS resumes.
- * - Coordinates are never sent over the network or persisted.
+ * - The grid-snapped position is pushed to the server every 10s (POST
+ *   /api/gps/set) so the backend knows the user's neighbourhood-level
+ *   location; the exact device position is still never stored or sent.
  */
+const GPS_PUSH_INTERVAL = 10_000
+
 export function useClientLocation(): UseClientLocationResult {
   const [position, setPosition] = useState<ClientLocation | null>(null)
   const [permissionState, setPermissionState] = useState<PermissionState>('prompt')
   const [isManual, setIsManual] = useState(false)
   const watchId = useRef<number | null>(null)
   const manualUntil = useRef(0)
+  // Latest fix (incl. heading) held for the periodic server push.
+  const latestFix = useRef<{ lat: number; lng: number; accuracy: number; heading: number } | null>(null)
 
   const handlePosition = useCallback((pos: GeolocationPosition) => {
     setPermissionState('granted')
     if (Date.now() < manualUntil.current) return // honour a fresh manual pin
     setIsManual(false)
-    setPosition({
-      lat: snapToGrid(pos.coords.latitude),
-      lng: snapToGrid(pos.coords.longitude),
+    const lat = snapToGrid(pos.coords.latitude)
+    const lng = snapToGrid(pos.coords.longitude)
+    latestFix.current = {
+      lat,
+      lng,
       accuracy: pos.coords.accuracy,
-    })
+      heading: pos.coords.heading ?? 0,
+    }
+    setPosition({ lat, lng, accuracy: pos.coords.accuracy })
   }, [])
 
   const handleError = useCallback((err: GeolocationPositionError) => {
@@ -88,9 +98,27 @@ export function useClientLocation(): UseClientLocationResult {
     }
   }, [requestLocation])
 
+  // Push the latest known fix to the server every 10s so the backend knows
+  // roughly where the user is (used for centring the area-wide ADS-B poll).
+  useEffect(() => {
+    const push = () => {
+      const fix = latestFix.current
+      if (!fix) return
+      fetch('/api/gps/set', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fix),
+        keepalive: true,
+      }).catch(() => { /* best-effort; ignore network errors */ })
+    }
+    const id = setInterval(push, GPS_PUSH_INTERVAL)
+    return () => clearInterval(id)
+  }, [])
+
   const setManualLocation = useCallback((lat: number, lng: number) => {
     manualUntil.current = Date.now() + 60_000 // hold the manual point ~60s
     setIsManual(true)
+    latestFix.current = { lat, lng, accuracy: 1, heading: 0 }
     setPosition({ lat, lng, accuracy: 1 })
     setPermissionState('granted')
   }, [])

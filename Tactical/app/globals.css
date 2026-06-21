@@ -540,6 +540,107 @@ samp,
   transition: transform var(--dur-panel) var(--ease-out);
 }
 
+/* ── Floating callouts above map markers ────────────────────────────── */
+/* Aircraft: callsign + live alt/spd, always visible. Never rotates. */
+.vp-ac-callout {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink-2);
+  border: 1px solid var(--amber-lo);
+  border-radius: var(--r-sm, 6px);
+  padding: 3px 7px 4px;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.vp-ac-marker.selected .vp-ac-callout {
+  border-color: var(--amber);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 10px var(--amber-glow);
+}
+.vp-co-callsign {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--amber);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.vp-co-data {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--fg-2);
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.vp-co-stem {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1px;
+  height: 6px;
+  background: var(--amber-lo);
+}
+.vp-ac-marker.selected .vp-co-stem {
+  background: var(--amber);
+}
+
+/* Ground reports: kind + age, hidden when zoomed out to avoid clutter. */
+.vp-rp-callout {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  background: var(--ink-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 6px);
+  padding: 2px 6px 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+.vp-rp-callout.confirmed {
+  border-color: var(--red);
+}
+.vp-co-kind {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--fg-2);
+  line-height: 1.2;
+}
+.vp-rp-callout.confirmed .vp-co-kind {
+  color: var(--red);
+}
+.vp-co-age {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 500;
+  color: var(--fg-4);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.vp-rp-callout .vp-co-stem {
+  background: var(--border);
+  height: 5px;
+}
+.vp-rp-callout.confirmed .vp-co-stem {
+  background: var(--red);
+}
+.vp-callouts-tight .vp-rp-callout {
+  display: none;
+}
+
 /* Ground-report glyphs — self-contained chips, ring on select */
 .vp-rp-marker {
   width: 26px;

@@ -29,6 +29,7 @@ import {
   Sun,
   Moon,
   Plane,
+  Maximize2,
   LucideIcon,
 } from 'lucide-react'
 
@@ -87,6 +88,7 @@ const iconMap: Record<string, LucideIcon | typeof Helicopter> = {
   more: MoreHorizontal,
   sun: Sun,
   moon: Moon,
+  maximize: Maximize2,
 }
 
 interface IconProps {
