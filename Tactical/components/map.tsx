@@ -134,6 +134,9 @@ export function VPMap({
   useEffect(() => { onUserPanRef.current = onUserPan }, [onUserPan])
   const followModeRef = useRef(followMode)
   useEffect(() => { followModeRef.current = followMode }, [followMode])
+  // Guards the focus effect from issuing redundant camera moves for a target
+  // it has already centred on.
+  const lastFocusRef = useRef<string | null>(null)
 
   const userMarker = useRef<maplibregl.Marker | null>(null)
   const aircraftMarkers = useRef<Map<string, AircraftMarkerEntry>>(new Map())
@@ -162,8 +165,12 @@ export function VPMap({
       onMapClickRef.current?.(e.lngLat.lat, e.lngLat.lng)
     })
 
-    // User dragging the map pauses live-follow.
-    map.on('dragstart', () => onUserPanRef.current?.())
+    // Any deliberate camera interaction pauses live-follow.
+    const pauseFollow = () => onUserPanRef.current?.()
+    map.on('dragstart', pauseFollow)
+    map.on('zoomstart', pauseFollow)
+    map.on('pitchstart', pauseFollow)
+    map.on('rotatestart', pauseFollow)
 
     // Ground-report callouts only render when zoomed in enough to read them
     // without clutter. Class toggle on the container, CSS does the rest.
@@ -279,7 +286,13 @@ export function VPMap({
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map || !focusTarget) return
-    if (followModeRef.current) {
+
+    // Skip if we've already centred on this exact target.
+    const focusKey = `${focusTarget.lng},${focusTarget.lat}`
+    if (lastFocusRef.current === focusKey) return
+    lastFocusRef.current = focusKey
+
+    if (followMode) {
       // Live follow: pan only, keep the user's current zoom, gentle ease.
       map.easeTo({
         center: [focusTarget.lng, focusTarget.lat],
@@ -297,7 +310,7 @@ export function VPMap({
         essential: true,
       })
     }
-  }, [ready, focusTarget])
+  }, [ready, focusTarget, followMode])
 
   // ── Fit all aircraft into view ─────────────────────────────
   useEffect(() => {
@@ -505,7 +518,7 @@ export function VPMap({
       const ageMin = Math.max(0, Math.round((r.reportedAgo - scrubT) / 60))
       const ageStr = ageMin < 1 ? '<1m' : ageMin < 60 ? `${ageMin}m` : '>1h'
       el.innerHTML =
-        reportMarkerSVG(r.kind, color, 26) +
+        reportMarkerSVG(r.kind, color, 30) +
         `<div class="vp-rp-callout${confirmed ? ' confirmed' : ''}">` +
         `<span class="vp-co-kind">${r.kind.toUpperCase()}</span>` +
         `<span class="vp-co-age">${ageStr}</span>` +
