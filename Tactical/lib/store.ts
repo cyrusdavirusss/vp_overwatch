@@ -40,6 +40,7 @@ function saveToDisk(): void {
       lastSeen: ac.lastSeen, track: ac.track.slice(-100),
     })),
     reports: [...s.reportsMap.entries()].map(([uuid, r]) => ({ uuid, ...r })),
+    subscribers: s.notifState.subscribers.map(sub => ({ ...sub })),
   }
   try {
     if (!fs.existsSync(SNAPSHOT_DIR)) fs.mkdirSync(SNAPSHOT_DIR, { recursive: true })
@@ -100,6 +101,15 @@ function loadFromDisk(): void {
         }
       }
       console.log(`[store] restored ${restored} reports`)
+    }
+
+    // Restore subscribers
+    if (Array.isArray(snap.subscribers)) {
+      s.notifState.subscribers = snap.subscribers.map((sub: any) => ({
+        ...sub,
+        notifyOn: sub.notifyOn ?? { takeoff: true, stealth: true, land: true },
+      }))
+      console.log(`[store] restored ${s.notifState.subscribers.length} subscribers`)
     }
   } catch (e: any) {
     console.error('[store] load failed:', e.message)
@@ -222,6 +232,9 @@ export interface SortieEntry {
   status: 'active' | 'landed'
 }
 
+// ── Notification system ────────────────────────────────────────────────────
+import { createNotifState, notifyTakeoff, notifyLand, notifyStealth, resetHexNotifications, addSubscriber, removeSubscriber, updateSubscriber, type Subscriber, type NotificationEvent } from '@/lib/notifications'
+
 // ── Map Kind Helpers ──────────────────────────────────────────────────────
 
 const KIND_MAP: Record<string, Report['kind']> = {
@@ -266,6 +279,7 @@ interface StoreState {
   lastOpenSkyPoll: number
   sortieHistory: SortieEntry[]
   sortieMaxAlt: Map<string, number>
+  notifState: ReturnType<typeof createNotifState>
 }
 
 const GLOBAL_KEY = '__VP_STORE__'
@@ -289,6 +303,7 @@ function getState(): StoreState {
       lastOpenSkyPoll: 0,
       sortieHistory: [],
       sortieMaxAlt: new Map(),
+      notifState: createNotifState(),
     }
   }
   return g[GLOBAL_KEY]
@@ -493,13 +508,15 @@ async function pollOpenSky(): Promise<void> {
       // Detect sortie start: was inactive, now active
       const wasActiveHex = prevActiveStates.get(hex)
       if (wasActiveHex === false) {
+        // Reset startTime to now so fuel calculates from this sortie, not first-seen
+        const sortieStartTime = now
         const entry: SortieEntry = {
           id: `sortie-${hex}-${now}`,
           hex,
           callsign,
           type: known?.type || ac.t || 'Unknown',
           operatorShort: known?.operatorShort ?? '?',
-          startTime: now,
+          startTime: sortieStartTime,
           endTime: null,
           durationSeconds: 0,
           maxAltitude: alt,
@@ -507,6 +524,8 @@ async function pollOpenSky(): Promise<void> {
         }
         s.sortieHistory.push(entry)
         s.sortieMaxAlt.set(hex, alt)
+        // Reset aircraft startTime so fuel timer starts from this sortie
+        if (existing) existing.startTime = sortieStartTime
         saveToDisk()
       } else if (wasActiveHex === true) {
         // Update max altitude for ongoing sortie
@@ -587,6 +606,13 @@ async function pollFastPolice(): Promise<void> {
     const aircraft = await fetchPoliceAdsb()
     const now = Date.now()
 
+    // Capture previous active states for sortie transition tracking
+    const prevActiveStates = new Map<string, boolean>()
+    for (const hex of POLICE_HEXES) {
+      const ac = s.aircraftMap.get(hex)
+      prevActiveStates.set(hex, ac ? ac.isActive : false)
+    }
+
     for (const ac of aircraft) {
       const hex = (ac.hex as string)?.toUpperCase()
       if (!hex || !POLICE_HEXES.includes(hex)) continue
@@ -609,8 +635,44 @@ async function pollFastPolice(): Promise<void> {
       const startTime = (existing && existing.startTime > 0) ? existing.startTime : now
       const timeAirborne = Math.round((now - startTime) / 1000)
 
+      // Detect sortie start: was inactive, now active → reset fuel timer
+      const wasActiveHex = prevActiveStates.get(hex)
+      if (wasActiveHex === false) {
+        // Reset startTime to now so fuel is calculated from this sortie, not first-seen
+        const sortieStartTime = now
+        const entry: SortieEntry = {
+          id: `sortie-${hex}-${now}`,
+          hex,
+          callsign,
+          type: known?.type || ac.t || 'A139',
+          operatorShort: known?.operatorShort ?? 'VICPOL',
+          startTime: sortieStartTime,
+          endTime: null,
+          durationSeconds: 0,
+          maxAltitude: alt,
+          status: 'active',
+        }
+        s.sortieHistory.push(entry)
+        s.sortieMaxAlt.set(hex, alt)
+        // Write back into existing so subsequent track points use the reset startTime
+        if (existing) existing.startTime = sortieStartTime
+        saveToDisk()
+        // Fire takeoff notification (async, don't block poll loop)
+        notifyTakeoff(s.notifState, hex, callsign, alt).catch(e =>
+          console.warn('[notif] takeoff error:', e?.message)
+        )
+      } else if (wasActiveHex === true) {
+        // Update max altitude for ongoing sortie
+        const currentMax = s.sortieMaxAlt.get(hex) ?? 0
+        if (alt > currentMax) s.sortieMaxAlt.set(hex, alt)
+      }
+
+      // Re-read startTime (may have been reset by sortie start above)
+      const effectiveStartTime = (existing?.startTime ?? startTime)
+      const effectiveTimeAirborne = Math.round((now - effectiveStartTime) / 1000)
+
       const tp: TrackPoint = {
-        t: -timeAirborne,
+        t: -effectiveTimeAirborne,
         lat: latitude,
         lng: longitude,
         alt,
@@ -620,7 +682,7 @@ async function pollFastPolice(): Promise<void> {
       }
 
       const fuelEndurance = known?.fuelEnduranceMinutes ?? 270
-      const fuelPct = Math.max(0, Math.min(100, Math.round((1 - timeAirborne / (fuelEndurance * 60)) * 100)))
+      const fuelPct = Math.max(0, Math.min(100, Math.round((1 - effectiveTimeAirborne / (fuelEndurance * 60)) * 100)))
       const historicalAvg = computeHistoricalAverage(hex, 42 * 60)
 
       // Avoid duplicating breadcrumb points when nothing moved between ticks.
@@ -640,10 +702,10 @@ async function pollFastPolice(): Promise<void> {
         role: 'rotary',
         operator: 'Victoria Police',
         operatorShort: 'VICPOL',
-        startTime,
-        timeAirborneSeconds: timeAirborne,
+        startTime: effectiveStartTime,
+        timeAirborneSeconds: effectiveTimeAirborne,
         historicalAverageSeconds: historicalAvg,
-        estimatedReturnSeconds: Math.max(0, historicalAvg - timeAirborne),
+        estimatedReturnSeconds: Math.max(0, historicalAvg - effectiveTimeAirborne),
         altitude: alt,
         speed,
         heading,
@@ -655,6 +717,29 @@ async function pollFastPolice(): Promise<void> {
         fuelEnduranceMinutes: fuelEndurance,
         fuelRemainingPercent: fuelPct,
       })
+    }
+
+    // Mark police hexes not seen in this poll as inactive and close sorties
+    for (const hex of POLICE_HEXES) {
+      const acEntry = s.aircraftMap.get(hex)
+      const wasActiveHex = prevActiveStates.get(hex)
+      if (acEntry && wasActiveHex === true && !aircraft.some((a) => (a.hex as string)?.toUpperCase() === hex)) {
+        acEntry.isActive = false
+        const activeIdx = s.sortieHistory.findIndex(e => e.hex === hex && e.status === 'active')
+        if (activeIdx !== -1) {
+          const entry = s.sortieHistory[activeIdx]
+          entry.endTime = now
+          entry.durationSeconds = Math.round((now - entry.startTime) / 1000)
+          entry.maxAltitude = s.sortieMaxAlt.get(hex) ?? acEntry.altitude
+          entry.status = 'landed'
+          saveToDisk()
+          // Fire land notification (async, don't block poll loop)
+          const duration = Math.round((now - entry.startTime) / 1000)
+          notifyLand(s.notifState, hex, acEntry.callsign || POLICE_CALLSIGNS[hex] || '', duration).catch(e =>
+            console.warn('[notif] land error:', e?.message)
+          )
+        }
+      }
     }
   } catch (err: any) {
     console.warn(`[ADSB.lol fast-police] error: ${err.message}`)
@@ -799,6 +884,34 @@ export function getStore() {
     /** Get the most recent live browser position (null if never reported). */
     getUserLocation(): UserLocation | null {
       return s.userLocation ? { ...s.userLocation } : null
+    },
+
+    // ── Notification subscriber management ──────────────────────────────────
+
+    addSubscriber(name: string, phone: string, notifyOn?: Subscriber['notifyOn']): Subscriber {
+      return addSubscriber(s.notifState, name, phone, notifyOn)
+    },
+
+    removeSubscriber(id: string): boolean {
+      return removeSubscriber(s.notifState, id)
+    },
+
+    updateSubscriber(id: string, updates: Partial<Subscriber>): Subscriber | null {
+      return updateSubscriber(s.notifState, id, updates)
+    },
+
+    getSubscribers(): Subscriber[] {
+      return [...s.notifState.subscribers]
+    },
+
+    getNotificationEvents(limit: number = 20, since?: number): NotificationEvent[] {
+      let events = s.notifState.eventLog
+      if (since) events = events.filter(e => e.timestamp > since)
+      return events.slice(-limit).reverse()
+    },
+
+    resetHexNotifications(hex: string): void {
+      resetHexNotifications(s.notifState, hex)
     },
   }
 }
