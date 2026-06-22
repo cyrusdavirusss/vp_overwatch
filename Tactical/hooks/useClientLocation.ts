@@ -89,6 +89,20 @@ export function useClientLocation(): UseClientLocationResult {
   useEffect(() => {
     // Clean up any pin persisted by an earlier build (deprecated behaviour).
     try { localStorage.removeItem('vp-manual-location') } catch {}
+
+    // Fire a one-shot getCurrentPosition for a quick initial fix (fires fast on
+    // mobile / desktop WiFi positioning) BEFORE watchPosition starts streaming.
+    // This gets the user a map zoom-in on first load instead of waiting for the
+    // slower watchPosition initial callback (~5-30 s).
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(handlePosition, () => {
+        /* silent — watchPosition will try again */ }, {
+        enableHighAccuracy: false,
+        timeout: 5000,
+        maximumAge: 30_000, // accept a cached fix up to 30 s old
+      })
+    }
+
     requestLocation()
     return () => {
       if (watchId.current !== null) {
