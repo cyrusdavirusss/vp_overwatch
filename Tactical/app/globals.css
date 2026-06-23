@@ -709,3 +709,56 @@ samp,
   letter-spacing: 0.04em;
   font-weight: 600;
 }
+
+/* ── Community dot markers (crowdsourced sightings — Signal Blue, APPROX) ── */
+.vp-cdot-marker {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  cursor: default;
+}
+.vp-cdot-core {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 8px var(--blue), 0 0 16px var(--blue-glow);
+  border: 2px solid rgba(255, 255, 255, 0.15);
+}
+.vp-cdot-pulse {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid var(--blue);
+  animation: cdot-pulse 2s var(--ease-out, ease-out) infinite;
+  opacity: 0.6;
+}
+@keyframes cdot-pulse {
+  0%   { transform: translate(-50%, -50%) scale(0.6); opacity: 0.8; }
+  100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+}
+.vp-cdot-label {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--blue);
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid var(--blue-glow);
+  border-radius: 3px;
+  padding: 1px 4px;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}

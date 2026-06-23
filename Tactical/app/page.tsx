@@ -12,8 +12,14 @@ import { FilterPanel, type Filters } from '@/components/filter-panel'
 import { LocationSetter } from '@/components/location-setter'
 import { DataGrid } from '@/components/data-grid'
 import { LazyMap } from '@/components/lazy-map'
+import { MlatBanner } from '@/components/mlat-banner'
+import { AROverlay } from '@/components/ar-overlay'
+import { RouteAlertPanel } from '@/components/route-alert-panel'
 import { useRealtimeData, sampleTrack } from '@/hooks/useRealtimeData'
 import { useClientLocation } from '@/hooks/useClientLocation'
+import { useCommunityDots } from '@/hooks/useCommunityDots'
+import { useRouteAlerts } from '@/hooks/useRouteAlerts'
+import type { MapViewType } from '@/lib/map-style'
 import type { User } from '@/lib/data'
 
 const STRIP_H = 36
@@ -44,6 +50,7 @@ export default function VPOverwatch() {
   })
 
   const clientLocation = useClientLocation()
+  const communityDots = useCommunityDots()
 
   // Home / default location. Desktop browsers can't GPS-locate, so when no
   // precise fix is available the map centers here instead of a generic
@@ -59,6 +66,8 @@ export default function VPOverwatch() {
     hdg: 0,
     accuracy: clientLocation.position?.accuracy ?? 5000,
   }), [clientLocation.position, HOME_LAT, HOME_LNG])
+
+  const routeAlerts = useRouteAlerts(liveData.aircraft, liveData.reports, userPosition.lat, userPosition.lng)
 
   const [scrubT, setScrubT] = useState(0)
   const [selectedAircraftId, setSelectedAircraftId] = useState<string | null>(null)
@@ -138,6 +147,18 @@ export default function VPOverwatch() {
   }, [liveData.aircraft])
   const hasSilentAircraft = silentCount > 0
 
+  // MLAT / "Blind Sky" awareness — count active aircraft by ADS-B source quality
+  const mlatCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive && a.isMlat).length, [liveData.aircraft])
+  const modeSCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive && a.isModeS).length, [liveData.aircraft])
+  const [mlatBannerExpanded, setMlatBannerExpanded] = useState(false)
+  const [showAR, setShowAR] = useState(false)
+  const [pickingDest, setPickingDest] = useState(false)
+  const [mapView, setMapView] = useState<MapViewType>('radar')
+  const cycleMapView = useCallback(() => {
+    const order: MapViewType[] = ['radar', 'dark', 'light', 'grayscale', 'satellite']
+    setMapView((v) => order[(order.indexOf(v) + 1) % order.length])
+  }, [])
+
   const onSelectAircraft = useCallback((id: string | null) => {
     setSelectedAircraftId(id)
     setSelectedReportId(null)
@@ -196,6 +217,13 @@ export default function VPOverwatch() {
     setPicking(true)
   }, [])
 
+  // A map tap while picking a destination sets the route endpoint for Route Watch.
+  const onMapClickSetDest = useCallback((lat: number, lng: number) => {
+    routeAlerts.setDestinationPoint(lat, lng)
+    setPickingDest(false)
+    setFocusTarget({ lat, lng })
+  }, [routeAlerts])
+
   // A map tap while picking sets the exact position, then exits pick mode.
   const onMapClickSetLocation = useCallback((lat: number, lng: number) => {
     setPicking(false)
@@ -226,6 +254,17 @@ export default function VPOverwatch() {
   }, [clientLocation.position, clientLocation.permissionState, clientLocation.isManual])
 
   // ── Desktop: full Palantir multi-panel layout ──────────────────────────
+  const arOverlay = showAR ? (
+    <AROverlay
+      aircraft={liveData.aircraft}
+      communityDots={communityDots}
+      userLat={userPosition.lat}
+      userLng={userPosition.lng}
+      onClose={() => setShowAR(false)}
+      onSelectAircraft={(ac) => { setShowAR(false); onSelectAircraft(ac.id) }}
+    />
+  ) : null
+
   if (isDesktop) {
     const panelW = 380
     return (
@@ -320,11 +359,13 @@ export default function VPOverwatch() {
               }}
               focusTarget={focusTarget}
               hasSilentAircraft={hasSilentAircraft}
-              pickMode={picking}
-              onMapClick={picking ? onMapClickSetLocation : undefined}
+              pickMode={picking || pickingDest}
+              onMapClick={picking ? onMapClickSetLocation : pickingDest ? onMapClickSetDest : undefined}
               followMode={followUser}
               onUserPan={() => setFollowUser(false)}
               fitAllTrigger={fitAllCounter}
+              communityDots={communityDots}
+              viewType={mapView}
             />
 
             <div className="absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded bg-ink-0/80 border border-border-subtle" style={{ backdropFilter: 'blur(8px)' }}>
@@ -336,13 +377,46 @@ export default function VPOverwatch() {
             </div>
 
             <FabCluster
-              onLayers={() => setFilterOpen((v) => !v)}
+              onLayers={cycleMapView}
               onFilters={() => setFilterOpen((v) => !v)}
               onRecenter={onRecenter}
               onSetLocation={() => setShowLocationSetter(true)}
               followUser={followUser}
               onFitAll={onFitAll}
+              onAR={() => setShowAR(true)}
+              onRoute={() => setPickingDest(true)}
             />
+
+            {/* Route awareness — destination pick hint + threat panel (desktop) */}
+            {pickingDest && (
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-3 py-1.5 rounded-md border border-[var(--blue)]" style={{ background: 'color-mix(in srgb, var(--ink-1) 95%, transparent)', backdropFilter: 'blur(8px)', boxShadow: 'var(--shadow-fab)' }}>
+                <span className="font-mono text-[10px] font-semibold tracking-[0.1em] uppercase text-[var(--blue)]">Tap your destination</span>
+                <button onClick={() => setPickingDest(false)} className="font-mono text-[10px] tracking-[0.08em] uppercase text-fg-3 hover:text-fg-1">Cancel</button>
+              </div>
+            )}
+            {routeAlerts.hasRoute && (
+              <div className="absolute top-14 left-3 z-20 w-[300px]">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-mono text-[9px] font-bold tracking-[0.12em] uppercase text-fg-4">Route Watch</span>
+                  <button onClick={routeAlerts.clearRoute} className="font-mono text-[9px] tracking-[0.08em] uppercase text-fg-3 hover:text-fg-1">Clear</button>
+                </div>
+                <RouteAlertPanel
+                  result={routeAlerts.result}
+                  onSelectAircraft={(ac) => onSelectAircraft(ac.id)}
+                  onSelectReport={(r) => onSelectReport(r.id)}
+                />
+              </div>
+            )}
+
+            {/* MLAT / Blind-Sky awareness banner — bottom-left of the map */}
+            <div className="absolute left-3 bottom-3 z-10 max-w-[300px]">
+              <MlatBanner
+                mlatCount={mlatCount}
+                modeSCount={modeSCount}
+                expanded={mlatBannerExpanded}
+                onToggle={() => setMlatBannerExpanded((v) => !v)}
+              />
+            </div>
 
             {picking && (
               <div
@@ -416,6 +490,7 @@ export default function VPOverwatch() {
             onChange={setScrubT}
           />
         </div>
+        {arOverlay}
       </div>
     )
   }
@@ -481,16 +556,29 @@ export default function VPOverwatch() {
             focusTarget={focusTarget}
             hasSilentAircraft={hasSilentAircraft}
             fitAllTrigger={fitAllCounter}
+            communityDots={communityDots}
+            viewType={mapView}
           />
 
           <FabCluster
-            onLayers={() => setFilterOpen((v) => !v)}
+            onLayers={cycleMapView}
             onFilters={() => setFilterOpen((v) => !v)}
             onRecenter={onRecenter}
             onSetLocation={() => setShowLocationSetter(true)}
             followUser={followUser}
             onFitAll={onFitAll}
+            onAR={() => setShowAR(true)}
           />
+
+          {/* MLAT / Blind-Sky awareness banner — bottom-left of the map */}
+          <div className="absolute left-3 bottom-3 z-10 max-w-[300px]">
+            <MlatBanner
+              mlatCount={mlatCount}
+              modeSCount={modeSCount}
+              expanded={mlatBannerExpanded}
+              onToggle={() => setMlatBannerExpanded((v) => !v)}
+            />
+          </div>
 
           {showLocationSetter && (
             <LocationSetter
@@ -547,6 +635,7 @@ export default function VPOverwatch() {
           />
         </div>
       </div>
+      {arOverlay}
     </div>
   )
 }

@@ -9,13 +9,42 @@
  * All notification events are recorded for audit regardless of delivery method.
  */
 
+import {
+  hermesEnabled,
+  buildBriefing,
+  dispatchHermesCall,
+  type AircraftBrief,
+  type HermesEventType,
+} from '@/lib/hermes'
+
+export type { AircraftBrief } from '@/lib/hermes'
+
 // ── Types ─────────────────────────────────────────────────────────────────
+
+/**
+ * Record of a subscriber's opt-in to receive automated voice calls.
+ *
+ * Outbound automated/pre-recorded voice calls are regulated (in AU, the Do Not
+ * Call Register Act / Spam Act; equivalents elsewhere), and Bland AI and every
+ * carrier require provable consent. We treat a subscriber as callable ONLY when
+ * consent.granted is true. Missing consent (e.g. legacy snapshot rows) is
+ * treated as NOT consented — fail closed.
+ */
+export interface ConsentRecord {
+  granted: boolean
+  grantedAt: number | null
+  // How consent was captured, for the audit trail (e.g. "web-form", "sms-double-optin").
+  method: string | null
+  // Optional free-text proof reference (form submission id, recording id, etc.).
+  proof?: string | null
+}
 
 export interface Subscriber {
   id: string
   name: string
   phone: string            // E.164 format, e.g. "+61412345678"
   enabled: boolean
+  consent: ConsentRecord   // must be granted before any call is placed
   notifyOn: {
     takeoff: boolean       // Called when sortie starts
     stealth: boolean       // Called when aircraft goes dark mid-flight
@@ -23,6 +52,14 @@ export interface Subscriber {
   }
   createdAt: number
   lastNotified: number | null
+}
+
+/**
+ * Gate: may we place an automated call to this subscriber right now?
+ * Requires the subscriber be enabled AND hold a granted consent record.
+ */
+export function canCall(sub: Subscriber): boolean {
+  return sub.enabled && Boolean(sub.consent?.granted)
 }
 
 export interface NotificationEvent {
@@ -100,6 +137,29 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+/**
+ * Deliver one call, preferring Hermes (Bland AI conversational briefing) when
+ * configured and telemetry is available, otherwise falling back to the static
+ * Twilio TTS message, otherwise a dry-run log.
+ *
+ * Consent is NOT checked here — callers must pre-filter with canCall(). This
+ * function assumes the subscriber is already cleared to be dialed.
+ */
+async function deliverCall(
+  eventType: HermesEventType,
+  phone: string,
+  fallbackMessage: string,
+  brief?: AircraftBrief
+): Promise<boolean> {
+  if (hermesEnabled() && brief) {
+    const task = buildBriefing(eventType, brief)
+    const r = await dispatchHermesCall(phone, task, { eventType })
+    if (r.ok) return true
+    // On a hard Bland error, degrade gracefully to the Twilio path.
+  }
+  return placeCall(phone, fallbackMessage)
+}
+
 // ── Cleanup stale messages ────────────────────────────────────────────────
 
 const EVENT_RETENTION_MS = 7 * 24 * 3600 * 1000  // 7 days
@@ -132,7 +192,8 @@ export async function notifyTakeoff(
   state: NotifState,
   hex: string,
   callsign: string,
-  alt: number
+  alt: number,
+  brief?: AircraftBrief
 ): Promise<void> {
   const lastNotif = state.lastNotifiedTakeoff.get(hex) ?? 0
   const now = Date.now()
@@ -140,7 +201,7 @@ export async function notifyTakeoff(
   if (now - lastNotif < 10 * 60 * 1000) return
 
   const message = buildTakeoffMessage(hex, callsign, alt)
-  const matchingSubscribers = state.subscribers.filter(s => s.enabled && s.notifyOn.takeoff)
+  const matchingSubscribers = state.subscribers.filter(s => canCall(s) && s.notifyOn.takeoff)
 
   const event: NotificationEvent = {
     id: `notif-takeoff-${hex}-${now}`,
@@ -151,7 +212,7 @@ export async function notifyTakeoff(
   }
 
   for (const sub of matchingSubscribers) {
-    const ok = await placeCall(sub.phone, message)
+    const ok = await deliverCall('takeoff', sub.phone, message, brief)
     event.calledSubscribers.push(sub.id)
     if (!ok) event.error = 'call_failed'
     sub.lastNotified = now
@@ -171,12 +232,13 @@ export async function notifyTakeoff(
 export async function notifyStealth(
   state: NotifState,
   hex: string,
-  callsign: string
+  callsign: string,
+  brief?: AircraftBrief
 ): Promise<void> {
   if (state.stealthWarnings.has(hex)) return  // already warned
 
   const message = buildStealthMessage(hex, callsign)
-  const matchingSubscribers = state.subscribers.filter(s => s.enabled && s.notifyOn.stealth)
+  const matchingSubscribers = state.subscribers.filter(s => canCall(s) && s.notifyOn.stealth)
   const now = Date.now()
 
   const event: NotificationEvent = {
@@ -188,7 +250,7 @@ export async function notifyStealth(
   }
 
   for (const sub of matchingSubscribers) {
-    const ok = await placeCall(sub.phone, message)
+    const ok = await deliverCall('stealth', sub.phone, message, brief)
     event.calledSubscribers.push(sub.id)
     if (!ok) event.error = 'call_failed'
     sub.lastNotified = now
@@ -207,12 +269,13 @@ export async function notifyLand(
   state: NotifState,
   hex: string,
   callsign: string,
-  durationSeconds: number
+  durationSeconds: number,
+  brief?: AircraftBrief
 ): Promise<void> {
   if (state.notifiedLanded.has(hex)) return
 
   const message = buildLandMessage(hex, callsign, durationSeconds / 60)
-  const matchingSubscribers = state.subscribers.filter(s => s.enabled && s.notifyOn.land)
+  const matchingSubscribers = state.subscribers.filter(s => canCall(s) && s.notifyOn.land)
   const now = Date.now()
 
   const event: NotificationEvent = {
@@ -224,7 +287,7 @@ export async function notifyLand(
   }
 
   for (const sub of matchingSubscribers) {
-    const ok = await placeCall(sub.phone, message)
+    const ok = await deliverCall('land', sub.phone, message, brief)
     event.calledSubscribers.push(sub.id)
     if (!ok) event.error = 'call_failed'
     sub.lastNotified = now
@@ -262,13 +325,15 @@ export function addSubscriber(
   state: NotifState,
   name: string,
   phone: string,
-  notifyOn: Subscriber['notifyOn'] = { takeoff: true, stealth: true, land: true }
+  notifyOn: Subscriber['notifyOn'] = { takeoff: true, stealth: true, land: true },
+  consent: ConsentRecord = { granted: false, grantedAt: null, method: null }
 ): Subscriber {
   const sub: Subscriber = {
     id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     name,
     phone,
     enabled: true,
+    consent,
     notifyOn,
     createdAt: Date.now(),
     lastNotified: null,
