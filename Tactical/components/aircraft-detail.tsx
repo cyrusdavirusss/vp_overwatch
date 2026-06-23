@@ -74,6 +74,26 @@ export function AircraftDetail({ aircraft, user, scrubT, onClose }: AircraftDeta
         <span>{aircraft.operator}</span>
       </div>
 
+      {/* MLAT / Mode-S awareness badge */}
+      {aircraft.isMlat && (
+        <div
+          className="flex items-center gap-2 px-2.5 py-1.5 rounded-md mb-3 text-[11px]"
+          style={{ background: 'color-mix(in srgb, var(--amber) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 30%, transparent)', color: 'var(--amber)' }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span><strong>MLAT position</strong> — accuracy ±300m, altitude unreliable</span>
+        </div>
+      )}
+      {aircraft.isModeS && (
+        <div
+          className="flex items-center gap-2 px-2.5 py-1.5 rounded-md mb-3 text-[11px]"
+          style={{ background: 'color-mix(in srgb, var(--red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)', color: 'var(--red)' }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span><strong>Mode-S only</strong> — detected but no position available</span>
+        </div>
+      )}
+
       {/* Flight Timer */}
       <FlightTimer
         timeAirborneSeconds={aircraft.timeAirborneSeconds}
@@ -93,7 +113,7 @@ export function AircraftDetail({ aircraft, user, scrubT, onClose }: AircraftDeta
         className="grid grid-cols-4 gap-px rounded-md overflow-hidden mb-3.5"
         style={{ background: 'var(--border-subtle)' }}
       >
-        <Metric label="alt" value={pos.alt.toLocaleString()} unit="ft" trend={trend} />
+        <Metric label="alt" value={pos.alt != null ? pos.alt.toLocaleString() : '—'} unit={pos.alt != null ? 'ft' : ''} trend={trend} />
         <Metric label="spd" value={pos.spd.toFixed(0)} unit="kts" />
         <Metric label="hdg" value={String(pos.hdg).padStart(3, '0')} unit="°" />
         <Metric

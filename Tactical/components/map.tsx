@@ -11,7 +11,8 @@ import {
   sampleTrailUntil,
   computeDistance,
 } from '@/lib/data'
-import { buildMapStyle, registerPmtilesProtocol } from '@/lib/map-style'
+import { buildMapStyle, registerPmtilesProtocol, type MapViewType } from '@/lib/map-style'
+import type { CommunityDot } from '@/lib/visual-sighting'
 import { aircraftMarkerSVG, reportMarkerSVG, RED, GREEN } from '@/lib/markers'
 
 // Register the pmtiles:// protocol once, at the map module root. This module
@@ -46,6 +47,10 @@ export interface VPMapProps {
   onUserPan?: () => void
   /** Increment to trigger fit-all-aircraft bounds. */
   fitAllTrigger?: number
+  /** Crowdsourced community sighting dots (approximate positions). */
+  communityDots?: CommunityDot[]
+  /** Basemap view mode (radar / dark / light / grayscale / satellite). */
+  viewType?: MapViewType
 }
 
 // Motion: 400ms camera-focus duration with the design system's spring ease
@@ -124,6 +129,8 @@ export function VPMap({
   followMode,
   onUserPan,
   fitAllTrigger,
+  communityDots = [],
+  viewType = 'radar',
 }: VPMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -141,6 +148,8 @@ export function VPMap({
   const userMarker = useRef<maplibregl.Marker | null>(null)
   const aircraftMarkers = useRef<Map<string, AircraftMarkerEntry>>(new Map())
   const reportMarkers = useRef<Map<string, maplibregl.Marker>>(new Map())
+  const communityMarkers = useRef<Map<string, maplibregl.Marker>>(new Map())
+  const lastViewType = useRef<MapViewType>(viewType)
   const lastScrubT = useRef(scrubT)
 
   // ── Initialise map once ────────────────────────────────────────────────
@@ -149,7 +158,7 @@ export function VPMap({
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: buildMapStyle(),
+      style: buildMapStyle(viewType),
       center: [user.lng, user.lat],
       zoom: 9,
       pitch: 0, // pitch/bearing enabled but default flat, north up
@@ -185,69 +194,8 @@ export function VPMap({
     syncCalloutZoom()
 
     map.on('load', () => {
-      // ── Data-overlay sources (updated imperatively below) ──────────────
-      const addSrc = (id: string) =>
-        map.addSource(id, { type: 'geojson', data: EMPTY })
-      addSrc('vp-hex')
-      addSrc('vp-conn')
-      addSrc('vp-trails')
-      addSrc('vp-acc')
-      addSrc('vp-predict')
-
-      // Threat density (red, sparse, dashed) — sits lowest.
-      map.addLayer({
-        id: 'vp-hex-fill',
-        type: 'fill',
-        source: 'vp-hex',
-        paint: { 'fill-color': RED, 'fill-opacity': ['get', 'o'] },
-      })
-      map.addLayer({
-        id: 'vp-hex-line',
-        type: 'line',
-        source: 'vp-hex',
-        paint: { 'line-color': RED, 'line-opacity': 0.3, 'line-width': 1, 'line-dasharray': [4, 4] },
-      })
-
-      // Aircraft → nearby report connection lines (signal blue, dashed).
-      map.addLayer({
-        id: 'vp-conn-line',
-        type: 'line',
-        source: 'vp-conn',
-        layout: { 'line-cap': 'round' },
-        paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': ['get', 'o'], 'line-dasharray': [3, 6] },
-      })
-
-      // Aircraft trails (aviation amber).
-      map.addLayer({
-        id: 'vp-trails-line',
-        type: 'line',
-        source: 'vp-trails',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#FFB020', 'line-width': ['get', 'w'], 'line-opacity': ['get', 'o'] },
-      })
-
-      // GPS accuracy disc (signal blue).
-      map.addLayer({
-        id: 'vp-acc-fill',
-        type: 'fill',
-        source: 'vp-acc',
-        paint: { 'fill-color': '#4D7CFF', 'fill-opacity': 0.12 },
-      })
-      map.addLayer({
-        id: 'vp-acc-line',
-        type: 'line',
-        source: 'vp-acc',
-        paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': 0.4 },
-      })
-
-      // Predictive vector for the selected aircraft (amber, dashed).
-      map.addLayer({
-        id: 'vp-predict-line',
-        type: 'line',
-        source: 'vp-predict',
-        layout: { 'line-cap': 'round' },
-        paint: { 'line-color': '#FFB020', 'line-width': 2, 'line-opacity': 0.6, 'line-dasharray': [8, 6] },
-      })
+      // ── Data-overlay sources + layers (idempotent; re-added after style swaps) ──
+      addVpOverlays(map)
 
       // User position marker (DOM) — dot + pulse.
       const uel = document.createElement('div')
@@ -273,6 +221,8 @@ export function VPMap({
       aircraftMarkers.current.clear()
       reportMarkers.current.forEach((m) => m.remove())
       reportMarkers.current.clear()
+      communityMarkers.current.forEach((m) => m.remove())
+      communityMarkers.current.clear()
       userMarker.current?.remove()
       userMarker.current = null
       map.remove()
@@ -281,6 +231,22 @@ export function VPMap({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ── Map view switcher: swap the basemap, then re-add overlay layers ─────
+  // setStyle() drops every source/layer, so the imperatively-managed overlays
+  // are re-added once the new style finishes loading. DOM markers survive.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    if (lastViewType.current === viewType) return
+    lastViewType.current = viewType
+    map.setStyle(buildMapStyle(viewType))
+    const reAdd = () => {
+      if (!map.isStyleLoaded()) { map.once('styledata', reAdd); return }
+      addVpOverlays(map)
+    }
+    map.once('styledata', reAdd)
+  }, [ready, viewType])
 
   // ── Camera focus (flyTo with momentum + spring ease) ───────────────────
   useEffect(() => {
@@ -387,7 +353,7 @@ export function VPMap({
         const cs = entry.callout.querySelector('.vp-co-callsign') as HTMLDivElement
         const cd = entry.callout.querySelector('.vp-co-data') as HTMLDivElement
         if (cs) cs.textContent = a.callsign || a.registration
-        if (cd) cd.textContent = `${pos.alt.toLocaleString()}ft · ${Math.round(pos.spd)}kts`
+        if (cd) cd.textContent = `${pos.alt != null ? pos.alt.toLocaleString() + 'ft' : '—'} · ${Math.round(pos.spd)}kts`
 
         entry.rot.style.transform = `rotate(${pos.hdg}deg)`
         ;(entry.marker.getElement() as HTMLDivElement).classList.toggle('selected', isSel)
@@ -536,6 +502,38 @@ export function VPMap({
     }
   }, [ready, reports, scrubT, layers.reports, selectedReportId, onSelectReport])
 
+  // ── Community sighting dots (crowdsourced, Signal Blue, APPROX) ─────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+
+    const live = new Set<string>()
+    for (const dot of communityDots) {
+      live.add(dot.aircraftHex)
+      let marker = communityMarkers.current.get(dot.aircraftHex)
+      if (!marker) {
+        const el = document.createElement('div')
+        el.className = 'vp-cdot-marker'
+        el.innerHTML =
+          '<div class="vp-cdot-pulse"></div>' +
+          '<div class="vp-cdot-core"></div>' +
+          `<div class="vp-cdot-label">${dot.aircraftHex} · APPROX</div>`
+        marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([dot.lng, dot.lat])
+          .addTo(map)
+        communityMarkers.current.set(dot.aircraftHex, marker)
+      }
+      marker.setLngLat([dot.lng, dot.lat])
+    }
+
+    for (const [id, marker] of communityMarkers.current) {
+      if (!live.has(id)) {
+        marker.remove()
+        communityMarkers.current.delete(id)
+      }
+    }
+  }, [ready, communityDots])
+
   // Aircraft marker click handlers are bound here so they always see the
   // latest callback identity without recreating markers.
   useEffect(() => {
@@ -565,6 +563,36 @@ export function VPMap({
 }
 
 // Update a GeoJSON source's features.
+// Idempotently (re)adds the imperatively-updated GeoJSON overlay sources and
+// layers (threat density, aircraft→report connectors, trails, GPS accuracy
+// disc, predictive vector). Called on initial map load AND after any setStyle()
+// — a style swap drops all sources/layers, so they must be re-added.
+function addVpOverlays(map: maplibregl.Map) {
+  const addSrc = (id: string) => {
+    if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: EMPTY })
+  }
+  addSrc('vp-hex')
+  addSrc('vp-conn')
+  addSrc('vp-trails')
+  addSrc('vp-acc')
+  addSrc('vp-predict')
+
+  if (!map.getLayer('vp-hex-fill'))
+    map.addLayer({ id: 'vp-hex-fill', type: 'fill', source: 'vp-hex', paint: { 'fill-color': RED, 'fill-opacity': ['get', 'o'] } })
+  if (!map.getLayer('vp-hex-line'))
+    map.addLayer({ id: 'vp-hex-line', type: 'line', source: 'vp-hex', paint: { 'line-color': RED, 'line-opacity': 0.3, 'line-width': 1, 'line-dasharray': [4, 4] } })
+  if (!map.getLayer('vp-conn-line'))
+    map.addLayer({ id: 'vp-conn-line', type: 'line', source: 'vp-conn', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': ['get', 'o'], 'line-dasharray': [3, 6] } })
+  if (!map.getLayer('vp-trails-line'))
+    map.addLayer({ id: 'vp-trails-line', type: 'line', source: 'vp-trails', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFB020', 'line-width': ['get', 'w'], 'line-opacity': ['get', 'o'] } })
+  if (!map.getLayer('vp-acc-fill'))
+    map.addLayer({ id: 'vp-acc-fill', type: 'fill', source: 'vp-acc', paint: { 'fill-color': '#4D7CFF', 'fill-opacity': 0.12 } })
+  if (!map.getLayer('vp-acc-line'))
+    map.addLayer({ id: 'vp-acc-line', type: 'line', source: 'vp-acc', paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': 0.4 } })
+  if (!map.getLayer('vp-predict-line'))
+    map.addLayer({ id: 'vp-predict-line', type: 'line', source: 'vp-predict', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#FFB020', 'line-width': 2, 'line-opacity': 0.6, 'line-dasharray': [8, 6] } })
+}
+
 function setData(map: maplibregl.Map, id: string, features: GeoJSON.Feature[]) {
   const src = map.getSource(id) as maplibregl.GeoJSONSource | undefined
   src?.setData({ type: 'FeatureCollection', features })
