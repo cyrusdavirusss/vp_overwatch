@@ -140,7 +140,7 @@ export function DataGrid({
                         <span className="text-fg-4 text-[9px]">{a.type}</span>
                       </div>
                     </Td>
-                    <Td mono>{pos.alt.toLocaleString()}<span className="text-fg-4 ml-0.5">ft</span></Td>
+                    <Td mono>{pos.alt != null ? (<>{pos.alt.toLocaleString()}<span className="text-fg-4 ml-0.5">ft</span></>) : '—'}</Td>
                     <Td mono>{pos.spd.toFixed(0)}<span className="text-fg-4 ml-0.5">kts</span></Td>
                     <Td mono>{String(pos.hdg).padStart(3, '0')}°</Td>
                     <Td mono>{dist.toFixed(1)}<span className="text-fg-4 ml-0.5">nm</span></Td>

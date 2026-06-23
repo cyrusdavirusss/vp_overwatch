@@ -15,7 +15,7 @@
 
 import maplibregl from 'maplibre-gl'
 import type { StyleSpecification } from 'maplibre-gl'
-import { DARK, layers, type Flavor } from '@protomaps/basemaps'
+import { DARK, LIGHT, GRAYSCALE, layers, type Flavor } from '@protomaps/basemaps'
 import { Protocol } from 'pmtiles'
 
 // Protomaps vector source name referenced by the generated layers.
@@ -195,16 +195,47 @@ function radarFlavor(): Flavor {
 }
 
 /**
- * Build the complete MapLibre style. Sources, glyphs and sprite are all
- * env-driven with keyless Protomaps fallbacks.
+ * Map view modes. All but `satellite` are Protomaps Flavors rendered over the
+ * same self-hosted PMTiles basemap (no external deps / keys). `satellite`
+ * swaps to public Esri World Imagery raster tiles and needs connectivity.
  */
-export function buildMapStyle(): StyleSpecification {
+export type MapViewType = 'radar' | 'dark' | 'light' | 'grayscale' | 'satellite'
+
+/**
+ * Build the complete MapLibre style for a given view mode. Sources, glyphs and
+ * sprite are env-driven with keyless Protomaps fallbacks.
+ */
+export function buildMapStyle(viewType: MapViewType = 'radar'): StyleSpecification {
   const pmtilesUrl =
     process.env.NEXT_PUBLIC_PMTILES_URL?.trim() || FALLBACK_PMTILES
   const glyphs =
     process.env.NEXT_PUBLIC_MAP_GLYPHS_URL?.trim() || FALLBACK_GLYPHS
   const sprite =
     process.env.NEXT_PUBLIC_MAP_SPRITE_URL?.trim() || FALLBACK_SPRITE
+
+  // Satellite: public Esri World Imagery raster (keyless, requires internet).
+  if (viewType === 'satellite') {
+    return {
+      version: 8,
+      glyphs,
+      sources: {
+        'esri-imagery': {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          attribution: 'Imagery © Esri, Maxar, Earthstar Geographics',
+        },
+      },
+      layers: [{ id: 'esri-imagery', type: 'raster', source: 'esri-imagery' }],
+    }
+  }
+
+  // Vector flavors over the self-hosted PMTiles basemap.
+  const flavor: Flavor =
+    viewType === 'light' ? LIGHT :
+    viewType === 'grayscale' ? GRAYSCALE :
+    viewType === 'dark' ? DARK :
+    radarFlavor()
 
   return {
     version: 8,
@@ -218,6 +249,6 @@ export function buildMapStyle(): StyleSpecification {
           '<a href="https://protomaps.com">Protomaps</a> © <a href="https://openstreetmap.org">OpenStreetMap</a>',
       },
     },
-    layers: layers(SOURCE, radarFlavor(), { lang: 'en' }),
+    layers: layers(SOURCE, flavor, { lang: 'en' }),
   }
 }

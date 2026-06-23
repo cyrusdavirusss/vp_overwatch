@@ -234,7 +234,7 @@ export function OnAirBar({
               label="brg"
               value={`${String(Math.round(current.bearing)).padStart(3, '0')}° ${compassFromBearing(current.bearing)}`}
             />
-            {!compact && <Readout label="alt" value={`${current.a.altitude.toLocaleString()}ft`} />}
+            {!compact && <Readout label="alt" value={current.a.altitude != null ? `${current.a.altitude.toLocaleString()}ft` : '—'} />}
             <Readout label="spd" value={`${Math.round(current.a.speed)}kts`} />
           </div>
 

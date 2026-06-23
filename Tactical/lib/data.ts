@@ -25,6 +25,12 @@ export interface Aircraft {
   lastSeen: number | null
   fuelEnduranceMinutes: number
   fuelRemainingPercent: number
+  /** ADS-B source type from the feed: 'adsb' | 'mlat' | 'mode_s' | 'unknown' */
+  source?: 'adsb' | 'mlat' | 'mode_s' | 'unknown'
+  /** True when position is MLAT-derived (±300m, altitude unreliable) */
+  isMlat?: boolean
+  /** True when only Mode-S squitter — detected but no position */
+  isModeS?: boolean
 }
 
 export interface TrackPoint {

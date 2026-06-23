@@ -96,6 +96,10 @@ function loadFromDisk(): void {
       let restored = 0
       for (const r of snap.reports) {
         if (r.uuid && r.reportedAgo != null && r.reportedAgo < 7200) {
+          // Normalise legacy ids: older snapshots used an 8-char uuid slice,
+          // which collided when uuids shared a prefix (e.g. alert-12*) and
+          // produced duplicate React keys. Re-derive from the full uuid.
+          r.id = `wz-${r.uuid}`
           s.reportsMap.set(r.uuid, r)
           restored++
         }
@@ -108,6 +112,9 @@ function loadFromDisk(): void {
       s.notifState.subscribers = snap.subscribers.map((sub: any) => ({
         ...sub,
         notifyOn: sub.notifyOn ?? { takeoff: true, stealth: true, land: true },
+        // Fail closed: any legacy row without an explicit consent record is
+        // treated as NOT consented and won't be dialed until re-confirmed.
+        consent: sub.consent ?? { granted: false, grantedAt: null, method: null },
       }))
       console.log(`[store] restored ${s.notifState.subscribers.length} subscribers`)
     }
@@ -174,6 +181,12 @@ export interface Aircraft {
   lastSeen: number | null
   fuelEnduranceMinutes: number
   fuelRemainingPercent: number
+  /** ADS-B source type from the feed: 'adsb' | 'mlat' | 'mode_s' | 'unknown' */
+  source?: 'adsb' | 'mlat' | 'mode_s' | 'unknown'
+  /** True when position is MLAT-derived (±300m, altitude unreliable) */
+  isMlat?: boolean
+  /** True when only Mode-S squitter — detected but no position */
+  isModeS?: boolean
 }
 
 export interface Report {
@@ -233,7 +246,22 @@ export interface SortieEntry {
 }
 
 // ── Notification system ────────────────────────────────────────────────────
-import { createNotifState, notifyTakeoff, notifyLand, notifyStealth, resetHexNotifications, addSubscriber, removeSubscriber, updateSubscriber, type Subscriber, type NotificationEvent } from '@/lib/notifications'
+import { createNotifState, notifyTakeoff, notifyLand, notifyStealth, resetHexNotifications, addSubscriber, removeSubscriber, updateSubscriber, type Subscriber, type NotificationEvent, type AircraftBrief } from '@/lib/notifications'
+
+/** Project a full Aircraft record down to the telemetry Hermes briefs on. */
+function aircraftToBrief(ac: Aircraft): AircraftBrief {
+  return {
+    registration: ac.registration,
+    callsign: ac.callsign,
+    typeLabel: ac.typeLabel,
+    altitude: ac.altitude,
+    speed: ac.speed,
+    heading: ac.heading,
+    fuelEnduranceMinutes: ac.fuelEnduranceMinutes,
+    fuelRemainingPercent: ac.fuelRemainingPercent,
+    timeAirborneSeconds: ac.timeAirborneSeconds,
+  }
+}
 
 // ── Map Kind Helpers ──────────────────────────────────────────────────────
 
@@ -501,6 +529,9 @@ async function pollOpenSky(): Promise<void> {
         lastSeen: now,
         fuelEnduranceMinutes: fuelEndurance,
         fuelRemainingPercent: fuelPct,
+        source: ac.type === 'mlat' ? 'mlat' : ac.type === 'adsb' ? 'adsb' : ac.type === 'mode_s' ? 'mode_s' : 'unknown',
+        isMlat: ac.type === 'mlat',
+        isModeS: ac.type === 'mode_s',
       }
 
       s.aircraftMap.set(hex, aircraftObj)
@@ -636,6 +667,7 @@ async function pollFastPolice(): Promise<void> {
       const timeAirborne = Math.round((now - startTime) / 1000)
 
       // Detect sortie start: was inactive, now active → reset fuel timer
+      let justTookOff = false
       const wasActiveHex = prevActiveStates.get(hex)
       if (wasActiveHex === false) {
         // Reset startTime to now so fuel is calculated from this sortie, not first-seen
@@ -657,10 +689,9 @@ async function pollFastPolice(): Promise<void> {
         // Write back into existing so subsequent track points use the reset startTime
         if (existing) existing.startTime = sortieStartTime
         saveToDisk()
-        // Fire takeoff notification (async, don't block poll loop)
-        notifyTakeoff(s.notifState, hex, callsign, alt).catch(e =>
-          console.warn('[notif] takeoff error:', e?.message)
-        )
+        // Defer the takeoff notification until the full aircraft record below is
+        // built, so Hermes can brief on complete telemetry (speed/heading/fuel).
+        justTookOff = true
       } else if (wasActiveHex === true) {
         // Update max altitude for ongoing sortie
         const currentMax = s.sortieMaxAlt.get(hex) ?? 0
@@ -716,7 +747,19 @@ async function pollFastPolice(): Promise<void> {
         lastSeen: now,
         fuelEnduranceMinutes: fuelEndurance,
         fuelRemainingPercent: fuelPct,
+        source: ac.type === 'mlat' ? 'mlat' : ac.type === 'adsb' ? 'adsb' : ac.type === 'mode_s' ? 'mode_s' : 'unknown',
+        isMlat: ac.type === 'mlat',
+        isModeS: ac.type === 'mode_s',
       })
+
+      // Now that the full record exists, fire the takeoff briefing (async, don't
+      // block the poll loop). Hermes briefs from complete telemetry.
+      if (justTookOff) {
+        const acNow = s.aircraftMap.get(hex)
+        notifyTakeoff(s.notifState, hex, callsign, alt, acNow ? aircraftToBrief(acNow) : undefined).catch(e =>
+          console.warn('[notif] takeoff error:', e?.message)
+        )
+      }
     }
 
     // Mark police hexes not seen in this poll as inactive and close sorties
@@ -735,7 +778,7 @@ async function pollFastPolice(): Promise<void> {
           saveToDisk()
           // Fire land notification (async, don't block poll loop)
           const duration = Math.round((now - entry.startTime) / 1000)
-          notifyLand(s.notifState, hex, acEntry.callsign || POLICE_CALLSIGNS[hex] || '', duration).catch(e =>
+          notifyLand(s.notifState, hex, acEntry.callsign || POLICE_CALLSIGNS[hex] || '', duration, aircraftToBrief(acEntry)).catch(e =>
             console.warn('[notif] land error:', e?.message)
           )
         }
@@ -814,7 +857,7 @@ export function getStore() {
       const reportedAgo = Math.round((now - pubMillis) / 1000)
 
       const report: Report = {
-        id: `wz-${uuid.slice(0, 8)}`,
+        id: `wz-${uuid}`,
         wazeUuid: uuid,
         type,
         subtype,

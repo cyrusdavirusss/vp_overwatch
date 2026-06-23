@@ -85,27 +85,33 @@ export function BottomSheet({
 
   const currentHeight = heightFor(snap) + dragOffset
 
-  // Build feed: aircraft first, then reports by recency
+  const [activeTab, setActiveTab] = useState<'All' | 'Air' | 'Ground'>('All')
+
+  // Build feed: aircraft first, then reports by recency (filtered by tab)
   const feed = useMemo(() => {
     const items: Array<
       | { kind: 'aircraft'; obj: Aircraft; pos: NonNullable<ReturnType<typeof sampleTrack>> }
       | { kind: 'report'; obj: Report; ageAtScrub: number }
     > = []
 
-    aircraft.forEach((a) => {
-      const pos = sampleTrack(a.track, scrubT)
-      if (pos) items.push({ kind: 'aircraft', obj: a, pos })
-    })
+    if (activeTab !== 'Ground') {
+      aircraft.forEach((a) => {
+        const pos = sampleTrack(a.track, scrubT)
+        if (pos) items.push({ kind: 'aircraft', obj: a, pos })
+      })
+    }
 
-    reports.forEach((r) => {
-      const reportAgeAtScrub = r.reportedAgo - scrubT
-      if (reportAgeAtScrub >= 0) {
-        items.push({ kind: 'report', obj: r, ageAtScrub: reportAgeAtScrub })
-      }
-    })
+    if (activeTab !== 'Air') {
+      reports.forEach((r) => {
+        const reportAgeAtScrub = r.reportedAgo - scrubT
+        if (reportAgeAtScrub >= 0) {
+          items.push({ kind: 'report', obj: r, ageAtScrub: reportAgeAtScrub })
+        }
+      })
+    }
 
     return items
-  }, [aircraft, reports, scrubT])
+  }, [aircraft, reports, scrubT, activeTab])
 
   return (
     <div
@@ -138,11 +144,12 @@ export function BottomSheet({
             <span className="num text-base font-semibold text-fg-1">{feed.length}</span>
           </div>
           <div className="flex gap-0.5 p-0.5 bg-ink-2 rounded-full border border-border">
-            {['All', 'Air', 'Ground'].map((tab) => (
+            {(['All', 'Air', 'Ground'] as const).map((tab) => (
               <button
                 key={tab}
+                onClick={() => setActiveTab(tab)}
                 className={`h-[22px] px-2.5 rounded-full font-mono text-[10px] font-semibold tracking-[0.06em] uppercase transition-colors ${
-                  tab === 'All' ? 'bg-ink-3 text-fg-1' : 'text-fg-3 hover:text-fg-1'
+                  tab === activeTab ? 'bg-ink-3 text-fg-1' : 'text-fg-3 hover:text-fg-1'
                 }`}
               >
                 {tab}
@@ -227,7 +234,7 @@ function AircraftFeedItem({ aircraft, pos, user, selected, onClick }: AircraftFe
           <span className="text-[11px] text-fg-3">· {aircraft.type}</span>
         </div>
         <div className="flex items-center gap-1.5 font-mono text-[11px] text-fg-2 whitespace-nowrap overflow-hidden text-ellipsis tabular-nums">
-          <span>{pos.alt.toLocaleString()}ft</span>
+          <span>{pos.alt != null ? `${pos.alt.toLocaleString()}ft` : '—'}</span>
           {trend && (
             <span className={trend === 'up' ? 'text-[var(--green)]' : 'text-[var(--amber)]'}>
               {trend === 'up' ? '↑' : '↓'}
