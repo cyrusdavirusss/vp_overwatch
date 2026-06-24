@@ -1,19 +1,17 @@
 'use client'
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { StatusStrip } from '@/components/status-strip'
-import { OnAirBar } from '@/components/onair-bar'
-import { TimeScrubber } from '@/components/time-scrubber'
+import { VPHeader } from '@/components/vp-header'
+import { OnAirBar as VPOnAirBar } from '@/components/on-air-bar'
 import { FabCluster } from '@/components/fab-cluster'
-import { BottomSheet } from '@/components/bottom-sheet'
 import { AircraftDetail } from '@/components/aircraft-detail'
 import { ReportDetail } from '@/components/report-detail'
 import { FilterPanel, type Filters } from '@/components/filter-panel'
 import { LocationSetter } from '@/components/location-setter'
-import { DataGrid } from '@/components/data-grid'
 import { LazyMap } from '@/components/lazy-map'
 import { MlatBanner } from '@/components/mlat-banner'
 import { AROverlay } from '@/components/ar-overlay'
+import { SubscribeModal } from '@/components/subscribe-modal'
 import { RouteAlertPanel } from '@/components/route-alert-panel'
 import { useRealtimeData, sampleTrack } from '@/hooks/useRealtimeData'
 import { useClientLocation } from '@/hooks/useClientLocation'
@@ -51,6 +49,9 @@ export default function VPOverwatch() {
 
   const clientLocation = useClientLocation()
   const communityDots = useCommunityDots()
+  // Live GPS fix present → hide the manual "Set Location" button; keep it only
+  // as a fallback when GPS is denied/unavailable (e.g. served over plain HTTP).
+  const gpsLive = clientLocation.permissionState === 'granted' && !clientLocation.isManual && clientLocation.position !== null
 
   // Home / default location. Desktop browsers can't GPS-locate, so when no
   // precise fix is available the map centers here instead of a generic
@@ -83,6 +84,18 @@ export default function VPOverwatch() {
   const [systemClock, setSystemClock] = useState(Date.now())
 
   useEffect(() => { setRelayTick(liveData.relay.lastTickAgo) }, [liveData.relay.lastTickAgo])
+
+  // Device orientation feeds the AR overlay (bearing/elevation via window.__vpOrientation).
+  // iOS 13+ needs an explicit permission prompt (handled when AR opens), so skip auto-bind there.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof DeviceOrientationEvent === 'undefined') return
+    if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') return
+    const onOrient = (e: DeviceOrientationEvent) => {
+      ;(window as any).__vpOrientation = { alpha: e.alpha, beta: e.beta, gamma: e.gamma }
+    }
+    window.addEventListener('deviceorientation', onOrient)
+    return () => window.removeEventListener('deviceorientation', onOrient)
+  }, [])
   useEffect(() => {
     const id = setInterval(() => {
       setRelayTick((t) => t + 1)
@@ -146,12 +159,14 @@ export default function VPOverwatch() {
     return liveData.aircraft.filter((a) => a.isActive === false && a.lastSeen !== null).length
   }, [liveData.aircraft])
   const hasSilentAircraft = silentCount > 0
+  const isLostSignal = hasSilentAircraft
 
   // MLAT / "Blind Sky" awareness — count active aircraft by ADS-B source quality
   const mlatCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive && a.isMlat).length, [liveData.aircraft])
   const modeSCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive && a.isModeS).length, [liveData.aircraft])
   const [mlatBannerExpanded, setMlatBannerExpanded] = useState(false)
   const [showAR, setShowAR] = useState(false)
+  const [showSubscribe, setShowSubscribe] = useState(false)
   const [pickingDest, setPickingDest] = useState(false)
   const [mapView, setMapView] = useState<MapViewType>('radar')
   const cycleMapView = useCallback(() => {
@@ -235,7 +250,7 @@ export default function VPOverwatch() {
   const selectedReport = filteredReports.find((r) => r.id === selectedReportId)
 
   const detailContent = selectedAircraft ? (
-    <AircraftDetail aircraft={selectedAircraft} user={userPosition} scrubT={scrubT} onClose={onCloseDetail} />
+    <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} />
   ) : selectedReport ? (
     <ReportDetail report={selectedReport} user={userPosition} onClose={onCloseDetail} />
   ) : null
@@ -258,90 +273,33 @@ export default function VPOverwatch() {
     <AROverlay
       aircraft={liveData.aircraft}
       communityDots={communityDots}
-      userLat={userPosition.lat}
-      userLng={userPosition.lng}
+      userLocation={userPosition}
       onClose={() => setShowAR(false)}
-      onSelectAircraft={(ac) => { setShowAR(false); onSelectAircraft(ac.id) }}
     />
   ) : null
 
   if (isDesktop) {
-    const panelW = 380
     return (
       <div className="w-screen h-screen bg-ink-0 flex flex-col overflow-hidden" style={{ fontFamily: 'var(--font-ui)' }}>
-        {/* Top command bar */}
-        <div className="h-9 flex items-center justify-between px-3 bg-ink-1 border-b border-border flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-              <circle cx="12" cy="12" r="10" stroke="var(--blue)" strokeWidth="1.2" opacity="0.4" />
-              <circle cx="12" cy="12" r="6.5" stroke="var(--blue)" strokeWidth="1.2" opacity="0.7" />
-              <path d="M12 6 L16.5 14.5 L12 12.5 L7.5 14.5 Z" fill="var(--amber)" />
-              <circle cx="12" cy="12" r="0.8" fill="var(--fg-1)" />
-            </svg>
-            <span className="font-mono text-[11px] font-bold tracking-[0.14em] text-fg-1">VP-OVERWATCH</span>
-            <span className="font-mono text-[9px] tracking-[0.08em] text-fg-4 uppercase">TACTICAL OPERATIONS CENTER</span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            {/* System metrics */}
-            <div className="flex items-center gap-3">
-              <StatusChip label="AIR" value={filteredAircraft.length} color="var(--amber)" />
-              <StatusChip label="GND" value={filteredReports.length} color="var(--red)" />
-              <StatusChip label="RELAY" value={relayTick < 120 ? 'LIVE' : 'STALE'} color={relayTick < 120 ? 'var(--green)' : 'var(--stale)'} />
-            </div>
-
-            <div className="w-px h-5 bg-border" />
-
-            {/* Secret aircraft indicator */}
-            {silentCount > 0 && (
-              <div className="flex items-center gap-1.5">
-                <span className="font-mono text-[8px] font-semibold tracking-[0.12em] uppercase" style={{ color: 'var(--amber)' }}>SILENT</span>
-                <span className="num text-[11px] font-bold" style={{ color: 'var(--amber)' }}>{silentCount}</span>
-              </div>
-            )}
-
-            {silentCount > 0 && <div className="w-px h-5 bg-border" />}
-
-            {/* History link */}
-            <a
-              href="/vicpol-history"
-              className="px-2 py-1 font-mono text-[9px] font-semibold tracking-[0.12em] uppercase text-fg-3 bg-ink-2 border border-border rounded hover:bg-ink-3 hover:text-fg-1 transition-colors"
-            >
-              HISTORY
-            </a>
-
-            <div className="w-px h-5 bg-border" />
-
-            {/* Clock */}
-            <div className="flex items-center gap-2">
-              <span className="num text-[12px] font-semibold text-fg-1 tracking-[0.04em]">{clockStr}</span>
-              <span className="font-mono text-[8px] text-fg-4 tracking-[0.1em]">AEST</span>
-            </div>
-
-            <div className="w-px h-5 bg-border" />
-
-            <div className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${liveData.relay.connected ? 'bg-[var(--green)]' : 'bg-[var(--red)]'}`} style={{ boxShadow: `0 0 6px ${liveData.relay.connected ? 'var(--green-glow)' : 'var(--red-glow)'}` }} />
-              <span className="font-mono text-[9px] font-semibold tracking-[0.12em] text-fg-2 uppercase">
-                {scrubT > 0 ? 'PLAYBACK' : liveData.relay.connected ? 'CONNECTED' : 'OFFLINE'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* ON AIR bar — persistent airframe indicator, never filtered */}
-        <OnAirBar
-          aircraft={liveData.aircraft}
-          user={userPosition}
-          selectedAircraftId={selectedAircraftId}
-          onSelectAircraft={onSelectAircraft}
-          now={systemClock}
+        <VPHeader
+          airCount={filteredAircraft.length}
+          gndCount={filteredReports.length}
+          silentCount={silentCount}
+          isLostSignal={isLostSignal}
+          isConnected={liveData.relay.connected}
+          onSubscribeClick={() => setShowSubscribe(true)}
         />
 
-        {/* Main content area — map + right data panel */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Map area */}
-          <div className="flex-1 relative">
+        {/* ON AIR bar */}
+        <VPOnAirBar
+          aircraft={liveData.aircraft}
+          selectedId={selectedAircraftId}
+          onSelect={onSelectAircraft}
+        />
+
+        {/* Main content area — full-bleed map with overlay panels */}
+        <div className="flex-1 relative">
+          {isLostSignal && <div className="vp-map-lost-tint" />}
             <LazyMap
               aircraft={filteredAircraft}
               reports={filteredReports}
@@ -368,6 +326,15 @@ export default function VPOverwatch() {
               viewType={mapView}
             />
 
+            {/* Map view pill */}
+            <div className="vp-map-pill">
+              {(['radar', 'dark', 'light', 'grayscale', 'satellite'] as const).map((v) => (
+                <button key={v} className={`vp-map-pill-btn ${mapView === v ? 'active' : ''}`} onClick={() => setMapView(v)}>
+                  {v === 'radar' ? 'RADAR' : v === 'dark' ? 'DARK' : v === 'light' ? 'LIGHT' : v === 'grayscale' ? 'GRAY' : 'SAT'}
+                </button>
+              ))}
+            </div>
+
             <div className="absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded bg-ink-0/80 border border-border-subtle" style={{ backdropFilter: 'blur(8px)' }}>
               <span className={`num text-[9px] ${clientLocation.position ? 'text-fg-3' : 'text-[var(--amber)] font-semibold'}`}>
                 {locationStr}
@@ -380,7 +347,7 @@ export default function VPOverwatch() {
               onLayers={cycleMapView}
               onFilters={() => setFilterOpen((v) => !v)}
               onRecenter={onRecenter}
-              onSetLocation={() => setShowLocationSetter(true)}
+              onSetLocation={gpsLive ? undefined : () => setShowLocationSetter(true)}
               followUser={followUser}
               onFitAll={onFitAll}
               onAR={() => setShowAR(true)}
@@ -457,47 +424,27 @@ export default function VPOverwatch() {
                 />
               </div>
             )}
-          </div>
+          {/* Aircraft detail — slide-in panel (right 280px on desktop) */}
+          {selectedAircraft && (
+            <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} />
+          )}
 
-          {/* Right data grid panel — wider */}
-          <div className="flex-shrink-0 w-[480px]">
-            <DataGrid
-              aircraft={filteredAircraft}
-              reports={filteredReports}
-              user={userPosition}
-              scrubT={scrubT}
-              selectedAircraftId={selectedAircraftId}
-              selectedReportId={selectedReportId}
-              onSelectAircraft={onSelectAircraft}
-              onSelectReport={onSelectReport}
-            />
-          </div>
-        </div>
-
-        {/* Bottom dock: detail panel + time scrubber */}
-        <div className="flex-shrink-0 border-t border-border bg-ink-1">
-          {detailContent && (
-            <div className="max-h-[280px] overflow-y-auto border-b border-border">
-              <div className="p-3 flex gap-4">
-                <div className="flex-1">{detailContent}</div>
-              </div>
+          {/* Ground report detail — right panel */}
+          {selectedReport && (
+            <div className="absolute top-0 right-0 bottom-0 w-[320px] z-30 overflow-y-auto bg-ink-1 border-l border-border">
+              <ReportDetail report={selectedReport} user={userPosition} onClose={onCloseDetail} />
             </div>
           )}
-          <TimeScrubber
-            aircraft={liveData.aircraft}
-            reports={liveData.reports}
-            value={scrubT}
-            onChange={setScrubT}
-          />
         </div>
         {arOverlay}
+      {showSubscribe && <SubscribeModal onClose={() => setShowSubscribe(false)} />}
       </div>
     )
   }
 
   // ── Mobile layout (original) ──────────────────────────────────────────
-  const MOBILE_STRIP_H = 110
-  const MOBILE_ONAIR_H = 52
+  const MOBILE_STRIP_H = 48
+  const MOBILE_ONAIR_H = 28
   const MOBILE_SCRUB_H = 96
   const MAP_H = screenDims.h - MOBILE_STRIP_H - MOBILE_ONAIR_H - MOBILE_SCRUB_H
 
@@ -511,12 +458,13 @@ export default function VPOverwatch() {
           fontFamily: 'var(--font-ui)',
         }}
       >
-        <StatusStrip
-          aircraftCount={filteredAircraft.length}
-          reportsCount={filteredReports.length}
-          scrubT={scrubT}
-          relay={{ ...liveData.relay, lastTickAgo: relayTick }}
+        <VPHeader
+          airCount={filteredAircraft.length}
+          gndCount={filteredReports.length}
           silentCount={silentCount}
+          isLostSignal={isLostSignal}
+          isConnected={liveData.relay.connected}
+          onSubscribeClick={() => setShowSubscribe(true)}
         />
 
         {/* ON AIR bar — persistent airframe indicator, never filtered */}
@@ -524,20 +472,18 @@ export default function VPOverwatch() {
           className="absolute left-0 right-0 z-10"
           style={{ top: MOBILE_STRIP_H, height: MOBILE_ONAIR_H }}
         >
-          <OnAirBar
+          <VPOnAirBar
             aircraft={liveData.aircraft}
-            user={userPosition}
-            selectedAircraftId={selectedAircraftId}
-            onSelectAircraft={onSelectAircraft}
-            now={systemClock}
-            compact
+            selectedId={selectedAircraftId}
+            onSelect={onSelectAircraft}
           />
         </div>
 
         <div
           className="absolute left-0 right-0"
-          style={{ top: MOBILE_STRIP_H + MOBILE_ONAIR_H, height: MAP_H }}
+          style={{ top: MOBILE_STRIP_H + MOBILE_ONAIR_H, bottom: 0 }}
         >
+          {isLostSignal && <div className="vp-map-lost-tint" />}
           <LazyMap
             aircraft={filteredAircraft}
             reports={filteredReports}
@@ -560,11 +506,24 @@ export default function VPOverwatch() {
             viewType={mapView}
           />
 
+          {/* Map view pill — floating top-center */}
+          <div className="vp-map-pill">
+            {(['radar', 'dark', 'light', 'grayscale', 'satellite'] as const).map((v) => (
+              <button
+                key={v}
+                className={`vp-map-pill-btn ${mapView === v ? 'active' : ''}`}
+                onClick={() => setMapView(v)}
+              >
+                {v === 'radar' ? 'RADAR' : v === 'dark' ? 'DARK' : v === 'light' ? 'LIGHT' : v === 'grayscale' ? 'GRAY' : 'SAT'}
+              </button>
+            ))}
+          </div>
+
           <FabCluster
             onLayers={cycleMapView}
             onFilters={() => setFilterOpen((v) => !v)}
             onRecenter={onRecenter}
-            onSetLocation={() => setShowLocationSetter(true)}
+            onSetLocation={gpsLive ? undefined : () => setShowLocationSetter(true)}
             followUser={followUser}
             onFitAll={onFitAll}
             onAR={() => setShowAR(true)}
@@ -605,46 +564,21 @@ export default function VPOverwatch() {
             </div>
           )}
 
-          {!filterOpen && (
-            <BottomSheet
-              aircraft={filteredAircraft}
-              reports={filteredReports}
-              user={userPosition}
-              scrubT={scrubT}
-              selectedAircraftId={selectedAircraftId}
-              selectedReportId={selectedReportId}
-              onSelectAircraft={onSelectAircraft}
-              onSelectReport={onSelectReport}
-              snap={snap}
-              onSnapChange={setSnap}
-              containerHeight={MAP_H}
-              detailContent={detailContent}
-            />
+          {/* Aircraft detail — slide-in overlay panel (bottom 60% on mobile) */}
+          {selectedAircraft && (
+            <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} />
           )}
-        </div>
 
-        <div
-          className="absolute left-0 right-0 bottom-0"
-          style={{ height: MOBILE_SCRUB_H }}
-        >
-          <TimeScrubber
-            aircraft={liveData.aircraft}
-            reports={liveData.reports}
-            value={scrubT}
-            onChange={setScrubT}
-          />
+          {/* Ground report detail — bottom overlay */}
+          {selectedReport && (
+            <div className="absolute left-0 right-0 bottom-0 z-30 max-h-[55%] overflow-y-auto bg-ink-1 border-t border-border">
+              <ReportDetail report={selectedReport} user={userPosition} onClose={onCloseDetail} />
+            </div>
+          )}
         </div>
       </div>
       {arOverlay}
-    </div>
-  )
-}
-
-function StatusChip({ label, value, color }: { label: string; value: string | number; color: string }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="font-mono text-[8px] font-semibold tracking-[0.12em] text-fg-4 uppercase">{label}</span>
-      <span className="num text-[11px] font-bold" style={{ color }}>{typeof value === 'number' ? String(value).padStart(2, '0') : value}</span>
+      {showSubscribe && <SubscribeModal onClose={() => setShowSubscribe(false)} />}
     </div>
   )
 }
