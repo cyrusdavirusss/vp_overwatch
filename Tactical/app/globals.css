@@ -762,3 +762,31 @@ samp,
   pointer-events: none;
   backdrop-filter: blur(4px);
 }
+
+/* ── VP·Overwatch v2 — map + marker theme (from globals-additions.css) ───── */
+.maplibregl-map { font-family: 'Space Mono', monospace !important; }
+.maplibregl-ctrl-attrib {
+  background: rgba(6,8,12,0.7) !important;
+  color: rgba(255,255,255,0.25) !important;
+  font-size: 9px !important;
+  border-radius: 4px !important;
+}
+.maplibregl-ctrl-attrib a { color: rgba(255,255,255,0.35) !important; }
+
+/* Aircraft / ground / community HTML marker classes (available for v2 markers) */
+.vp-aircraft-marker { width: 32px; height: 32px; cursor: pointer; position: relative; }
+.vp-aircraft-marker:hover .vp-marker-ring { border-color: rgba(0,212,255,0.8); }
+.vp-marker-ring { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid rgba(0,212,255,0.35); transition: border-color 160ms ease; }
+.vp-marker-ring.selected { border-color: rgba(0,212,255,0.8); animation: vp-pulse-cyan 1.5s ease-in-out infinite; }
+.vp-marker-dot { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 10px; height: 10px; border-radius: 50%; background: var(--vp-cyan); box-shadow: 0 0 8px 3px rgba(0,212,255,0.5); }
+.vp-marker-dot.amber { background: var(--vp-amber); box-shadow: 0 0 8px 3px rgba(255,170,0,0.5); }
+.vp-marker-dot.red { background: var(--vp-red); box-shadow: 0 0 8px 3px rgba(255,45,45,0.6); animation: vp-pulse-red 1.5s ease-in-out infinite; }
+.vp-marker-label { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-family: 'Space Mono', monospace; font-size: 9px; color: rgba(0,212,255,0.9); white-space: nowrap; letter-spacing: 0.1em; text-shadow: 0 0 8px rgba(0,212,255,0.5); pointer-events: none; }
+.vp-ground-marker { width: 12px; height: 12px; border-radius: 50%; background: var(--vp-red); box-shadow: 0 0 0 3px rgba(255,45,45,0.2), 0 0 14px rgba(255,45,45,0.5); cursor: pointer; transition: transform 160ms ease, box-shadow 160ms ease; }
+.vp-ground-marker:hover { transform: scale(1.5); box-shadow: 0 0 0 4px rgba(255,45,45,0.3), 0 0 20px rgba(255,45,45,0.7); }
+.vp-community-marker { position: relative; width: 14px; height: 14px; }
+.vp-community-marker-dot { width: 14px; height: 14px; border-radius: 50%; background: rgba(139,92,246,0.8); box-shadow: 0 0 12px rgba(139,92,246,0.6); border: 1.5px solid rgba(139,92,246,0.9); cursor: pointer; }
+.vp-community-marker-label { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-family: 'Space Mono', monospace; font-size: 9px; color: #a78bfa; white-space: nowrap; text-shadow: 0 0 6px rgba(139,92,246,0.6); pointer-events: none; }
+
+/* Lost signal map tint */
+.vp-map-lost-tint { position: absolute; inset: 0; background: rgba(255,45,45,0.04); pointer-events: none; animation: vp-lost-border 1.5s ease-in-out infinite; z-index: 5; }

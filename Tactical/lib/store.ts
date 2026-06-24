@@ -932,7 +932,9 @@ export function getStore() {
     // ── Notification subscriber management ──────────────────────────────────
 
     addSubscriber(name: string, phone: string, notifyOn?: Subscriber['notifyOn']): Subscriber {
-      return addSubscriber(s.notifState, name, phone, notifyOn)
+      const sub = addSubscriber(s.notifState, name, phone, notifyOn)
+      saveToDisk()
+      return sub
     },
 
     removeSubscriber(id: string): boolean {

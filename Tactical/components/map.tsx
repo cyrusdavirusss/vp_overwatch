@@ -584,13 +584,13 @@ function addVpOverlays(map: maplibregl.Map) {
   if (!map.getLayer('vp-conn-line'))
     map.addLayer({ id: 'vp-conn-line', type: 'line', source: 'vp-conn', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': ['get', 'o'], 'line-dasharray': [3, 6] } })
   if (!map.getLayer('vp-trails-line'))
-    map.addLayer({ id: 'vp-trails-line', type: 'line', source: 'vp-trails', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFB020', 'line-width': ['get', 'w'], 'line-opacity': ['get', 'o'] } })
+    map.addLayer({ id: 'vp-trails-line', type: 'line', source: 'vp-trails', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#00d4ff', 'line-width': ['get', 'w'], 'line-opacity': ['get', 'o'] } })
   if (!map.getLayer('vp-acc-fill'))
     map.addLayer({ id: 'vp-acc-fill', type: 'fill', source: 'vp-acc', paint: { 'fill-color': '#4D7CFF', 'fill-opacity': 0.12 } })
   if (!map.getLayer('vp-acc-line'))
     map.addLayer({ id: 'vp-acc-line', type: 'line', source: 'vp-acc', paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': 0.4 } })
   if (!map.getLayer('vp-predict-line'))
-    map.addLayer({ id: 'vp-predict-line', type: 'line', source: 'vp-predict', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#FFB020', 'line-width': 2, 'line-opacity': 0.6, 'line-dasharray': [8, 6] } })
+    map.addLayer({ id: 'vp-predict-line', type: 'line', source: 'vp-predict', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#00d4ff', 'line-width': 2, 'line-opacity': 0.6, 'line-dasharray': [8, 6] } })
 }
 
 function setData(map: maplibregl.Map, id: string, features: GeoJSON.Feature[]) {
