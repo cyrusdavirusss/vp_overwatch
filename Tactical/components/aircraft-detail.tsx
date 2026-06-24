@@ -1,368 +1,167 @@
-'use client'
+"use client";
 
-import { useState, useEffect, useMemo } from 'react'
-import { Icon } from './icon'
-import { Metric, Chip } from './ui'
-import {
-  Aircraft,
-  TrackPoint,
-  User,
-  sampleTrack,
-  computeDistance,
-  computeBearing,
-  compassFromBearing,
-  formatSec,
-  formatHMS,
-  formatHM,
-} from '@/lib/data'
+/**
+ * VP·OVERWATCH — AircraftDetail panel (v2, adapted to the live Aircraft model)
+ * ─────────────────────────────────────────────────────────────────────────
+ * Absolute right-side panel (desktop) / bottom 60% (mobile, via vp-theme.css).
+ * Uses vp-theme.css classes.
+ */
+
+import type { Aircraft } from "@/lib/data";
 
 interface AircraftDetailProps {
-  aircraft: Aircraft
-  user: User
-  scrubT: number
-  onClose: () => void
+  aircraft: Aircraft;
+  onClose: () => void;
 }
 
-export function AircraftDetail({ aircraft, user, scrubT, onClose }: AircraftDetailProps) {
-  const pos = sampleTrack(aircraft.track, scrubT)
-  if (!pos) return null
+const XIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
 
-  const distNm = computeDistance(user.lat, user.lng, pos.lat, pos.lng) / 1852
-  const bearing = computeBearing(user.lat, user.lng, pos.lat, pos.lng)
-  const trackedMin = Math.floor((aircraft.track.length * 4) / 60)
-  const trend = pos.vs > 50 ? 'climb' : pos.vs < -50 ? 'descend' : 'level'
+function fuelLevel(pct: number): "high" | "medium" | "low" {
+  if (pct > 50) return "high";
+  if (pct > 20) return "medium";
+  return "low";
+}
 
-  // Sparkline data - altitude over last 15 minutes
-  const sparkData = useMemo(() => {
-    const out: number[] = []
-    for (let m = 0; m < 15; m++) {
-      const t = scrubT + m * 60
-      const p = sampleTrack(aircraft.track, t)
-      if (p) out.push(p.alt)
-    }
-    return out.reverse()
-  }, [aircraft, scrubT])
+// Live model: source is 'adsb' | 'mlat' | 'mode_s' | 'unknown'.
+function getSourceClass(ac: Aircraft): string {
+  if (ac.source === "mlat" || ac.isMlat) return "mlat";
+  if (ac.source === "adsb") return "adsb";
+  return "modes";
+}
+function getSourceText(ac: Aircraft): string {
+  if (ac.source === "mlat" || ac.isMlat) return "MLAT";
+  if (ac.source === "adsb") return "ADS-B";
+  return "MODE-S";
+}
+
+export function AircraftDetail({ aircraft: ac, onClose }: AircraftDetailProps) {
+  // "lost" = was airborne and has dropped off radar; "silent" = active but
+  // only MLAT/Mode-S (degraded source, position/altitude unreliable).
+  const isLost = ac.isActive === false && ac.lastSeen !== null;
+  const isSilent = ac.isActive === true && (ac.isModeS === true || ac.isMlat === true);
+
+  const fuelPct = ac.fuelRemainingPercent ?? 100;
+  const fl = fuelLevel(fuelPct);
+  const endMin = ac.fuelEnduranceMinutes ?? 240;
+  const remainMin = Math.round((fuelPct / 100) * endMin);
+  const airtimeMin = Math.round((ac.timeAirborneSeconds ?? 0) / 60);
+  const lastTp = ac.track && ac.track.length ? ac.track[ac.track.length - 1] : null;
+  const verticalRate = lastTp ? lastTp.vs : null;
 
   return (
-    <div className="bg-ink-1 border border-border rounded-lg p-4 mx-3">
+    <div className={`vp-detail-panel ${isLost ? "vp-lost" : ""}`}>
+
       {/* Header */}
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex flex-col gap-0.5">
-          <div className="num text-[22px] font-semibold text-fg-1 tracking-[0.04em] leading-none">
-            {aircraft.callsign}
+      <div className="vp-panel-header">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div className="vp-panel-callsign">{ac.callsign || ac.registration || ac.hex}</div>
+            <div className="vp-panel-type">
+              {ac.type || "UNKNOWN"} · {ac.operator || "VicPol Air Wing"}
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-fg-3">
-            <span className="num font-medium text-fg-2 tracking-[0.06em]">
-              {aircraft.hex}
-            </span>
-            <span className="text-fg-4">·</span>
-            <span>{aircraft.type}</span>
-          </div>
+          <button
+            onClick={onClose}
+            style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 4, marginTop: -2 }}
+            aria-label="Close panel"
+          >
+            <XIcon />
+          </button>
         </div>
-        <button
-          className="w-8 h-8 flex items-center justify-center bg-ink-2 border border-border text-fg-2 rounded-md hover:bg-ink-3 hover:text-fg-1 transition-colors"
-          onClick={onClose}
-          aria-label="Close"
-        >
-          <Icon name="close" size={18} />
-        </button>
+
+        {/* Source + status badges */}
+        <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <span className={`vp-badge ${getSourceClass(ac)}`}>{getSourceText(ac)}</span>
+          {isSilent && <span className="vp-badge silent">SILENT</span>}
+          {isLost && <span className="vp-badge lost">LOST</span>}
+        </div>
       </div>
 
-      {/* Operator */}
-      <div className="flex items-center gap-2 mb-3.5 text-xs text-fg-2">
-        <Chip variant="aircraft">{aircraft.operatorShort}</Chip>
-        <span>{aircraft.operator}</span>
-      </div>
-
-      {/* MLAT / Mode-S awareness badge */}
-      {aircraft.isMlat && (
-        <div
-          className="flex items-center gap-2 px-2.5 py-1.5 rounded-md mb-3 text-[11px]"
-          style={{ background: 'color-mix(in srgb, var(--amber) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 30%, transparent)', color: 'var(--amber)' }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          <span><strong>MLAT position</strong> — accuracy ±300m, altitude unreliable</span>
+      {/* Lost signal banner */}
+      {isLost && (
+        <div className="vp-lost-banner">
+          <span>⚠</span>
+          LOST SIGNAL — AIRBORNE {airtimeMin}min
         </div>
       )}
-      {aircraft.isModeS && (
-        <div
-          className="flex items-center gap-2 px-2.5 py-1.5 rounded-md mb-3 text-[11px]"
-          style={{ background: 'color-mix(in srgb, var(--red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)', color: 'var(--red)' }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <span><strong>Mode-S only</strong> — detected but no position available</span>
-        </div>
-      )}
 
-      {/* Flight Timer */}
-      <FlightTimer
-        timeAirborneSeconds={aircraft.timeAirborneSeconds}
-        estimatedReturnSeconds={aircraft.estimatedReturnSeconds}
-        historicalAverageSeconds={aircraft.historicalAverageSeconds}
-      />
-
-      {/* Fuel Bar */}
-      <FuelBar
-        fuelRemainingPercent={aircraft.fuelRemainingPercent}
-        fuelEnduranceMinutes={aircraft.fuelEnduranceMinutes}
-        timeAirborneSeconds={aircraft.timeAirborneSeconds}
-      />
-
-      {/* Primary metrics grid */}
-      <div
-        className="grid grid-cols-4 gap-px rounded-md overflow-hidden mb-3.5"
-        style={{ background: 'var(--border-subtle)' }}
-      >
-        <Metric label="alt" value={pos.alt != null ? pos.alt.toLocaleString() : '—'} unit={pos.alt != null ? 'ft' : ''} trend={trend} />
-        <Metric label="spd" value={pos.spd.toFixed(0)} unit="kts" />
-        <Metric label="hdg" value={String(pos.hdg).padStart(3, '0')} unit="°" />
-        <Metric
-          label="v/s"
-          value={pos.vs >= 0 ? `+${Math.abs(pos.vs)}` : `−${Math.abs(pos.vs)}`}
-          unit="ft/m"
-          tone={pos.vs > 50 ? 'green' : pos.vs < -50 ? 'amber' : 'default'}
-        />
+      {/* Data rows */}
+      <div className="vp-panel-row">
+        <span className="vp-panel-key">ALTITUDE</span>
+        <span className="vp-panel-val cyan">
+          {ac.altitude != null ? `${ac.altitude.toLocaleString()} ft` : "—"}
+        </span>
       </div>
-
-      {/* Sparkline */}
-      <div className="bg-ink-2 border border-border rounded-md p-2.5 mb-3.5">
-        <div className="flex items-baseline justify-between mb-2">
-          <span className="t-label">Altitude · last 15m</span>
-          <span className="num text-[10px] text-fg-3">
-            {Math.min(...sparkData).toLocaleString()} – {Math.max(...sparkData).toLocaleString()}ft
-          </span>
-        </div>
-        <Sparkline data={sparkData} height={48} />
+      <div className="vp-panel-row">
+        <span className="vp-panel-key">SPEED</span>
+        <span className="vp-panel-val">
+          {ac.speed != null ? `${ac.speed} kts` : "—"}
+        </span>
       </div>
-
-      {/* Secondary stats */}
-      <div className="flex gap-4 pt-3 border-t border-border-subtle">
-        <SecondaryStat label="tracked" value={`${trackedMin}m`} />
-        <SecondaryStat label="distance" value={`${distNm.toFixed(1)}nm`} />
-        <SecondaryStat
-          label="bearing"
-          value={`${String(Math.round(bearing)).padStart(3, '0')}° ${compassFromBearing(bearing)}`}
-        />
+      <div className="vp-panel-row">
+        <span className="vp-panel-key">HEADING</span>
+        <span className="vp-panel-val">
+          {ac.heading != null ? `${ac.heading}°` : "—"}
+        </span>
       </div>
-    </div>
-  )
-}
-
-function SecondaryStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex-1">
-      <div className="font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-fg-3 mb-1">
-        {label}
+      <div className="vp-panel-row">
+        <span className="vp-panel-key">VERTICAL</span>
+        <span className="vp-panel-val">
+          {verticalRate != null
+            ? `${verticalRate > 0 ? "+" : ""}${verticalRate} fpm`
+            : "—"}
+        </span>
       </div>
-      <div className="num text-[13px] font-medium text-fg-1 tracking-[0.02em]">
-        {value}
+      <div className="vp-panel-row">
+        <span className="vp-panel-key">AIRBORNE</span>
+        <span className="vp-panel-val amber">
+          {airtimeMin > 0 ? `${airtimeMin} min` : "—"}
+        </span>
       </div>
-    </div>
-  )
-}
-
-function Sparkline({ data, height = 48 }: { data: number[]; height?: number }) {
-  if (!data || data.length === 0) return null
-
-  const max = Math.max(...data)
-  const min = Math.min(...data)
-  const range = Math.max(1, max - min)
-  const W = 280
-
-  const stepX = W / (data.length - 1 || 1)
-  const points = data
-    .map((v, i) => `${i * stepX},${height - ((v - min) / range) * (height - 8) - 4}`)
-    .join(' ')
-  const linePath = `M ${points.split(' ').join(' L ')}`
-  const areaPath = `M 0,${height} L ${points.split(' ').join(' L ')} L ${(data.length - 1) * stepX},${height} Z`
-
-  return (
-    <svg
-      width="100%"
-      height={height}
-      viewBox={`0 0 ${W} ${height}`}
-      preserveAspectRatio="none"
-    >
-      <defs>
-        <linearGradient id="spark-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--amber)" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="var(--amber)" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d={areaPath} fill="url(#spark-grad)" />
-      <path
-        d={linePath}
-        stroke="var(--amber)"
-        strokeWidth="1.5"
-        fill="none"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle
-        cx={(data.length - 1) * stepX}
-        cy={height - ((data[data.length - 1] - min) / range) * (height - 8) - 4}
-        r="3"
-        fill="var(--amber)"
-      />
-    </svg>
-  )
-}
-
-// Fuel Bar component
-function FuelBar({
-  fuelRemainingPercent,
-  fuelEnduranceMinutes,
-  timeAirborneSeconds,
-}: {
-  fuelRemainingPercent: number
-  fuelEnduranceMinutes: number
-  timeAirborneSeconds: number
-}) {
-  const remainingMinutes = Math.max(0, fuelEnduranceMinutes - (timeAirborneSeconds / 60))
-  const remainingHours = Math.floor(remainingMinutes / 60)
-  const remainingMins = Math.round(remainingMinutes % 60)
-  const remainingStr = remainingHours > 0
-    ? `~${remainingHours}h${String(remainingMins).padStart(2, '0')}m remaining`
-    : `~${remainingMins}m remaining`
-
-  let barColor: string
-  if (fuelRemainingPercent > 50) {
-    barColor = 'var(--green)'
-  } else if (fuelRemainingPercent > 20) {
-    barColor = 'var(--amber)'
-  } else {
-    barColor = 'var(--red)'
-  }
-
-  return (
-    <div className="bg-ink-2 border border-border rounded-md p-3 mb-3.5">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-2.5">
-        <div className="flex-1">
-          <div className="font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-fg-3 mb-0.5">
-            fuel
-          </div>
-          <div className="num text-lg font-semibold text-fg-1 leading-none tracking-[-0.01em]">
-            {fuelRemainingPercent}%
-          </div>
-        </div>
-        <div className="flex-1 text-right">
-          <div className="font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-fg-3 mb-0.5">
-            endurance
-          </div>
-          <div className="num text-[13px] font-medium text-fg-2 leading-tight">
-            {remainingStr}
-          </div>
-        </div>
+      <div className="vp-panel-row">
+        <span className="vp-panel-key">REGO</span>
+        <span className="vp-panel-val">{ac.registration || "—"}</span>
+      </div>
+      <div className="vp-panel-row">
+        <span className="vp-panel-key">ICAO</span>
+        <span className="vp-panel-val" style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>
+          {ac.hex}
+        </span>
       </div>
 
       {/* Fuel bar */}
-      <div className="relative h-2 bg-ink-3 rounded-full overflow-hidden">
-        <div
-          className="absolute top-0 left-0 bottom-0 rounded-full transition-[width] duration-700"
-          style={{
-            width: `${fuelRemainingPercent}%`,
-            background: barColor,
-            boxShadow: `0 0 8px ${barColor}`,
-          }}
-        />
-      </div>
-    </div>
-  )
-}
-
-// Flight Timer component
-function FlightTimer({
-  timeAirborneSeconds,
-  estimatedReturnSeconds,
-  historicalAverageSeconds,
-}: {
-  timeAirborneSeconds: number
-  estimatedReturnSeconds: number
-  historicalAverageSeconds: number
-}) {
-  const [tick, setTick] = useState(0)
-
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 1000)
-    return () => clearInterval(id)
-  }, [])
-
-  const liveAirborne = timeAirborneSeconds + tick
-  const liveReturn = Math.max(0, estimatedReturnSeconds - tick)
-  const total = liveAirborne + liveReturn
-  const pct = Math.min(1, liveAirborne / Math.max(total, 1))
-  const overrun = liveAirborne > historicalAverageSeconds
-
-  return (
-    <div className="bg-ink-2 border border-border rounded-md p-3 mb-3.5">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-2.5">
-        <div className="flex-1">
-          <div className="font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-fg-3 mb-0.5">
-            airborne
-          </div>
-          <div className="num text-lg font-semibold text-fg-1 leading-none tracking-[-0.01em]">
-            {formatHMS(liveAirborne)}
-          </div>
-        </div>
-        <div
-          className="text-center px-2 mx-2"
-          style={{ borderLeft: '1px solid var(--border-subtle)', borderRight: '1px solid var(--border-subtle)' }}
-        >
-          <div className="font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-fg-3 mb-0.5">
-            historical avg
-          </div>
-          <div className="num text-[13px] font-medium text-fg-2 leading-tight">
-            {formatHM(historicalAverageSeconds)}
-          </div>
-        </div>
-        <div className="flex-1 text-right">
-          <div className="font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-fg-3 mb-0.5">
-            est. return in
-          </div>
-          <div className="num text-lg font-semibold text-fg-1 leading-none tracking-[-0.01em]">
-            {formatHMS(liveReturn)}
-          </div>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div className="relative h-2 bg-ink-3 rounded-full overflow-hidden">
-        <div
-          className="absolute top-0 left-0 bottom-0 rounded-full transition-[width] duration-700"
-          style={{
-            width: `${pct * 100}%`,
-            background: 'linear-gradient(90deg, var(--amber-lo), var(--amber))',
-            boxShadow: '0 0 8px var(--amber-glow)',
-          }}
-        />
-        <div
-          className="absolute top-0 bottom-0 w-[1.5px] bg-fg-1/70"
-          style={{
-            left: `${(historicalAverageSeconds / Math.max(total, historicalAverageSeconds)) * 100}%`,
-            transform: 'translateX(-50%)',
-          }}
-        />
-        {overrun && (
-          <div
-            className="absolute top-0 bottom-0 right-0 opacity-70"
+      <div className="vp-fuel-wrap">
+        <div className="vp-fuel-label">
+          <span className="vp-panel-key">FUEL EST.</span>
+          <span
+            className="vp-panel-val"
             style={{
-              width: `${((liveAirborne - historicalAverageSeconds) / historicalAverageSeconds) * 100}%`,
-              background: 'repeating-linear-gradient(-45deg, var(--red) 0 4px, transparent 4px 8px)',
+              fontSize: 10,
+              color: fl === "low" ? "var(--vp-red)" : fl === "medium" ? "var(--vp-amber)" : "var(--vp-cyan)",
             }}
-          />
-        )}
+          >
+            {Math.round(fuelPct)}% · ~{remainMin}min
+          </span>
+        </div>
+        <div className="vp-fuel-track">
+          <div className={`vp-fuel-fill ${fl}`} style={{ width: `${fuelPct}%` }} />
+        </div>
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between mt-1.5 font-mono text-[9.5px] text-fg-3 tracking-[0.02em]">
-        <span className="num">0:00</span>
-        <span className={overrun ? 'text-[var(--red)] font-semibold' : ''}>
-          {overrun ? `${formatHM(liveAirborne - historicalAverageSeconds)} past avg` : 'flight in progress'}
-        </span>
-        <span className="num">{formatHM(Math.max(total, historicalAverageSeconds))}</span>
-      </div>
+      {/* Signal intermittent warning */}
+      {isSilent && !isLost && (
+        <div className="vp-signal-warn">
+          <div className="vp-signal-warn-title">⚠ SIGNAL INTERMITTENT</div>
+          <div className="vp-signal-warn-body">
+            {getSourceText(ac)} only — position approximate, altitude unreliable.
+          </div>
+        </div>
+      )}
     </div>
-  )
+  );
 }

@@ -8,7 +8,7 @@
 
 import type { Aircraft, Report } from '@/lib/data'
 
-export const AMBER = '#FFB020' // active aircraft
+export const AMBER = '#00d4ff' // active aircraft (cyan — VP·Overwatch v2 theme)
 export const RED = '#FF4757' // confirmed ground threat
 export const GREEN = '#5BD68A' // reported / unconfirmed (softer state)
 export const INK0 = '#0A0B0D' // marker base fill
