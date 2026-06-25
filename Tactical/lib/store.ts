@@ -209,6 +209,8 @@ export interface Aircraft {
   isMlat?: boolean
   /** True when only Mode-S squitter — detected but no position */
   isModeS?: boolean
+  /** 'le' = law-enforcement (known VicPol/AFP hex), 'civil' = everything else in range */
+  category?: 'le' | 'civil'
 }
 
 export interface Report {
@@ -269,7 +271,7 @@ export interface SortieEntry {
 
 // ── Notification system ────────────────────────────────────────────────────
 import { createNotifState, notifyTakeoff, notifyLand, notifyStealth, resetHexNotifications, addSubscriber, removeSubscriber, updateSubscriber, type Subscriber, type NotificationEvent, type AircraftBrief } from '@/lib/notifications'
-import { computeCommunityReports, REPORT_TTL_MS, type PendingGroundReport, type GroundKind } from '@/lib/community-reports'
+import { computeCommunityReports, haversineM, REPORT_TTL_MS, type PendingGroundReport, type GroundKind } from '@/lib/community-reports'
 
 /** Project a full Aircraft record down to the telemetry Hermes briefs on. */
 function aircraftToBrief(ac: Aircraft): AircraftBrief {
@@ -323,6 +325,8 @@ function wazeLabel(kind: Report['kind'], subtype: string | null, street: string)
 
 interface StoreState {
   aircraftMap: Map<string, Aircraft>
+  /** Transient civil aircraft in range (AR sky view only — not the 2D map/safety bar) */
+  civilMap: Map<string, Aircraft>
   reportsMap: Map<string, Report>
   userGPS: User
   userLocation: UserLocation | null
@@ -341,6 +345,7 @@ function getState(): StoreState {
   if (!g[GLOBAL_KEY]) {
     g[GLOBAL_KEY] = {
       aircraftMap: new Map<string, Aircraft>(),
+      civilMap: new Map<string, Aircraft>(),
       reportsMap: new Map<string, Report>(),
       userGPS: { lat: -37.8136, lng: 144.9631, hdg: 0, accuracy: 25 },
       userLocation: null,
@@ -424,6 +429,7 @@ function initKnownAircraft(): void {
         lastSeen: null,
         fuelEnduranceMinutes: info.fuelEnduranceMinutes,
         fuelRemainingPercent: 100,
+        category: 'le',
       })
     }
   }
@@ -510,7 +516,46 @@ async function pollOpenSky(): Promise<void> {
       seenHexes.add(hex)
 
       const known = KNOWN_AIRCRAFT[hex]
-      if (!known) continue
+      if (!known) {
+        // Civil aircraft in range — a lightweight transient record kept only for
+        // the AR "sky" view (NOT the 2D map or the law-enforcement safety bar).
+        const clat = ac.lat
+        const clng = ac.lon
+        if (!validLatLng(clat, clng)) continue
+        const calt = (ac.alt_geom != null && Number(ac.alt_geom) > 0)
+          ? Number(ac.alt_geom)
+          : (ac.alt_baro != null ? Number(ac.alt_baro) : 0)
+        s.civilMap.set(hex, {
+          id: hex,
+          hex,
+          registration: ac.r || 'N/A',
+          callsign: ac.flight?.trim() || '',
+          type: ac.t || 'Unknown',
+          typeLabel: ac.desc || ac.t || 'Unknown',
+          role: 'fixedwing',
+          operator: ac.ownOp || 'Civil',
+          operatorShort: 'CIV',
+          startTime: 0,
+          timeAirborneSeconds: 0,
+          historicalAverageSeconds: 0,
+          estimatedReturnSeconds: 0,
+          altitude: Math.round(calt),
+          speed: Math.round(Number(ac.gs ?? 0)),
+          heading: Math.round(Number(ac.track ?? 0)),
+          latitude: clat,
+          longitude: clng,
+          track: [],
+          isActive: true,
+          lastSeen: now,
+          fuelEnduranceMinutes: 0,
+          fuelRemainingPercent: 0,
+          source: ac.type === 'mlat' ? 'mlat' : ac.type === 'adsb' ? 'adsb' : ac.type === 'mode_s' ? 'mode_s' : 'unknown',
+          isMlat: ac.type === 'mlat',
+          isModeS: ac.type === 'mode_s',
+          category: 'civil',
+        })
+        continue
+      }
 
       matched++
 
@@ -595,7 +640,8 @@ async function pollOpenSky(): Promise<void> {
         source: ac.type === 'mlat' ? 'mlat' : ac.type === 'adsb' ? 'adsb' : ac.type === 'mode_s' ? 'mode_s' : 'unknown',
         isMlat: ac.type === 'mlat',
         isModeS: ac.type === 'mode_s',
-      }
+        category: 'le',
+}
 
       s.aircraftMap.set(hex, aircraftObj)
 
@@ -632,6 +678,12 @@ async function pollOpenSky(): Promise<void> {
       if (!KNOWN_AIRCRAFT[hex] && (now - (ac.lastSeen ?? ac.startTime)) > 300_000) {
         s.aircraftMap.delete(hex)
       }
+    }
+
+    // Civil contacts are transient — drop any not refreshed in this 60s poll +
+    // a grace window, so the AR sky view never shows planes that have left range.
+    for (const [hex, ac] of s.civilMap) {
+      if (now - (ac.lastSeen ?? 0) > 150_000) s.civilMap.delete(hex)
     }
 
     // Mark known aircraft not seen in this poll as inactive and record sortie end.
@@ -815,7 +867,8 @@ async function pollFastPolice(): Promise<void> {
         source: ac.type === 'mlat' ? 'mlat' : ac.type === 'adsb' ? 'adsb' : ac.type === 'mode_s' ? 'mode_s' : 'unknown',
         isMlat: ac.type === 'mlat',
         isModeS: ac.type === 'mode_s',
-      })
+        category: 'le',
+})
 
       // Now that the full record exists, fire the takeoff briefing (async, don't
       // block the poll loop). Hermes briefs from complete telemetry.
@@ -897,6 +950,29 @@ export function getStore() {
       return [...s.aircraftMap.values()].filter(
         (a) => validLatLng(a.latitude, a.longitude)
       )
+    },
+
+    /**
+     * All airborne contacts for the AR "sky" view: law-enforcement (known, active)
+     * + civil traffic in range, tagged via `category` and sorted nearest-first so
+     * the cap keeps the most relevant overhead aircraft.
+     */
+    async getSkyContacts(limit = 80): Promise<Aircraft[]> {
+      if (Date.now() - s.lastOpenSkyPoll > OPENSKY_POLL_INTERVAL) {
+        await pollOpenSky()
+      }
+      const { lat, lng } = s.userGPS
+      const le = [...s.aircraftMap.values()].filter(
+        (a) => a.isActive && validLatLng(a.latitude, a.longitude)
+      )
+      const civil = [...s.civilMap.values()]
+      const all = [...le, ...civil]
+      all.sort(
+        (a, b) =>
+          haversineM(lat, lng, a.latitude, a.longitude) -
+          haversineM(lat, lng, b.latitude, b.longitude)
+      )
+      return all.slice(0, limit)
     },
 
     /** Get breadcrumb track for a specific hex */
