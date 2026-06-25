@@ -514,7 +514,11 @@ async function pollOpenSky(): Promise<void> {
       const historicalAvg = computeHistoricalAverage(hex, known?.role === 'rotary' ? 42 * 60 : 95 * 60)
 
       const fuelEndurance = known?.fuelEnduranceMinutes ?? 270
-      const fuelPct = Math.max(0, Math.min(100, Math.round((1 - timeAirborne / (fuelEndurance * 60)) * 100)))
+      // Guard startTime=0 (inactive seed) producing a nonsense fuel % — only compute when genuinely airborne
+      const isAirborneWithValidStart = (existing?.isActive ?? false) && startTime > 0 && startTime !== now
+      const fuelPct = isAirborneWithValidStart
+        ? Math.max(0, Math.min(100, Math.round((1 - timeAirborne / (fuelEndurance * 60)) * 100)))
+        : 100
 
       const aircraftObj: Aircraft = {
         id: hex,
@@ -582,7 +586,8 @@ async function pollOpenSky(): Promise<void> {
 
     // Prune only NON-known hexes — known aircraft stay forever (silent = amber)
     for (const [hex, ac] of s.aircraftMap) {
-      if (!KNOWN_AIRCRAFT[hex] && (now - ac.startTime - ac.timeAirborneSeconds * 1000) > 300_000) {
+      // Staleness via lastSeen — the old formula (now - startTime - timeAirborne*1000) was always 0
+      if (!KNOWN_AIRCRAFT[hex] && (now - (ac.lastSeen ?? ac.startTime)) > 300_000) {
         s.aircraftMap.delete(hex)
       }
     }
@@ -725,7 +730,11 @@ async function pollFastPolice(): Promise<void> {
       }
 
       const fuelEndurance = known?.fuelEnduranceMinutes ?? 270
-      const fuelPct = Math.max(0, Math.min(100, Math.round((1 - effectiveTimeAirborne / (fuelEndurance * 60)) * 100)))
+      // Guard against startTime=0 (inactive seed) producing nonsense fuel %
+      const isFastAirborneValid = (existing?.isActive ?? false) && effectiveStartTime > 0 && effectiveStartTime !== now
+      const fuelPct = isFastAirborneValid
+        ? Math.max(0, Math.min(100, Math.round((1 - effectiveTimeAirborne / (fuelEndurance * 60)) * 100)))
+        : 100
       const historicalAvg = computeHistoricalAverage(hex, 42 * 60)
 
       // Avoid duplicating breadcrumb points when nothing moved between ticks.
@@ -868,7 +877,7 @@ export function getStore() {
       const pubMillis = raw.pubMillis ? Number(raw.pubMillis) : now - 60_000
       const reportedAgo = Math.round((now - pubMillis) / 1000)
 
-      const report: Report = {
+      const report: Report & { pubMillis: number } = {
         id: `wz-${uuid}`,
         wazeUuid: uuid,
         type,
@@ -884,6 +893,7 @@ export function getStore() {
         reportedAgo,
         lastConfirmedAgo: reportedAgo,
         descr: wazeLabel(kind, subtype, raw.street || 'Unknown'),
+        pubMillis, // original publication timestamp for dynamic age calculation
       }
 
       s.reportsMap.set(uuid, report)
@@ -908,8 +918,12 @@ export function getStore() {
 
     /** Delete stale Waze alerts older than 2 hours (7200s) */
     pruneReports(): void {
+      // reportedAgo is frozen at ingest time — compute age dynamically from pubMillis
+      const now = Date.now()
       for (const [uuid, r] of s.reportsMap) {
-        if (r.reportedAgo > 7200) s.reportsMap.delete(uuid)
+        const pubMs = (r as any).pubMillis ?? (now - r.reportedAgo * 1000)
+        const ageSeconds = Math.round((now - pubMs) / 1000)
+        if (ageSeconds > 7200) s.reportsMap.delete(uuid)
       }
     },
 
