@@ -12,6 +12,7 @@ import { LazyMap } from '@/components/lazy-map'
 import { MlatBanner } from '@/components/mlat-banner'
 import { AROverlay } from '@/components/ar-overlay'
 import { SubscribeModal } from '@/components/subscribe-modal'
+import { VPSButton } from '@/components/vps-button'
 import { RouteAlertPanel } from '@/components/route-alert-panel'
 import { useRealtimeData, sampleTrack } from '@/hooks/useRealtimeData'
 import { useClientLocation } from '@/hooks/useClientLocation'
@@ -69,6 +70,25 @@ export default function VPOverwatch() {
   }), [clientLocation.position, HOME_LAT, HOME_LNG])
 
   const routeAlerts = useRouteAlerts(liveData.aircraft, liveData.reports, userPosition.lat, userPosition.lng)
+
+  // VPS — submit a community ground report at the user's current position.
+  const onReportHazard = useCallback(async (kind: 'marked' | 'unmarked' | 'hidden') => {
+    let sessionId = ''
+    try {
+      sessionId = localStorage.getItem('vp-session') || ''
+      if (!sessionId) {
+        sessionId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        localStorage.setItem('vp-session', sessionId)
+      }
+    } catch { /* private mode — anon */ }
+    try {
+      await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, lat: userPosition.lat, lng: userPosition.lng, sessionId }),
+      })
+    } catch { /* best-effort */ }
+  }, [userPosition])
 
   const [scrubT, setScrubT] = useState(0)
   const [selectedAircraftId, setSelectedAircraftId] = useState<string | null>(null)
@@ -343,6 +363,11 @@ export default function VPOverwatch() {
               <span className="num text-[9px] text-fg-3">HDG ---°</span>
             </div>
 
+            {/* VPS — community report button (left side) */}
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
+              <VPSButton onReport={onReportHazard} />
+            </div>
+
             <FabCluster
               onLayers={cycleMapView}
               onFilters={() => setFilterOpen((v) => !v)}
@@ -517,6 +542,11 @@ export default function VPOverwatch() {
                 {v === 'radar' ? 'RADAR' : v === 'dark' ? 'DARK' : v === 'light' ? 'LIGHT' : v === 'grayscale' ? 'GRAY' : 'SAT'}
               </button>
             ))}
+          </div>
+
+          {/* VPS — community report button (left side) */}
+          <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
+            <VPSButton onReport={onReportHazard} />
           </div>
 
           <FabCluster
