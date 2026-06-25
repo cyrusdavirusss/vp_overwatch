@@ -108,8 +108,10 @@ function loadFromDisk(): void {
     // Restore reports that aren't stale yet
     if (Array.isArray(snap.reports)) {
       let restored = 0
+      const now = Date.now()
       for (const r of snap.reports) {
-        if (r.uuid && r.reportedAgo != null && r.reportedAgo < 7200) {
+        const lastSeen = r.lastSeenAt ?? r.pubMillis ?? (r.reportedAgo != null ? now - r.reportedAgo * 1000 : 0)
+        if (r.uuid && now - lastSeen < REPORT_TTL_MS) {
           // Normalise legacy ids: older snapshots used an 8-char uuid slice,
           // which collided when uuids shared a prefix (e.g. alert-12*) and
           // produced duplicate React keys. Re-derive from the full uuid.
@@ -445,6 +447,21 @@ function computeHistoricalAverage(hex: string, roleDefault: number): number {
   )
 }
 
+/**
+ * Reject coordinates that ADS-B feeds emit as noise: null/NaN, the (0,0) null
+ * island, or anything outside the valid lat/lng envelope. ~15% of the police
+ * feed arrives as (0,0); letting those through corrupts the breadcrumb track
+ * and flings the camera to the Gulf of Guinea.
+ */
+function validLatLng(lat: any, lng: any): boolean {
+  return (
+    typeof lat === 'number' && typeof lng === 'number' &&
+    Number.isFinite(lat) && Number.isFinite(lng) &&
+    Math.abs(lat) <= 90 && Math.abs(lng) <= 180 &&
+    !(lat === 0 && lng === 0)
+  )
+}
+
 // ── ADSB.lol Polling ────────────────────────────────────────────────────
 
 function fetchJsonHttps(url: string, timeout: number): Promise<any> {
@@ -497,9 +514,14 @@ async function pollOpenSky(): Promise<void> {
 
       matched++
 
+      // Police hexes are owned exclusively by pollFastPolice (3s loop). Letting
+      // this 60s loop also write them produced an interleaved two-source track
+      // (zigzag) and clobbered the fast loop's fuel/startTime every minute.
+      if (POLICE_HEXES.includes(hex)) continue
+
       const latitude = ac.lat
       const longitude = ac.lon
-      if (latitude == null || longitude == null) continue
+      if (!validLatLng(latitude, longitude)) continue
 
       // adsb.lol field mapping — alt_geom is often 0 for MLAT, fallback to alt_baro
       // ADSB.lol returns alt_geom/alt_baro in FEET and gs in KNOTS — do NOT convert
@@ -511,8 +533,15 @@ async function pollOpenSky(): Promise<void> {
       const callsign = ac.flight?.trim() || ''
 
       const existing = s.aircraftMap.get(hex)
-      const startTime = existing?.startTime ?? now
-      const timeAirborne = Math.round((now - startTime) / 1000)
+      const wasActiveHex = prevActiveStates.get(hex)
+
+      // Sortie start = was inactive, now seen active. On takeoff (or whenever the
+      // stored startTime is the seeded-0 sentinel) anchor the fuel/airborne timer
+      // to *now*, so fuel burns from this sortie rather than the first-ever sighting.
+      const justTookOff = wasActiveHex === false
+      const effectiveStartTime =
+        justTookOff || !existing || existing.startTime <= 0 ? now : existing.startTime
+      const timeAirborne = Math.round((now - effectiveStartTime) / 1000)
 
       const tp: TrackPoint = {
         t: -timeAirborne,
@@ -524,26 +553,32 @@ async function pollOpenSky(): Promise<void> {
         vs: Math.round(Number(verticalRate)), // ADSB.lol baro_rate/geom_rate already in fpm
       }
 
-      const historicalAvg = computeHistoricalAverage(hex, known?.role === 'rotary' ? 42 * 60 : 95 * 60)
+      const historicalAvg = computeHistoricalAverage(hex, known.role === 'rotary' ? 42 * 60 : 95 * 60)
 
-      const fuelEndurance = known?.fuelEnduranceMinutes ?? 270
-      // Guard startTime=0 (inactive seed) producing a nonsense fuel % — only compute when genuinely airborne
-      const isAirborneWithValidStart = (existing?.isActive ?? false) && startTime > 0 && startTime !== now
-      const fuelPct = isAirborneWithValidStart
+      const fuelEndurance = known.fuelEnduranceMinutes ?? 270
+      // Burn fuel only once genuinely airborne (a real start time in the past).
+      const airborne = effectiveStartTime > 0 && effectiveStartTime !== now
+      const fuelPct = airborne
         ? Math.max(0, Math.min(100, Math.round((1 - timeAirborne / (fuelEndurance * 60)) * 100)))
         : 100
+
+      // Append a breadcrumb only when the position actually changed — kills the
+      // stationary jitter the no-dedup append used to produce.
+      const lastTp = existing?.track[existing.track.length - 1]
+      const moved = !lastTp || lastTp.lat !== latitude || lastTp.lng !== longitude
+      const track = existing ? (moved ? [...existing.track, tp].slice(-500) : existing.track) : [tp]
 
       const aircraftObj: Aircraft = {
         id: hex,
         hex,
-        registration: ac.r || known?.registration || 'N/A',
+        registration: ac.r || known.registration || 'N/A',
         callsign,
-        type: ac.t || known?.type || 'Unknown',
-        typeLabel: known?.typeLabel || ac.t || 'Unknown',
-        role: known?.role ?? 'fixedwing',
-        operator: known?.operator ?? 'Unknown',
-        operatorShort: known?.operatorShort ?? '?',
-        startTime,
+        type: ac.t || known.type || 'Unknown',
+        typeLabel: known.typeLabel || ac.t || 'Unknown',
+        role: known.role ?? 'fixedwing',
+        operator: known.operator ?? 'Unknown',
+        operatorShort: known.operatorShort ?? '?',
+        startTime: effectiveStartTime,
         timeAirborneSeconds: timeAirborne,
         historicalAverageSeconds: historicalAvg,
         estimatedReturnSeconds: Math.max(0, historicalAvg - timeAirborne),
@@ -552,7 +587,7 @@ async function pollOpenSky(): Promise<void> {
         heading,
         latitude,
         longitude,
-        track: existing ? [...existing.track, tp].slice(-500) : [tp],
+        track,
         isActive: true,
         lastSeen: now,
         fuelEnduranceMinutes: fuelEndurance,
@@ -564,18 +599,14 @@ async function pollOpenSky(): Promise<void> {
 
       s.aircraftMap.set(hex, aircraftObj)
 
-      // Detect sortie start: was inactive, now active
-      const wasActiveHex = prevActiveStates.get(hex)
-      if (wasActiveHex === false) {
-        // Reset startTime to now so fuel calculates from this sortie, not first-seen
-        const sortieStartTime = now
+      if (justTookOff) {
         const entry: SortieEntry = {
           id: `sortie-${hex}-${now}`,
           hex,
           callsign,
-          type: known?.type || ac.t || 'Unknown',
-          operatorShort: known?.operatorShort ?? '?',
-          startTime: sortieStartTime,
+          type: known.type || ac.t || 'Unknown',
+          operatorShort: known.operatorShort ?? '?',
+          startTime: now,
           endTime: null,
           durationSeconds: 0,
           maxAltitude: alt,
@@ -583,8 +614,6 @@ async function pollOpenSky(): Promise<void> {
         }
         pushSortie(s, entry)
         s.sortieMaxAlt.set(hex, alt)
-        // Reset aircraft startTime so fuel timer starts from this sortie
-        if (existing) existing.startTime = sortieStartTime
         saveToDisk()
       } else if (wasActiveHex === true) {
         // Update max altitude for ongoing sortie
@@ -605,9 +634,10 @@ async function pollOpenSky(): Promise<void> {
       }
     }
 
-    // Mark known aircraft not seen in this poll as inactive and record sortie end
+    // Mark known aircraft not seen in this poll as inactive and record sortie end.
+    // Police hexes are skipped — pollFastPolice owns their active/land lifecycle.
     for (const [hex, ac] of s.aircraftMap) {
-      if (KNOWN_AIRCRAFT[hex] && !seenHexes.has(hex)) {
+      if (KNOWN_AIRCRAFT[hex] && !POLICE_HEXES.includes(hex) && !seenHexes.has(hex)) {
         const wasActiveHex = prevActiveStates.get(hex)
         if (wasActiveHex === true) {
           ac.isActive = false
@@ -627,7 +657,8 @@ async function pollOpenSky(): Promise<void> {
 
     s.lastOpenSkyPoll = now
     s.relay.lastTickAgo = 0
-    console.log(`[ADSB.lol] ${count} VicPol tracked, ${s.aircraftMap.size} active (${aircraft.length} total in range)`)
+    const airborneCount = [...s.aircraftMap.values()].filter((a) => a.isActive).length
+    console.log(`[ADSB.lol] ${count} VicPol seen this poll, ${airborneCount} airborne, ${s.aircraftMap.size} airframes seeded (${aircraft.length} total in range)`)
   } catch (err: any) {
     if (err.name === 'AbortError') {
       console.warn('[ADSB.lol] timeout')
@@ -679,7 +710,7 @@ async function pollFastPolice(): Promise<void> {
 
       const latitude = ac.lat
       const longitude = ac.lon
-      if (latitude == null || longitude == null) continue
+      if (!validLatLng(latitude, longitude)) continue
 
       const altRaw = (ac.alt_geom != null && Number(ac.alt_geom) > 0)
         ? Number(ac.alt_geom)
@@ -864,7 +895,7 @@ export function getStore() {
         await pollOpenSky()
       }
       return [...s.aircraftMap.values()].filter(
-        (a) => a.latitude !== 0 || a.longitude !== 0 || a.callsign !== ''
+        (a) => validLatLng(a.latitude, a.longitude)
       )
     },
 
@@ -890,7 +921,7 @@ export function getStore() {
       const pubMillis = raw.pubMillis ? Number(raw.pubMillis) : now - 60_000
       const reportedAgo = Math.round((now - pubMillis) / 1000)
 
-      const report: Report & { pubMillis: number } = {
+      const report: Report & { pubMillis: number; lastSeenAt: number } = {
         id: `wz-${uuid}`,
         wazeUuid: uuid,
         type,
@@ -907,6 +938,9 @@ export function getStore() {
         lastConfirmedAgo: reportedAgo,
         descr: wazeLabel(kind, subtype, raw.street || 'Unknown'),
         pubMillis, // original publication timestamp for dynamic age calculation
+        lastSeenAt: now, // wall-clock time this unit was last seen in the relay feed;
+                         // refreshed on every re-report so a still-present unit's
+                         // 45-min timer keeps resetting ("the unit is still there").
       }
 
       s.reportsMap.set(uuid, report)
@@ -929,14 +963,18 @@ export function getStore() {
       saveToDisk()
     },
 
-    /** Delete stale Waze alerts older than 2 hours (7200s) */
+    /**
+     * Drop ground units that haven't been seen in the relay feed for 45 min.
+     * Each re-report refreshes lastSeenAt, so a unit that's still on the ground
+     * (data keeps coming back) keeps its timer reset and stays on the map. Only
+     * after REPORT_TTL_MS of silence is the unit pruned ("put down").
+     */
     pruneReports(): void {
-      // reportedAgo is frozen at ingest time — compute age dynamically from pubMillis
       const now = Date.now()
       for (const [uuid, r] of s.reportsMap) {
-        const pubMs = (r as any).pubMillis ?? (now - r.reportedAgo * 1000)
-        const ageSeconds = Math.round((now - pubMs) / 1000)
-        if (ageSeconds > 7200) s.reportsMap.delete(uuid)
+        // Fall back to pubMillis for legacy reports ingested before lastSeenAt existed.
+        const lastSeen = (r as any).lastSeenAt ?? (r as any).pubMillis ?? (now - r.reportedAgo * 1000)
+        if (now - lastSeen > REPORT_TTL_MS) s.reportsMap.delete(uuid)
       }
     },
 
