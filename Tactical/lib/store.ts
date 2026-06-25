@@ -489,9 +489,10 @@ async function pollOpenSky(): Promise<void> {
       if (latitude == null || longitude == null) continue
 
       // adsb.lol field mapping — alt_geom is often 0 for MLAT, fallback to alt_baro
+      // ADSB.lol returns alt_geom/alt_baro in FEET and gs in KNOTS — do NOT convert
       const altRaw = (ac.alt_geom != null && Number(ac.alt_geom) > 0) ? Number(ac.alt_geom) : (ac.alt_baro != null ? Number(ac.alt_baro) : 0)
-      const alt = Math.round(altRaw * 3.28084)
-      const speed = Math.round(Number(ac.gs ?? 0) * 1.94384)
+      const alt = Math.round(altRaw)   // already feet
+      const speed = Math.round(Number(ac.gs ?? 0))   // already knots
       const heading = Math.round(ac.track ?? 0)
       const verticalRate = ac.baro_rate ?? ac.geom_rate ?? 0
       const callsign = ac.flight?.trim() || ''
@@ -507,7 +508,7 @@ async function pollOpenSky(): Promise<void> {
         alt,
         hdg: heading,
         spd: speed,
-        vs: Math.round(Number(verticalRate) * 196.85),
+        vs: Math.round(Number(verticalRate)), // ADSB.lol baro_rate/geom_rate already in fpm
       }
 
       const historicalAvg = computeHistoricalAverage(hex, known?.role === 'rotary' ? 42 * 60 : 95 * 60)
@@ -665,8 +666,9 @@ async function pollFastPolice(): Promise<void> {
       const altRaw = (ac.alt_geom != null && Number(ac.alt_geom) > 0)
         ? Number(ac.alt_geom)
         : (ac.alt_baro != null ? Number(ac.alt_baro) : 0)
-      const alt = Math.round(altRaw * 3.28084)
-      const speed = Math.round(Number(ac.gs ?? 0) * 1.94384)
+      // ADSB.lol returns feet and knots — do NOT apply unit conversions
+      const alt = Math.round(altRaw)   // already feet
+      const speed = Math.round(Number(ac.gs ?? 0))   // already knots
       const heading = Math.round(ac.track ?? 0)
       const verticalRate = ac.baro_rate ?? ac.geom_rate ?? 0
       const callsign = ac.flight?.trim() || POLICE_CALLSIGNS[hex] || ''
@@ -719,7 +721,7 @@ async function pollFastPolice(): Promise<void> {
         alt,
         hdg: heading,
         spd: speed,
-        vs: Math.round(Number(verticalRate) * 196.85),
+        vs: Math.round(Number(verticalRate)), // ADSB.lol baro_rate/geom_rate already in fpm
       }
 
       const fuelEndurance = known?.fuelEnduranceMinutes ?? 270
