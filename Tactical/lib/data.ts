@@ -31,6 +31,8 @@ export interface Aircraft {
   isMlat?: boolean
   /** True when only Mode-S squitter — detected but no position */
   isModeS?: boolean
+  /** 'le' = law-enforcement (known VicPol/AFP hex), 'civil' = everything else in range */
+  category?: 'le' | 'civil'
 }
 
 export interface TrackPoint {
