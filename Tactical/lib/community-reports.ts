@@ -32,7 +32,7 @@ export interface CommunityReportItem {
 
 export const CONFIRM_RADIUS_M = 50
 export const CONFIRM_COUNT = 3
-export const REPORT_TTL_MS = 30 * 60 * 1000 // 30 minutes
+export const REPORT_TTL_MS = 45 * 60 * 1000 // 45 minutes
 
 const R = 6371000
 const toRad = (d: number) => (d * Math.PI) / 180
