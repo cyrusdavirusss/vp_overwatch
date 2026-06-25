@@ -41,6 +41,7 @@ function saveToDisk(): void {
     })),
     reports: [...s.reportsMap.entries()].map(([uuid, r]) => ({ uuid, ...r })),
     subscribers: s.notifState.subscribers.map(sub => ({ ...sub })),
+    groundReports: s.groundReports,
   }
   try {
     if (!fs.existsSync(SNAPSHOT_DIR)) fs.mkdirSync(SNAPSHOT_DIR, { recursive: true })
@@ -105,6 +106,12 @@ function loadFromDisk(): void {
         }
       }
       console.log(`[store] restored ${restored} reports`)
+    }
+
+    // Restore pending ground (VPS) reports that haven't expired
+    if (Array.isArray(snap.groundReports)) {
+      const cutoff = Date.now()
+      s.groundReports = snap.groundReports.filter((r: any) => r && r.createdAt && cutoff - r.createdAt < REPORT_TTL_MS)
     }
 
     // Restore subscribers
@@ -247,6 +254,7 @@ export interface SortieEntry {
 
 // ── Notification system ────────────────────────────────────────────────────
 import { createNotifState, notifyTakeoff, notifyLand, notifyStealth, resetHexNotifications, addSubscriber, removeSubscriber, updateSubscriber, type Subscriber, type NotificationEvent, type AircraftBrief } from '@/lib/notifications'
+import { computeCommunityReports, REPORT_TTL_MS, type PendingGroundReport, type GroundKind } from '@/lib/community-reports'
 
 /** Project a full Aircraft record down to the telemetry Hermes briefs on. */
 function aircraftToBrief(ac: Aircraft): AircraftBrief {
@@ -308,6 +316,7 @@ interface StoreState {
   sortieHistory: SortieEntry[]
   sortieMaxAlt: Map<string, number>
   notifState: ReturnType<typeof createNotifState>
+  groundReports: PendingGroundReport[]
 }
 
 const GLOBAL_KEY = '__VP_STORE__'
@@ -332,6 +341,7 @@ function getState(): StoreState {
       sortieHistory: [],
       sortieMaxAlt: new Map(),
       notifState: createNotifState(),
+      groundReports: [],
     }
   }
   return g[GLOBAL_KEY]
@@ -879,6 +889,21 @@ export function getStore() {
       touchWatchdog()
     },
 
+    /** Add a user ("VPS") ground report to the pending pool (hidden until confirmed). */
+    addUserReport(kind: GroundKind, lat: number, lng: number, sessionId: string): void {
+      const now = Date.now()
+      s.groundReports = s.groundReports.filter((r) => now - r.createdAt < REPORT_TTL_MS)
+      s.groundReports.push({
+        id: `g-${now}-${Math.random().toString(36).slice(2, 7)}`,
+        kind,
+        lat,
+        lng,
+        createdAt: now,
+        sessionId: sessionId || `anon-${now}`,
+      })
+      saveToDisk()
+    },
+
     /** Delete stale Waze alerts older than 2 hours (7200s) */
     pruneReports(): void {
       for (const [uuid, r] of s.reportsMap) {
@@ -886,10 +911,28 @@ export function getStore() {
       }
     },
 
-    /** Get all current Waze reports */
+    /** Get all ground reports: Waze relay + confirmed community (VPS) reports. */
     getReports(): Report[] {
       this.pruneReports()
-      return [...s.reportsMap.values()]
+      const waze = [...s.reportsMap.values()]
+      const community = computeCommunityReports(s.groundReports).map((c): Report => ({
+        id: c.id,
+        wazeUuid: c.id,
+        type: 'POLICE',
+        subtype: null,
+        kind: c.kind,
+        lat: c.lat,
+        lng: c.lng,
+        street: 'Community report',
+        city: '',
+        reliability: 8,
+        confidence: 8,
+        nThumbsUp: 10, // >= 5 → confirmed (red) marker via the existing renderer
+        reportedAgo: Math.round((Date.now() - c.lastReportAt) / 1000),
+        lastConfirmedAgo: 0,
+        descr: `${c.kind === 'marked' ? 'Marked unit' : c.kind === 'unmarked' ? 'Unmarked unit' : 'Hidden unit / camera'} · community ×${c.reportCount}`,
+      }))
+      return [...waze, ...community]
     },
 
     /** Update relay metadata after ingestion */
