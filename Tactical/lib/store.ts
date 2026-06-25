@@ -17,6 +17,8 @@ const SNAPSHOT_PATH = path.join(SNAPSHOT_DIR, 'store.json')
 const WATCHDOG_PATH = path.join(SNAPSHOT_DIR, 'last-ingest.txt')
 let lastSave = 0
 const SAVE_THROTTLE_MS = 5_000
+// Bound the sortie log so heap, snapshot size, and per-landing/per-request scans stay flat.
+const MAX_SORTIE_HISTORY = 1000
 const LAST_INGEST_TS_PATH = WATCHDOG_PATH
 
 /**
@@ -45,9 +47,20 @@ function saveToDisk(): void {
   }
   try {
     if (!fs.existsSync(SNAPSHOT_DIR)) fs.mkdirSync(SNAPSHOT_DIR, { recursive: true })
-    fs.writeFileSync(SNAPSHOT_PATH, JSON.stringify(snapshot), 'utf-8')
+    // Async write so a growing snapshot never blocks the event loop on the hot path.
+    fs.promises
+      .writeFile(SNAPSHOT_PATH, JSON.stringify(snapshot), 'utf-8')
+      .catch((e: any) => console.error('[store] async save failed:', e?.message))
   } catch (e: any) {
     console.error('[store] save failed:', e.message)
+  }
+}
+
+/** Append a sortie and keep only the most recent MAX_SORTIE_HISTORY entries. */
+function pushSortie(s: StoreState, entry: SortieEntry): void {
+  s.sortieHistory.push(entry)
+  if (s.sortieHistory.length > MAX_SORTIE_HISTORY) {
+    s.sortieHistory.splice(0, s.sortieHistory.length - MAX_SORTIE_HISTORY)
   }
 }
 
@@ -65,7 +78,7 @@ function loadFromDisk(): void {
 
     // Restore sortie history
     if (Array.isArray(snap.sortieHistory)) {
-      s.sortieHistory = snap.sortieHistory
+      s.sortieHistory = snap.sortieHistory.slice(-MAX_SORTIE_HISTORY)
       console.log(`[store] loaded ${s.sortieHistory.length} sortie entries`)
     }
 
@@ -568,7 +581,7 @@ async function pollOpenSky(): Promise<void> {
           maxAltitude: alt,
           status: 'active',
         }
-        s.sortieHistory.push(entry)
+        pushSortie(s, entry)
         s.sortieMaxAlt.set(hex, alt)
         // Reset aircraft startTime so fuel timer starts from this sortie
         if (existing) existing.startTime = sortieStartTime
@@ -701,7 +714,7 @@ async function pollFastPolice(): Promise<void> {
           maxAltitude: alt,
           status: 'active',
         }
-        s.sortieHistory.push(entry)
+        pushSortie(s, entry)
         s.sortieMaxAlt.set(hex, alt)
         // Write back into existing so subsequent track points use the reset startTime
         if (existing) existing.startTime = sortieStartTime
