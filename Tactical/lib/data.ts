@@ -33,6 +33,9 @@ export interface Aircraft {
   isModeS?: boolean
   /** 'le' = law-enforcement (known VicPol/AFP hex), 'civil' = everything else in range */
   category?: 'le' | 'civil'
+  /** True once judged to have landed (low+slow signal loss, or fuel exhausted).
+   *  Distinct from the SILENT state (off-feed but plausibly still airborne). */
+  landed?: boolean
 }
 
 export interface TrackPoint {
