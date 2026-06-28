@@ -274,7 +274,7 @@
 /* ── FAB Cluster ────────────────────────────────────────────────────────── */
 .vp-fab-cluster {
   position: absolute;
-  bottom: 24px;
+  bottom: 76px; /* clear the dedicated AR Sky button anchored at the corner */
   right: 16px;
   display: flex;
   flex-direction: column;
