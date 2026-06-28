@@ -211,6 +211,8 @@ export interface Aircraft {
   isModeS?: boolean
   /** 'le' = law-enforcement (known VicPol/AFP hex), 'civil' = everything else in range */
   category?: 'le' | 'civil'
+  /** True once judged to have landed (low+slow signal loss, or fuel exhausted). */
+  landed?: boolean
 }
 
 export interface Report {
@@ -272,6 +274,13 @@ export interface SortieEntry {
 // ── Notification system ────────────────────────────────────────────────────
 import { createNotifState, notifyTakeoff, notifyLand, notifyStealth, resetHexNotifications, addSubscriber, removeSubscriber, updateSubscriber, type Subscriber, type NotificationEvent, type AircraftBrief } from '@/lib/notifications'
 import { computeCommunityReports, haversineM, REPORT_TTL_MS, type PendingGroundReport, type GroundKind } from '@/lib/community-reports'
+import {
+  perfForHex,
+  trueAirspeedKt,
+  instantFuelFlowKgH,
+  maxRemainingEnduranceSec,
+} from '@/lib/fuel-model'
+import { currentAreaWind, refreshAreaWind } from '@/lib/wind'
 
 /** Project a full Aircraft record down to the telemetry Hermes briefs on. */
 function aircraftToBrief(ac: Aircraft): AircraftBrief {
@@ -374,14 +383,17 @@ const BBOX = { lamin: -38.5, lamax: -36.5, lomin: 144.0, lomax: 146.0 }
 
 // VicPol-known aircraft hex codes
 const KNOWN_AIRCRAFT: Record<string, { registration: string; role: Aircraft['role']; operator: string; operatorShort: string; type: string; typeLabel: string; fuelEnduranceMinutes: number }> = {
-  '7C7F8C': { registration: 'VH-PVH', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
+  // fuelEnduranceMinutes = best-endurance max, derived in lib/fuel-model.ts from
+  // usable fuel / minimum fuel flow (AW139 ~274, EC135 ~210, C208 ~374). Used as
+  // a fallback; the live figure comes from the physics fuel model per poll.
+  '7C7F8C': { registration: 'VH-PVH', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
   '7C2B22': { registration: 'VH-PVI', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'EC135', typeLabel: 'Eurocopter EC135', fuelEnduranceMinutes: 210 },
-  '7C1F40': { registration: 'VH-PVK', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
-  '7C4EF2': { registration: 'VH-PVO', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
-  '7C4EF4': { registration: 'VH-PVQ', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
-  '7C4EF5': { registration: 'VH-PVR', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
-  '7C4EE8': { registration: 'VH-PVE', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 270 },
-  '7CF102': { registration: 'VH-AFC', role: 'fixedwing', operator: 'Australian Federal Police', operatorShort: 'AFP', type: 'C208', typeLabel: 'Cessna 208 Caravan', fuelEnduranceMinutes: 360 },
+  '7C1F40': { registration: 'VH-PVK', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
+  '7C4EF2': { registration: 'VH-PVO', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
+  '7C4EF4': { registration: 'VH-PVQ', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
+  '7C4EF5': { registration: 'VH-PVR', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
+  '7C4EE8': { registration: 'VH-PVE', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
+  '7CF102': { registration: 'VH-AFC', role: 'fixedwing', operator: 'Australian Federal Police', operatorShort: 'AFP', type: 'C208', typeLabel: 'Cessna 208 Caravan', fuelEnduranceMinutes: 374 },
 }
 
 // ── VicPol police aircraft polled on a dedicated fast (3s) loop ───────────
@@ -437,6 +449,198 @@ function initKnownAircraft(): void {
 initKnownAircraft()
 loadFromDisk()
 
+// A known airframe that goes "silent" (off-ADS-B, isActive=false) can only
+// still be airborne until it runs out of fuel. We therefore hold the amber
+// SILENT flag for exactly as long as the aircraft could plausibly still be up,
+// then clear it (it must be on the ground). The window is computed per-airframe
+// from real telemetry, not a flat timer:
+//   • aircraft TYPE/CLASS: per-tail perf profile (PERF_BY_HEX in fuel-model.ts)
+//     sets usable fuel + min fuel flow, so plane vs heli vs heli-type differ.
+//   • FUEL ACTUALLY BURNED: the physics model (airspeed, altitude, climb,
+//     acceleration, wind, weight) integrates burn per poll into
+//     fuelRemainingPercent; silentExpiryMs converts the fuel left when it went
+//     dark into the longest it could still fly (maxRemainingEnduranceSec).
+//     A chopper that went dark after 4 h of hard low orbit clears in ~30 min;
+//     one that went dark 5 min after takeoff stays flagged for hours.
+//
+// SILENT_RESERVE_MS extends the window slightly past dry-tank endurance so a
+// momentary ADS-B dropout right at the fuel limit doesn't clear a contact that
+// is actually still flying. SILENT_MIN_GRACE_MS is a floor so a brief blip
+// never clears a freshly-airborne contact.
+const SILENT_RESERVE_MS = 5 * 60_000
+const SILENT_MIN_GRACE_MS = 3 * 60_000
+
+// ── Fast-police signal-loss / landing lifecycle ─────────────────────────────
+// Police MLAT coverage is intermittent, so a contact routinely drops off the
+// feed for a few seconds while still flying. Hold it through brief dropouts
+// before judging it gone — otherwise it flaps on/off, resets the fuel timer, and
+// fires spurious land alerts (the bug behind "shows SILENT but it's still up" and
+// the frozen fuel bar). Only PAST this gap do we decide landed vs silent.
+const POLICE_SILENT_DEBOUNCE_MS = 30_000
+// Terminal-state landing heuristic at debounce expiry: low + slow ≈ on/near the
+// ground. MSL altitude is all the feed gives; Melbourne airfields sit ~280–430ft.
+const LANDED_ALT_FT = 500
+const LANDED_SPD_KT = 30
+// Keep a just-landed contact on the map (flagged LANDED) this long before it
+// goes dormant, so you can see where it put down.
+const LANDED_LINGER_MS = 2 * 60_000
+
+// Per-hex fuel-integration clock (advances every poll, whether the contact was
+// seen or is silent) and the moment it was flagged landed. Module-level &
+// transient — rebuilt from telemetry after a restart, so they never bloat the
+// persisted Aircraft record.
+const policeFuelCalcAt = new Map<string, number>()
+const policeLandedAt = new Map<string, number>()
+
+// Integrate a police contact's fuel % forward to `now` from its fuel clock,
+// using the supplied telemetry (live when seen, last-known held when silent —
+// vsFpm 0 in that case). Drains while airborne AND while off-feed; floors at 0.
+function integratePoliceFuelPct(
+  hex: string,
+  prevPct: number,
+  now: number,
+  altFt: number,
+  gsKt: number,
+  trackDeg: number,
+  vsFpm: number,
+  fallbackEnduranceMin: number,
+  timeAirborneSec: number,
+): number {
+  const perf = perfForHex(hex)
+  const last = policeFuelCalcAt.get(hex) ?? now
+  policeFuelCalcAt.set(hex, now)
+  if (!perf) {
+    return Math.max(0, Math.min(100, Math.round((1 - timeAirborneSec / (fallbackEnduranceMin * 60)) * 100)))
+  }
+  const dtH = (now - last) / 3.6e6
+  if (dtH <= 0 || dtH > 0.5) return prevPct // first tick or a long gap: hold
+  try {
+    const wind = currentAreaWind()
+    const tas = trueAirspeedKt(gsKt, trackDeg, wind)
+    const weightFrac = Math.max(0, Math.min(1, prevPct / 100))
+    const ff = instantFuelFlowKgH(perf, tas, altFt, vsFpm, 0, weightFrac)
+    const prevKg = (prevPct / 100) * perf.usableFuelKg
+    const newKg = Math.max(0, prevKg - ff * dtH)
+    return Math.max(0, Math.min(100, Math.round((newKg / perf.usableFuelKg) * 100)))
+  } catch {
+    return prevPct
+  }
+}
+
+// Flag a fast-police contact as LANDED: stop it counting as airborne/silent,
+// close its open sortie, and brief the landing once. Keeps its last position so
+// the map can show where it put down (retired to dormant after LANDED_LINGER_MS).
+function markLandedPolice(ac: Aircraft, now: number): void {
+  const s = getState()
+  ac.isActive = false
+  ac.landed = true
+  policeLandedAt.set(ac.hex, now)
+  const idx = s.sortieHistory.findIndex((e) => e.hex === ac.hex && e.status === 'active')
+  if (idx !== -1) {
+    const entry = s.sortieHistory[idx]
+    entry.endTime = now
+    entry.durationSeconds = Math.round((now - entry.startTime) / 1000)
+    entry.maxAltitude = s.sortieMaxAlt.get(ac.hex) ?? ac.altitude
+    entry.status = 'landed'
+    notifyLand(s.notifState, ac.hex, ac.callsign || POLICE_CALLSIGNS[ac.hex] || '', entry.durationSeconds, aircraftToBrief(ac)).catch((e) =>
+      console.warn('[notif] land error:', e?.message)
+    )
+  }
+  saveToDisk()
+}
+
+// Reset a known airframe back to its dormant pre-seed state: keeps the slot
+// (registration / type / operator) ready for the next sortie, but clears the
+// last position + lastSeen so it drops off the map and out of the SILENT count.
+function resetToDormant(ac: Aircraft): void {
+  ac.isActive = false
+  ac.lastSeen = null
+  ac.startTime = 0
+  ac.timeAirborneSeconds = 0
+  ac.callsign = ''
+  ac.latitude = 0
+  ac.longitude = 0
+  ac.altitude = 0
+  ac.speed = 0
+  ac.heading = 0
+  ac.track = []
+  ac.fuelRemainingPercent = 100
+  ac.landed = false
+  policeFuelCalcAt.delete(ac.hex)
+  policeLandedAt.delete(ac.hex)
+}
+
+const KT_TO_MS = 0.514444
+
+// Model-based remaining fuel %, integrated incrementally each poll using real
+// wall-clock dt (the stored track's relative `t` is unreliable). Accounts for
+// true airspeed (wind-corrected), altitude/air density, climb/descent,
+// longitudinal acceleration and falling weight as fuel burns. Falls back to the
+// linear time model when no perf profile exists or telemetry is missing.
+function modelFuelPercent(
+  hex: string,
+  prev: Aircraft | undefined,
+  now: number,
+  altFt: number,
+  gsKt: number,
+  trackDeg: number,
+  vsFpm: number,
+  timeAirborneSec: number,
+  fallbackEnduranceMin: number,
+): number {
+  const perf = perfForHex(hex)
+  const linear = Math.max(0, Math.min(100, Math.round((1 - timeAirborneSec / (fallbackEnduranceMin * 60)) * 100)))
+  if (!perf || !prev || !prev.lastSeen || !prev.isActive) return linear
+  const dtH = (now - prev.lastSeen) / 3.6e6
+  if (dtH <= 0 || dtH > 0.5) return prev.fuelRemainingPercent ?? linear // gap >30min: hold last
+  try {
+    const wind = currentAreaWind()
+    const tasNow = trueAirspeedKt(gsKt, trackDeg, wind)
+    const tasPrev = trueAirspeedKt(prev.speed, prev.heading, wind)
+    const accel = ((tasNow - tasPrev) * KT_TO_MS) / (dtH * 3600)
+    const weightFrac = Math.max(0, Math.min(1, (prev.fuelRemainingPercent ?? 100) / 100))
+    const ff = instantFuelFlowKgH(perf, tasNow, altFt, vsFpm, accel, weightFrac)
+    const prevKg = ((prev.fuelRemainingPercent ?? 100) / 100) * perf.usableFuelKg
+    const newKg = Math.max(0, prevKg - ff * dtH)
+    return Math.max(0, Math.min(100, Math.round((newKg / perf.usableFuelKg) * 100)))
+  } catch {
+    return linear
+  }
+}
+
+// Wall-clock time by which a silent airframe must have landed: the moment it
+// went dark + however long its REMAINING fuel could keep it aloft (computed by
+// the physics model from how hard it was actually flown), + reserve. Falls back
+// to type endurance from takeoff if no perf profile / fuel state is available.
+function silentExpiryMs(ac: Aircraft): number {
+  const perf = perfForHex(ac.hex)
+  const base = ac.lastSeen ?? (ac.startTime || Date.now())
+  if (perf && ac.fuelRemainingPercent != null) {
+    const remKg = (ac.fuelRemainingPercent / 100) * perf.usableFuelKg
+    return base + maxRemainingEnduranceSec(remKg, perf) * 1000 + SILENT_RESERVE_MS
+  }
+  const enduranceMs = (ac.fuelEnduranceMinutes || 60) * 60_000
+  const takeoff = ac.startTime && ac.startTime > 0 ? ac.startTime : base
+  return takeoff + enduranceMs + SILENT_RESERVE_MS
+}
+
+// Clear any known airframe that has been silent long enough that its fuel must
+// be exhausted — it took off and has since landed (or gone permanently dark).
+function pruneSilentKnown(now: number): void {
+  const s = getState()
+  for (const hex of Object.keys(KNOWN_AIRCRAFT)) {
+    const ac = s.aircraftMap.get(hex)
+    if (!ac || ac.isActive || ac.lastSeen == null) continue
+    // Fast-police hexes have their own debounce/landing/fuel-drain lifecycle in
+    // pollFastPolice (incl. the LANDED linger) — don't double-retire them here.
+    if (POLICE_HEXES.includes(hex) || ac.landed) continue
+    const silentForMs = now - ac.lastSeen
+    if (silentForMs >= SILENT_MIN_GRACE_MS && now >= silentExpiryMs(ac)) {
+      resetToDormant(ac)
+    }
+  }
+}
+
 /**
  * Compute rolling average flight duration from completed sorties.
  * Uses the last 10 landed sorties for this hex. Falls back to the
@@ -489,6 +693,9 @@ async function pollOpenSky(): Promise<void> {
   try {
     const s = getState()
     const { lat, lng } = s.userGPS
+    // Refresh winds aloft for the operating area (cached, fire-and-forget) so
+    // the fuel model can correct groundspeed → true airspeed.
+    refreshAreaWind(lat, lng)
     const url =
       `https://api.adsb.lol/v2/point/${lat}/${lng}/100`
 
@@ -602,10 +809,11 @@ async function pollOpenSky(): Promise<void> {
 
       const fuelEndurance = known.fuelEnduranceMinutes ?? 270
       // Burn fuel only once genuinely airborne (a real start time in the past).
+      // Full tank on takeoff; thereafter integrate the physics fuel model.
       const airborne = effectiveStartTime > 0 && effectiveStartTime !== now
-      const fuelPct = airborne
-        ? Math.max(0, Math.min(100, Math.round((1 - timeAirborne / (fuelEndurance * 60)) * 100)))
-        : 100
+      const fuelPct = !airborne || justTookOff
+        ? 100
+        : modelFuelPercent(hex, existing, now, alt, speed, heading, Math.round(Number(verticalRate)), timeAirborne, fuelEndurance)
 
       // Append a breadcrumb only when the position actually changed — kills the
       // stationary jitter the no-dedup append used to produce.
@@ -672,7 +880,9 @@ async function pollOpenSky(): Promise<void> {
       count++
     }
 
-    // Prune only NON-known hexes — known aircraft stay forever (silent = amber)
+    // Reset known airframes that have been silent past the grace window (landed
+    // / signal lost) back to dormant, then drop stale unknown contacts.
+    pruneSilentKnown(now)
     for (const [hex, ac] of s.aircraftMap) {
       // Staleness via lastSeen — the old formula (now - startTime - timeAirborne*1000) was always 0
       if (!KNOWN_AIRCRAFT[hex] && (now - (ac.lastSeen ?? ac.startTime)) > 300_000) {
@@ -727,10 +937,12 @@ async function pollOpenSky(): Promise<void> {
 // whichever responds with an { ac: [...] } shape.
 async function fetchPoliceAdsb(): Promise<any[]> {
   const hexes = POLICE_HEXES.map((h) => h.toLowerCase()).join(',')
+  // api.adsb.lol/v2/hex is the live, working endpoint. The old adsb.lol/v3 path
+  // now 404s, so it's last-resort only (kept in case it returns one day).
   const candidates = [
-    `https://adsb.lol/v3/ac/hex/${hexes}`,
-    `https://api.adsb.lol/v2/icao/${hexes}`,
     `https://api.adsb.lol/v2/hex/${hexes}`,
+    `https://api.adsb.lol/v2/icao/${hexes}`,
+    `https://adsb.lol/v3/ac/hex/${hexes}`,
   ]
   for (const url of candidates) {
     try {
@@ -748,13 +960,6 @@ async function pollFastPolice(): Promise<void> {
     const s = getState()
     const aircraft = await fetchPoliceAdsb()
     const now = Date.now()
-
-    // Capture previous active states for sortie transition tracking
-    const prevActiveStates = new Map<string, boolean>()
-    for (const hex of POLICE_HEXES) {
-      const ac = s.aircraftMap.get(hex)
-      prevActiveStates.set(hex, ac ? ac.isActive : false)
-    }
 
     for (const ac of aircraft) {
       const hex = (ac.hex as string)?.toUpperCase()
@@ -779,11 +984,14 @@ async function pollFastPolice(): Promise<void> {
       const startTime = (existing && existing.startTime > 0) ? existing.startTime : now
       const timeAirborne = Math.round((now - startTime) / 1000)
 
-      // Detect sortie start: was inactive, now active → reset fuel timer
+      // Distinguish a genuine new sortie from a contact resuming after a brief
+      // (or even >30s) signal dropout. We only "take off" — reset the fuel timer
+      // and open a new sortie — when the slot was dormant or had LANDED. A
+      // contact that merely went silent mid-air keeps its sortie + fuel state, so
+      // a coverage gap no longer flaps it or refills the tank to 100%.
+      const resuming = !!existing && existing.lastSeen != null && existing.landed !== true
       let justTookOff = false
-      const wasActiveHex = prevActiveStates.get(hex)
-      if (wasActiveHex === false) {
-        // Reset startTime to now so fuel is calculated from this sortie, not first-seen
+      if (!resuming) {
         const sortieStartTime = now
         const entry: SortieEntry = {
           id: `sortie-${hex}-${now}`,
@@ -799,14 +1007,14 @@ async function pollFastPolice(): Promise<void> {
         }
         pushSortie(s, entry)
         s.sortieMaxAlt.set(hex, alt)
-        // Write back into existing so subsequent track points use the reset startTime
         if (existing) existing.startTime = sortieStartTime
+        policeFuelCalcAt.set(hex, now) // start the fuel clock at takeoff
+        policeLandedAt.delete(hex)
         saveToDisk()
         // Defer the takeoff notification until the full aircraft record below is
         // built, so Hermes can brief on complete telemetry (speed/heading/fuel).
         justTookOff = true
-      } else if (wasActiveHex === true) {
-        // Update max altitude for ongoing sortie
+      } else {
         const currentMax = s.sortieMaxAlt.get(hex) ?? 0
         if (alt > currentMax) s.sortieMaxAlt.set(hex, alt)
       }
@@ -826,11 +1034,12 @@ async function pollFastPolice(): Promise<void> {
       }
 
       const fuelEndurance = known?.fuelEnduranceMinutes ?? 270
-      // Guard against startTime=0 (inactive seed) producing nonsense fuel %
-      const isFastAirborneValid = (existing?.isActive ?? false) && effectiveStartTime > 0 && effectiveStartTime !== now
-      const fuelPct = isFastAirborneValid
-        ? Math.max(0, Math.min(100, Math.round((1 - effectiveTimeAirborne / (fuelEndurance * 60)) * 100)))
-        : 100
+      // Full tank on a fresh takeoff; otherwise integrate fuel forward from the
+      // per-hex fuel clock (which kept draining through any silent gap), so the
+      // bar tracks continuously across dropouts instead of resetting to 100%.
+      const fuelPct = justTookOff
+        ? 100
+        : integratePoliceFuelPct(hex, existing?.fuelRemainingPercent ?? 100, now, alt, speed, heading, Math.round(Number(verticalRate)), fuelEndurance, effectiveTimeAirborne)
       const historicalAvg = computeHistoricalAverage(hex, 42 * 60)
 
       // Avoid duplicating breadcrumb points when nothing moved between ticks.
@@ -868,6 +1077,7 @@ async function pollFastPolice(): Promise<void> {
         isMlat: ac.type === 'mlat',
         isModeS: ac.type === 'mode_s',
         category: 'le',
+        landed: false,
 })
 
       // Now that the full record exists, fire the takeoff briefing (async, don't
@@ -880,28 +1090,43 @@ async function pollFastPolice(): Promise<void> {
       }
     }
 
-    // Mark police hexes not seen in this poll as inactive and close sorties
+    // Police hexes NOT refreshed this poll: hold through brief MLAT dropouts,
+    // then judge landed vs silent-airborne — draining fuel the whole time.
     for (const hex of POLICE_HEXES) {
-      const acEntry = s.aircraftMap.get(hex)
-      const wasActiveHex = prevActiveStates.get(hex)
-      if (acEntry && wasActiveHex === true && !aircraft.some((a) => (a.hex as string)?.toUpperCase() === hex)) {
-        acEntry.isActive = false
-        const activeIdx = s.sortieHistory.findIndex(e => e.hex === hex && e.status === 'active')
-        if (activeIdx !== -1) {
-          const entry = s.sortieHistory[activeIdx]
-          entry.endTime = now
-          entry.durationSeconds = Math.round((now - entry.startTime) / 1000)
-          entry.maxAltitude = s.sortieMaxAlt.get(hex) ?? acEntry.altitude
-          entry.status = 'landed'
-          saveToDisk()
-          // Fire land notification (async, don't block poll loop)
-          const duration = Math.round((now - entry.startTime) / 1000)
-          notifyLand(s.notifState, hex, acEntry.callsign || POLICE_CALLSIGNS[hex] || '', duration, aircraftToBrief(acEntry)).catch(e =>
-            console.warn('[notif] land error:', e?.message)
-          )
+      const ac = s.aircraftMap.get(hex)
+      if (!ac || ac.lastSeen == null) continue
+      if (aircraft.some((a) => (a.hex as string)?.toUpperCase() === hex)) continue // got a fresh fix
+      const gap = now - ac.lastSeen
+
+      if (ac.landed) {
+        // Already down — linger briefly at its last position, then go dormant.
+        if (now - (policeLandedAt.get(hex) ?? ac.lastSeen) > LANDED_LINGER_MS) resetToDormant(ac)
+        continue
+      }
+
+      // Keep the fuel bar draining against held last-known telemetry (level).
+      ac.fuelRemainingPercent = integratePoliceFuelPct(
+        hex, ac.fuelRemainingPercent ?? 100, now, ac.altitude, ac.speed, ac.heading, 0, ac.fuelEnduranceMinutes, ac.timeAirborneSeconds,
+      )
+
+      if (ac.isActive) {
+        if (gap < POLICE_SILENT_DEBOUNCE_MS) continue // brief dropout: still active, hold position
+        // Debounce expired. Low + slow when the signal died ⇒ it set down;
+        // otherwise it's genuinely silent (lost signal while still airborne).
+        if (ac.altitude <= LANDED_ALT_FT && ac.speed <= LANDED_SPD_KT) {
+          markLandedPolice(ac, now)
+        } else {
+          ac.isActive = false
         }
+      } else if ((ac.fuelRemainingPercent ?? 0) <= 0 || now >= silentExpiryMs(ac)) {
+        // Silent-airborne but the tank is dry (or past its fuel-based endurance
+        // bound) — it must be on the ground now.
+        markLandedPolice(ac, now)
       }
     }
+
+    // Backstop for any non-fast known airframes (fast-police are handled above).
+    pruneSilentKnown(now)
   } catch (err: any) {
     console.warn(`[ADSB.lol fast-police] error: ${err.message}`)
   }

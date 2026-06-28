@@ -40,9 +40,11 @@ function getSourceText(ac: Aircraft): string {
 }
 
 export function AircraftDetail({ aircraft: ac, onClose }: AircraftDetailProps) {
-  // "lost" = was airborne and has dropped off radar; "silent" = active but
+  // "landed" = judged on the ground (low+slow loss, or fuel exhausted);
+  // "lost" = off radar but plausibly still airborne; "silent" = active but
   // only MLAT/Mode-S (degraded source, position/altitude unreliable).
-  const isLost = ac.isActive === false && ac.lastSeen !== null;
+  const isLanded = ac.landed === true;
+  const isLost = ac.isActive === false && ac.lastSeen !== null && !isLanded;
   const isSilent = ac.isActive === true && (ac.isModeS === true || ac.isMlat === true);
 
   const fuelPct = ac.fuelRemainingPercent ?? 100;
@@ -79,6 +81,7 @@ export function AircraftDetail({ aircraft: ac, onClose }: AircraftDetailProps) {
           <span className={`vp-badge ${getSourceClass(ac)}`}>{getSourceText(ac)}</span>
           {isSilent && <span className="vp-badge silent">SILENT</span>}
           {isLost && <span className="vp-badge lost">LOST</span>}
+          {isLanded && <span className="vp-badge landed">LANDED</span>}
         </div>
       </div>
 

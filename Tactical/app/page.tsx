@@ -176,7 +176,7 @@ export default function VPOverwatch() {
   }, [liveData.reports, filters])
 
   const silentCount = useMemo(() => {
-    return liveData.aircraft.filter((a) => a.isActive === false && a.lastSeen !== null).length
+    return liveData.aircraft.filter((a) => a.isActive === false && a.lastSeen !== null && !a.landed).length
   }, [liveData.aircraft])
   const hasSilentAircraft = silentCount > 0
   const isLostSignal = hasSilentAircraft
