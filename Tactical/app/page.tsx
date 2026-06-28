@@ -100,6 +100,7 @@ export default function VPOverwatch() {
   const [picking, setPicking] = useState(false)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lng: number } | null>(null)
   const [fitAllCounter, setFitAllCounter] = useState(0)
+  const [recenterCounter, setRecenterCounter] = useState(0)
   const [relayTick, setRelayTick] = useState(liveData.relay.lastTickAgo)
   const [systemClock, setSystemClock] = useState(Date.now())
 
@@ -227,6 +228,9 @@ export default function VPOverwatch() {
 
   const onRecenter = useCallback(() => {
     setFollowUser(true)
+    // Bump the recenter trigger so the map flies to the user on every press, even
+    // when the GPS fix is unchanged (otherwise the focus dedup swallows it).
+    setRecenterCounter((c) => c + 1)
     if (clientLocation.position) {
       setFocusTarget({ lat: clientLocation.position.lat, lng: clientLocation.position.lng })
     } else {
@@ -368,6 +372,7 @@ export default function VPOverwatch() {
               followMode={followUser}
               onUserPan={() => setFollowUser(false)}
               fitAllTrigger={fitAllCounter}
+              recenterTrigger={recenterCounter}
               communityDots={communityDots}
               viewType={mapView}
             />
@@ -553,6 +558,7 @@ export default function VPOverwatch() {
             focusTarget={focusTarget}
             hasSilentAircraft={hasSilentAircraft}
             fitAllTrigger={fitAllCounter}
+            recenterTrigger={recenterCounter}
             communityDots={communityDots}
             viewType={mapView}
           />
