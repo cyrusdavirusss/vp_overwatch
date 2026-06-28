@@ -15,7 +15,7 @@
  * info boxes still work.
  */
 
-import { useState, useCallback, useEffect, useRef, type CSSProperties } from "react";
+import { useState, useCallback, useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { Aircraft, Report } from "@/lib/data";
 import type { CommunityDot } from "@/lib/visual-sighting";
 import {
@@ -24,6 +24,7 @@ import {
   dirFromAzEl,
   projectDir,
   smoothBasis,
+  panBasis,
   type CamBasis,
 } from "@/lib/ar-orientation";
 
@@ -64,6 +65,17 @@ const HEADING_CALIBRATION_DEG = 0;
 // YAW_DIR = horizontal (left/right pan), PITCH_DIR = vertical (tilt up/down).
 const YAW_DIR = -1;
 const PITCH_DIR = 1;
+// ── Finger-drag panning ──────────────────────────────────────────────────────
+// Drag across the screen to pan the contact layer instead of turning the phone.
+// The drag adds a yaw/pitch offset on top of live orientation; after
+// DRAG_SNAP_BACK_MS with no touch it eases back to 0 (pure phone-aim again).
+// DRAG_*_DIR flip the feel: +1 = the layer follows your finger (map-style grab);
+// set to −1 if dragging feels reversed on your device.
+const DRAG_YAW_DIR = 1;
+const DRAG_PITCH_DIR = 1;
+const DRAG_MOVE_THRESHOLD_PX = 6; // movement before a touch counts as a drag (vs a tap)
+const DRAG_SNAP_BACK_MS = 20_000; // idle time before the view recenters to phone aim
+const DRAG_DECAY_PER_FRAME = 0.86; // how fast the offset eases to 0 once snapping back
 
 // ── Geometry ───────────────────────────────────────────────────────────────
 const toRad = (d: number) => (d * Math.PI) / 180;
@@ -165,6 +177,7 @@ interface ViewModel {
   aimHint: string | null; // where the selected target is relative to current aim
   contactCount: number; // total contacts (for the cycle counter)
   manualIdx: number; // index of the manually-selected contact (distance order)
+  panned: boolean; // a finger-drag look-offset is currently applied
 }
 
 export function AROverlay({ aircraft, reports, communityDots, userLocation, onClose }: AROverlayProps) {
@@ -188,6 +201,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
     aimHint: null,
     contactCount: 0,
     manualIdx: 0,
+    panned: false,
   });
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -206,6 +220,14 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
   const breakRef = useRef<number>(0); // timestamp the crosshair left the locked target
   const manualRef = useRef(false); // mirror of `manual` for the rAF loop
   const manualIdxRef = useRef(0); // selected index into the distance-sorted list
+  // Finger-drag look-offset (degrees) applied on top of device orientation, plus
+  // the gesture bookkeeping needed to tell a drag from a tap and to time the
+  // 20s auto-recenter.
+  const panYawRef = useRef(0);
+  const panPitchRef = useRef(0);
+  const lastTouchRef = useRef(0); // performance.now() of the last drag interaction
+  const dragRef = useRef<{ active: boolean; moved: boolean; x: number; y: number } | null>(null);
+  const suppressClickRef = useRef(false); // swallow the click that ends a drag
   useEffect(() => { contactsRef.current = contacts; }, [contacts]);
   useEffect(() => { reportsRef.current = reports; }, [reports]);
   useEffect(() => { userLocRef.current = userLocation; }, [userLocation]);
@@ -337,7 +359,18 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
         basisRef.current = basisRef.current
           ? smoothBasis(basisRef.current, targetBasis, SMOOTHING)
           : targetBasis;
-        basis = basisRef.current;
+        // Auto-recenter: once the finger-drag offset has sat untouched for
+        // DRAG_SNAP_BACK_MS, ease it back to zero so the view returns to pure
+        // phone-aim (you turn the phone again).
+        const dragging = dragRef.current?.active;
+        if (!dragging && (panYawRef.current || panPitchRef.current) && now - lastTouchRef.current > DRAG_SNAP_BACK_MS) {
+          panYawRef.current *= DRAG_DECAY_PER_FRAME;
+          panPitchRef.current *= DRAG_DECAY_PER_FRAME;
+          if (Math.abs(panYawRef.current) < 0.05) panYawRef.current = 0;
+          if (Math.abs(panPitchRef.current) < 0.05) panPitchRef.current = 0;
+        }
+        // The drag offset rides on top of the smoothed orientation basis.
+        basis = panBasis(basisRef.current, panYawRef.current, panPitchRef.current);
         const ae = azElOf(basis.fwd);
         azimuth = ae.azimuth;
         elevation = ae.elevation;
@@ -488,6 +521,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
         aimHint,
         contactCount: ordered.length,
         manualIdx,
+        panned: panYawRef.current !== 0 || panPitchRef.current !== 0,
       });
     };
     raf = requestAnimationFrame(tick);
@@ -503,6 +537,49 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
   }, []);
   // Step through contacts (nearest first) in manual cycle mode.
   const cycle = useCallback((dir: number) => { manualIdxRef.current += dir; }, []);
+
+  // ── Finger-drag panning ─────────────────────────────────────────────────
+  // Drag anywhere on the view to swing the contact layer without turning the
+  // phone; releasing starts the DRAG_SNAP_BACK_MS idle timer that recenters.
+  const recenterPan = useCallback(() => {
+    panYawRef.current = 0;
+    panPitchRef.current = 0;
+    lastTouchRef.current = 0;
+  }, []);
+  const onPointerDown = useCallback((e: ReactPointerEvent) => {
+    dragRef.current = { active: true, moved: false, x: e.clientX, y: e.clientY };
+  }, []);
+  const onPointerMove = useCallback((e: ReactPointerEvent) => {
+    const d = dragRef.current;
+    if (!d?.active) return;
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    if (!d.moved && Math.hypot(dx, dy) < DRAG_MOVE_THRESHOLD_PX) return;
+    d.moved = true;
+    // Only meaningful when we have a real orientation basis to offset.
+    if (basisRef.current) {
+      const w = window.innerWidth || 1;
+      const h = window.innerHeight || 1;
+      panYawRef.current += DRAG_YAW_DIR * (dx / w) * HFOV;
+      panPitchRef.current += DRAG_PITCH_DIR * (dy / h) * VFOV;
+      panPitchRef.current = Math.max(-80, Math.min(80, panPitchRef.current)); // don't roll past vertical
+    }
+    d.x = e.clientX;
+    d.y = e.clientY;
+    lastTouchRef.current = performance.now();
+  }, []);
+  const onPointerUp = useCallback(() => {
+    if (dragRef.current?.moved) {
+      suppressClickRef.current = true; // swallow the tap that ends a drag
+      lastTouchRef.current = performance.now();
+    }
+    dragRef.current = null;
+  }, []);
+  // True (consuming the flag) if the click that just fired was the tail of a drag.
+  const consumeDragClick = useCallback(() => {
+    if (suppressClickRef.current) { suppressClickRef.current = false; return true; }
+    return false;
+  }, []);
 
   const handlePing = useCallback(async () => {
     if (!userLocation) {
@@ -534,7 +611,12 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
       className="vp-ar-overlay"
       role="dialog"
       aria-label="AR Camera Overlay"
-      onClick={() => setLocked(null)}
+      style={{ touchAction: "none" }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onClick={() => { if (consumeDragClick()) return; setLocked(null); }}
     >
       {/* Live camera background */}
       <video
@@ -604,6 +686,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
             key={p.ac.id}
             onClick={(e) => {
               e.stopPropagation();
+              if (consumeDragClick()) return; // ignore the tap that ends a drag
               setLocked(p.ac.hex); // tap = instant lock override
             }}
             style={{
@@ -738,6 +821,23 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
         <div style={{ position: "absolute", top: 40, left: "50%", transform: "translateX(-50%)", fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, letterSpacing: "0.18em", color: view.aimHint === "● IN VIEW" ? "#9effa0" : AMBER, textShadow: "0 1px 4px #000", pointerEvents: "none" }}>
           {view.aimHint}
         </div>
+      )}
+
+      {/* Drag-pan indicator — shown while a finger-drag look-offset is applied.
+          Tap to recenter immediately; otherwise it auto-recenters after 20s. */}
+      {view.panned && !manual && (
+        <button
+          onClick={(e) => { e.stopPropagation(); recenterPan(); }}
+          style={{
+            position: "absolute", bottom: 178, left: "50%", transform: "translateX(-50%)",
+            fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
+            padding: "6px 12px", borderRadius: 14, cursor: "pointer", whiteSpace: "nowrap",
+            background: "rgba(255,176,0,0.16)", border: `1px solid ${AMBER}`, color: AMBER,
+            boxShadow: "0 2px 10px rgba(0,0,0,0.4)",
+          }}
+        >
+          ✋ DRAGGED VIEW — TAP TO RECENTER
+        </button>
       )}
 
       {/* Mode toggle: FREE AIM (point the phone) ⇄ MANUAL (cycle contacts) */}

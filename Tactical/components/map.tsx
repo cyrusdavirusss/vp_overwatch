@@ -151,6 +151,11 @@ export function VPMap({
   const communityMarkers = useRef<Map<string, maplibregl.Marker>>(new Map())
   const lastViewType = useRef<MapViewType>(viewType)
   const lastScrubT = useRef(scrubT)
+  // Remember the fit-all trigger value we last acted on, so the effect only
+  // fires on an actual user request (the counter incrementing) and NOT on the
+  // initial mount or on every aircraft data poll (which would yank the camera
+  // off the user onto the planes). Seeded with the initial trigger value.
+  const lastFitTrigger = useRef(fitAllTrigger)
 
   // ── Initialise map once ────────────────────────────────────────────────
   useEffect(() => {
@@ -282,6 +287,11 @@ export function VPMap({
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map || fitAllTrigger === undefined || aircraft.length === 0) return
+    // Only act when the user actually pressed "fit all" (trigger changed). This
+    // guard also stops the effect from firing on mount and on every poll, which
+    // was hijacking the opening camera onto an aircraft instead of the user.
+    if (fitAllTrigger === lastFitTrigger.current) return
+    lastFitTrigger.current = fitAllTrigger
     const coords = aircraft
       .map((a) => [a.longitude, a.latitude] as [number, number])
     if (coords.length === 0) return

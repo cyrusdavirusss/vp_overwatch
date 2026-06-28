@@ -99,6 +99,40 @@ export function cameraBasis(
   return { fwd: norm(fwd), right: norm(right), up: norm(up) }
 }
 
+// Rotate a vector about an arbitrary (unit) axis by deg — Rodrigues' formula.
+export function rotateAxis(v: Vec3, axis: Vec3, deg: number): Vec3 {
+  const r = deg * D2R
+  const c = Math.cos(r), s = Math.sin(r)
+  const k = norm(axis)
+  const kv = cross(k, v)
+  const kd = dot(k, v) * (1 - c)
+  return [
+    v[0] * c + kv[0] * s + k[0] * kd,
+    v[1] * c + kv[1] * s + k[1] * kd,
+    v[2] * c + kv[2] * s + k[2] * kd,
+  ]
+}
+
+// Apply a manual "look offset" to a camera basis — used for finger-drag panning
+// the AR view without physically turning the phone. Yaw rotates about world up
+// (Z); pitch rotates about the camera's own right axis (so it stays correct at
+// any roll). The offsets sit ON TOP of the live device orientation.
+export function panBasis(basis: CamBasis, yawDeg: number, pitchDeg: number): CamBasis {
+  if (!yawDeg && !pitchDeg) return basis
+  const UP: Vec3 = [0, 0, 1]
+  let { fwd, right, up } = basis
+  if (yawDeg) {
+    fwd = rotateAxis(fwd, UP, yawDeg)
+    right = rotateAxis(right, UP, yawDeg)
+    up = rotateAxis(up, UP, yawDeg)
+  }
+  if (pitchDeg) {
+    fwd = rotateAxis(fwd, right, pitchDeg)
+    up = rotateAxis(up, right, pitchDeg)
+  }
+  return { fwd: norm(fwd), right: norm(right), up: norm(up) }
+}
+
 // Compass azimuth (0=N,90=E) and elevation (deg above horizon) of a vector.
 export function azElOf(v: Vec3): { azimuth: number; elevation: number } {
   const az = (Math.atan2(v[0], v[1]) * R2D + 360) % 360
