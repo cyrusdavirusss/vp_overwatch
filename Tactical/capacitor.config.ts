@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'VP-Overwatch',
   webDir: 'out',
   server: {
-    url: 'http://100.94.31.125:3000',
+    url: 'http://100.94.31.125:3100',
     cleartext: true,
   },
 }

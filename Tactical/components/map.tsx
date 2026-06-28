@@ -47,6 +47,8 @@ export interface VPMapProps {
   onUserPan?: () => void
   /** Increment to trigger fit-all-aircraft bounds. */
   fitAllTrigger?: number
+  /** Increment to force a re-center on the user, even if coords are unchanged. */
+  recenterTrigger?: number
   /** Crowdsourced community sighting dots (approximate positions). */
   communityDots?: CommunityDot[]
   /** Basemap view mode (radar / dark / light / grayscale / satellite). */
@@ -129,6 +131,7 @@ export function VPMap({
   followMode,
   onUserPan,
   fitAllTrigger,
+  recenterTrigger,
   communityDots = [],
   viewType = 'radar',
 }: VPMapProps) {
@@ -156,6 +159,11 @@ export function VPMap({
   // initial mount or on every aircraft data poll (which would yank the camera
   // off the user onto the planes). Seeded with the initial trigger value.
   const lastFitTrigger = useRef(fitAllTrigger)
+  // Remember the recenter trigger we last acted on. Pressing the locate FAB
+  // bumps this counter; an explicit press must always fly back to the user even
+  // when the GPS fix (and thus focusTarget) is unchanged — so a press clears the
+  // focus dedup below.
+  const lastRecenterTrigger = useRef(recenterTrigger)
 
   // ── Initialise map once ────────────────────────────────────────────────
   useEffect(() => {
@@ -258,6 +266,13 @@ export function VPMap({
     const map = mapRef.current
     if (!ready || !map || !focusTarget) return
 
+    // An explicit locate-FAB press (recenterTrigger bumped) must always recenter,
+    // even onto the same coords — clear the dedup so the move below isn't skipped.
+    if (recenterTrigger !== lastRecenterTrigger.current) {
+      lastRecenterTrigger.current = recenterTrigger
+      lastFocusRef.current = null
+    }
+
     // Skip if we've already centred on this exact target.
     const focusKey = `${focusTarget.lng},${focusTarget.lat}`
     if (lastFocusRef.current === focusKey) return
@@ -281,7 +296,7 @@ export function VPMap({
         essential: true,
       })
     }
-  }, [ready, focusTarget, followMode])
+  }, [ready, focusTarget, followMode, recenterTrigger])
 
   // ── Fit all aircraft into view ─────────────────────────────
   useEffect(() => {
@@ -366,7 +381,14 @@ export function VPMap({
         if (cd) cd.textContent = `${pos.alt != null ? pos.alt.toLocaleString() + 'ft' : '—'} · ${Math.round(pos.spd)}kts`
 
         entry.rot.style.transform = `rotate(${pos.hdg}deg)`
-        ;(entry.marker.getElement() as HTMLDivElement).classList.toggle('selected', isSel)
+        const markerEl = entry.marker.getElement() as HTMLDivElement
+        markerEl.classList.toggle('selected', isSel)
+        // Silent (off-ADS-B) aircraft fade with their draining fuel so they read
+        // as a last-known/maybe-landed ghost, never a live airborne contact; an
+        // active contact is always full-opacity.
+        markerEl.style.opacity = a.isActive
+          ? '1'
+          : String(Math.max(0.18, Math.min(0.8, (a.fuelRemainingPercent ?? 0) / 100)))
         moveMarker(entry, target, !scrubbing)
       }
     }

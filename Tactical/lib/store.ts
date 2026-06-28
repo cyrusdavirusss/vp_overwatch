@@ -40,6 +40,10 @@ function saveToDisk(): void {
       callsign: ac.callsign, latitude: ac.latitude, longitude: ac.longitude,
       altitude: ac.altitude, heading: ac.heading, speed: ac.speed,
       lastSeen: ac.lastSeen, track: ac.track.slice(-100),
+      // Persist the fuel timer so a restart/deploy doesn't snap a mid-flight
+      // tank back to 100% (which would also reset the silent-expiry window).
+      fuelRemainingPercent: ac.fuelRemainingPercent, landed: ac.landed,
+      timeAirborneSeconds: ac.timeAirborneSeconds,
     })),
     reports: [...s.reportsMap.entries()].map(([uuid, r]) => ({ uuid, ...r })),
     subscribers: s.notifState.subscribers.map(sub => ({ ...sub })),
@@ -91,6 +95,12 @@ function loadFromDisk(): void {
           existing.startTime = ac.startTime || existing.startTime
           existing.callsign = ac.callsign || existing.callsign
           existing.track = (ac.track || []).slice(-500)
+          // Continue the fuel timer from where it was rather than the seeded 100%,
+          // so a live contact's tank (and its silent-expiry bound) survives a
+          // restart. isActive/position are deliberately NOT restored — the next
+          // poll re-confirms them, so a restart never resurrects a stale phantom.
+          if (typeof ac.fuelRemainingPercent === 'number') existing.fuelRemainingPercent = ac.fuelRemainingPercent
+          if (typeof ac.timeAirborneSeconds === 'number') existing.timeAirborneSeconds = ac.timeAirborneSeconds
           // Mark as last-seen so we don't immediately create a new sortie
           existing.lastSeen = now
           restored++
@@ -510,7 +520,7 @@ function integratePoliceFuelPct(
   const last = policeFuelCalcAt.get(hex) ?? now
   policeFuelCalcAt.set(hex, now)
   if (!perf) {
-    return Math.max(0, Math.min(100, Math.round((1 - timeAirborneSec / (fallbackEnduranceMin * 60)) * 100)))
+    return Math.max(0, Math.min(100, (1 - timeAirborneSec / (fallbackEnduranceMin * 60)) * 100))
   }
   const dtH = (now - last) / 3.6e6
   if (dtH <= 0 || dtH > 0.5) return prevPct // first tick or a long gap: hold
@@ -521,7 +531,10 @@ function integratePoliceFuelPct(
     const ff = instantFuelFlowKgH(perf, tas, altFt, vsFpm, 0, weightFrac)
     const prevKg = (prevPct / 100) * perf.usableFuelKg
     const newKg = Math.max(0, prevKg - ff * dtH)
-    return Math.max(0, Math.min(100, Math.round((newKg / perf.usableFuelKg) * 100)))
+    // Keep FULL PRECISION — a single 3s/60s tick burns a fraction of a percent;
+    // rounding to an int here would round every tick straight back to the prior
+    // value, so the tank would never actually drain. Round only for display.
+    return Math.max(0, Math.min(100, (newKg / perf.usableFuelKg) * 100))
   } catch {
     return prevPct
   }
@@ -589,7 +602,7 @@ function modelFuelPercent(
   fallbackEnduranceMin: number,
 ): number {
   const perf = perfForHex(hex)
-  const linear = Math.max(0, Math.min(100, Math.round((1 - timeAirborneSec / (fallbackEnduranceMin * 60)) * 100)))
+  const linear = Math.max(0, Math.min(100, (1 - timeAirborneSec / (fallbackEnduranceMin * 60)) * 100))
   if (!perf || !prev || !prev.lastSeen || !prev.isActive) return linear
   const dtH = (now - prev.lastSeen) / 3.6e6
   if (dtH <= 0 || dtH > 0.5) return prev.fuelRemainingPercent ?? linear // gap >30min: hold last
@@ -602,7 +615,9 @@ function modelFuelPercent(
     const ff = instantFuelFlowKgH(perf, tasNow, altFt, vsFpm, accel, weightFrac)
     const prevKg = ((prev.fuelRemainingPercent ?? 100) / 100) * perf.usableFuelKg
     const newKg = Math.max(0, prevKg - ff * dtH)
-    return Math.max(0, Math.min(100, Math.round((newKg / perf.usableFuelKg) * 100)))
+    // Full precision (see integratePoliceFuelPct) — rounding per tick would stall
+    // the drain. Display layers round for presentation.
+    return Math.max(0, Math.min(100, (newKg / perf.usableFuelKg) * 100))
   } catch {
     return linear
   }
@@ -635,7 +650,10 @@ function pruneSilentKnown(now: number): void {
     // pollFastPolice (incl. the LANDED linger) — don't double-retire them here.
     if (POLICE_HEXES.includes(hex) || ac.landed) continue
     const silentForMs = now - ac.lastSeen
-    if (silentForMs >= SILENT_MIN_GRACE_MS && now >= silentExpiryMs(ac)) {
+    // Retire once the tank is dry (fuel drains every 3s while silent, below) or
+    // it has been dark past its fuel-based endurance bound — whichever first.
+    const dry = (ac.fuelRemainingPercent ?? 0) <= 0
+    if (silentForMs >= SILENT_MIN_GRACE_MS && (dry || now >= silentExpiryMs(ac))) {
       resetToDormant(ac)
     }
   }
@@ -1123,6 +1141,21 @@ async function pollFastPolice(): Promise<void> {
         // bound) — it must be on the ground now.
         markLandedPolice(ac, now)
       }
+    }
+
+    // Non-fast known airframes (e.g. Air Wing) that have gone silent: keep their
+    // fuel bar draining against held last-known telemetry every 3s — exactly like
+    // the fast-police contacts above — so a silent aircraft visibly burns down
+    // instead of freezing, and pruneSilentKnown can retire it the moment the tank
+    // hits empty rather than on a stale frozen value.
+    for (const hex of Object.keys(KNOWN_AIRCRAFT)) {
+      if (POLICE_HEXES.includes(hex)) continue
+      const ac = s.aircraftMap.get(hex)
+      if (!ac || ac.isActive || ac.lastSeen == null || ac.landed) continue
+      if (!validLatLng(ac.latitude, ac.longitude)) continue
+      ac.fuelRemainingPercent = integratePoliceFuelPct(
+        hex, ac.fuelRemainingPercent ?? 100, now, ac.altitude, ac.speed, ac.heading, 0, ac.fuelEnduranceMinutes, ac.timeAirborneSeconds,
+      )
     }
 
     // Backstop for any non-fast known airframes (fast-police are handled above).
