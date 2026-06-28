@@ -46,6 +46,9 @@ const CYAN = "#22d3ee";
 // distinct colour + reticle shape so they never read as a sky contact. Matches
 // the map's "confirmed ground threat" red (lib/markers RED #FF4757).
 const GROUND = "#ff3b5c";
+// Only surface ground units within this range in AR — distant units aren't
+// relevant to what you can physically see/walk to from here.
+const GROUND_MAX_DIST_M = 10_000; // 10 km
 
 // ── Tunable AR behaviour ─────────────────────────────────────────────────────
 // SMOOTHING: per-frame blend toward the live orientation (0–1). Lower = heavier
@@ -427,6 +430,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
               }
               return { r, xPct, yPct, onScreen, distM, bearing };
             })
+            .filter((g) => g.distM <= GROUND_MAX_DIST_M) // within 10 km only
             .sort((a, b) => a.distM - b.distM);
       // Fallback (no compass) spread along the bottom so labels don't stack.
       if (!basis && ground.length > 1) {
