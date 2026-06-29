@@ -181,6 +181,8 @@ function secondsSinceLastIngest(): number {
 
 export interface TrackPoint {
   t: number
+  /** Absolute creation time (ms epoch) — reliable timeline for trails/scrub. */
+  ts?: number
   lat: number
   lng: number
   alt: number
@@ -815,6 +817,7 @@ async function pollOpenSky(): Promise<void> {
 
       const tp: TrackPoint = {
         t: -timeAirborne,
+        ts: now,
         lat: latitude,
         lng: longitude,
         alt,
@@ -979,6 +982,13 @@ async function pollFastPolice(): Promise<void> {
     const aircraft = await fetchPoliceAdsb()
     const now = Date.now()
 
+    // Hexes that got a real POSITION fix this poll. The API often returns a hex
+    // it merely *heard* on Mode-S (seen≈0) with no lat/lon (seen_pos=null); that
+    // must NOT count as a fresh fix, or the contact gets stuck in limbo — the top
+    // loop skips it (no valid position) AND the silent loop skips it (thinks it's
+    // fresh), so it never updates and never drains/retires on fuel.
+    const seenWithPos = new Set<string>()
+
     for (const ac of aircraft) {
       const hex = (ac.hex as string)?.toUpperCase()
       if (!hex || !POLICE_HEXES.includes(hex)) continue
@@ -986,6 +996,7 @@ async function pollFastPolice(): Promise<void> {
       const latitude = ac.lat
       const longitude = ac.lon
       if (!validLatLng(latitude, longitude)) continue
+      seenWithPos.add(hex)
 
       const altRaw = (ac.alt_geom != null && Number(ac.alt_geom) > 0)
         ? Number(ac.alt_geom)
@@ -1043,6 +1054,7 @@ async function pollFastPolice(): Promise<void> {
 
       const tp: TrackPoint = {
         t: -effectiveTimeAirborne,
+        ts: now,
         lat: latitude,
         lng: longitude,
         alt,
@@ -1113,7 +1125,7 @@ async function pollFastPolice(): Promise<void> {
     for (const hex of POLICE_HEXES) {
       const ac = s.aircraftMap.get(hex)
       if (!ac || ac.lastSeen == null) continue
-      if (aircraft.some((a) => (a.hex as string)?.toUpperCase() === hex)) continue // got a fresh fix
+      if (seenWithPos.has(hex)) continue // got a fresh POSITION fix this poll
       const gap = now - ac.lastSeen
 
       if (ac.landed) {
