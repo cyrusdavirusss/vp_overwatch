@@ -40,6 +40,9 @@ export interface Aircraft {
 
 export interface TrackPoint {
   t: number
+  /** Absolute creation time (ms epoch). Reliable timeline for trails/scrub —
+   *  unlike `t` (= −timeAirborne), which resets when a sortie's startTime resets. */
+  ts?: number
   lat: number
   lng: number
   alt: number
@@ -83,24 +86,39 @@ export interface Relay {
 }
 
 // Helper functions
+// Position `scrubT` seconds in the past (0 = live/current). Track points are
+// stored chronologically (newest last). We sample on the ABSOLUTE `ts` timeline
+// where available — `t` (= −timeAirborne) is unreliable: it resets whenever a
+// sortie's startTime resets, so it's non-monotonic and can't locate "now".
 export function sampleTrack(
   track: TrackPoint[],
   scrubT: number
 ): TrackPoint | null {
   if (!track || track.length === 0) return null
 
-  // Find the closest point to scrubT seconds ago
-  let closest = track[track.length - 1]
-  let minDiff = Math.abs(closest.t - -scrubT)
+  // Live view: the newest point IS the current position (array is chronological).
+  if (scrubT <= 0) return track[track.length - 1]
 
-  for (const point of track) {
-    const diff = Math.abs(point.t - -scrubT)
-    if (diff < minDiff) {
-      minDiff = diff
-      closest = point
+  const newest = track[track.length - 1]
+  // Prefer the absolute timeline; fall back to legacy `t` for pre-`ts` points.
+  if (newest.ts != null) {
+    const target = newest.ts - scrubT * 1000
+    let closest = newest
+    let minDiff = Math.abs(newest.ts - target)
+    for (const p of track) {
+      if (p.ts == null) continue
+      const diff = Math.abs(p.ts - target)
+      if (diff < minDiff) { minDiff = diff; closest = p }
     }
+    return closest
   }
 
+  let closest = newest
+  let minDiff = Math.abs(closest.t - -scrubT)
+  for (const point of track) {
+    const diff = Math.abs(point.t - -scrubT)
+    if (diff < minDiff) { minDiff = diff; closest = point }
+  }
   return closest
 }
 
@@ -109,7 +127,22 @@ export function sampleTrailUntil(
   scrubT: number,
   windowSec: number
 ): TrackPoint[] {
-  return track.filter((p) => p.t >= -(scrubT + windowSec) && p.t <= -scrubT)
+  if (!track || track.length === 0) return []
+
+  const newest = track[track.length - 1]
+  if (newest.ts != null) {
+    // Absolute timeline: keep the last `windowSec` ending at the scrub point.
+    const end = newest.ts - scrubT * 1000
+    const start = end - windowSec * 1000
+    return track.filter((p) => p.ts != null && p.ts >= start && p.ts <= end)
+  }
+
+  // Legacy fallback (no ts on any point — only old/restored tracks before the
+  // next live append). `t` isn't an absolute timeline, so just return a recent
+  // chronological tail (array is oldest→newest). Replaced within seconds once
+  // ts-stamped points arrive.
+  const approxCount = Math.max(2, Math.round(windowSec / 5))
+  return track.slice(-approxCount)
 }
 
 export function computeDistance(
