@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script src="./support.js"></script>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<script src="./support.js?v=20260708"></script>
 </head>
 <body>
 <x-dc>
@@ -28,10 +31,10 @@
       data-screen-label="VP-Overwatch · Live Map"
     >
       <div style="position: absolute; inset: 0;">
-        <x-import component-from-global-scope="VPApp" from="./app/vp-bundle.jsx" theme="dark" map-style="night" hint-size="393,852"></x-import>
+        <x-import component-from-global-scope="VPApp" from="./app/vp-bundle.jsx?v=20260708" theme="dark" map-style="night" hint-size="393,852"></x-import>
       </div>
 
-      <div style="{{ bootWrapStyle }}">
+      <div style="{{ bootWrapStyle }}" onClick="{{ onBootTap }}">
         <video src="assets/intro.mp4" poster="assets/intro_frame.png" ref="{{ videoRef }}" autoPlay="{{ true }}" muted="{{ true }}" playsInline="{{ true }}" loop="{{ false }}" onEnded="{{ finishBoot }}"
                style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: brightness(0.85);"></video>
         <div style="position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,11,13,0.30) 0%, rgba(10,11,13,0.05) 35%, rgba(10,11,13,0.78) 100%);"></div>
@@ -67,11 +70,14 @@ class Component extends DCLogic {
   videoRef = { current: null };
 
   componentDidMount() {
-    // Attempt imperative playback in addition to the autoplay attribute —
-    // more reliable across embedding contexts than the attribute alone.
+    // Attempt imperative playback — mobile browsers need this after a user gesture.
     const tryPlay = () => {
       const v = this.videoRef.current;
-      if (v && v.paused) v.play().catch(() => {});
+      if (!v) return;
+      v.play().catch(() => {
+        // Autoplay blocked (common on iOS without prior gesture). The overlay
+        // will auto-dismiss after the fallback timer below, or on first tap.
+      });
     };
     tryPlay();
     this._playTimer = setTimeout(tryPlay, 250);
@@ -86,8 +92,9 @@ class Component extends DCLogic {
     };
     this._recalc();
     window.addEventListener('resize', this._recalc);
-    // Fallback in case autoplay is blocked / onEnded never fires
-    this._bootTimer = setTimeout(() => this.finishBoot(), 8300);
+    // Fallback: auto-dismiss after 3.5s (shorter than the full video on mobile
+    // where autoplay is typically blocked and the video never starts).
+    this._bootTimer = setTimeout(() => this.finishBoot(), 3500);
   }
 
   componentWillUnmount() {
@@ -107,6 +114,13 @@ class Component extends DCLogic {
       scale: this.state.scale,
       finishBoot: this.finishBoot,
       videoRef: this.videoRef,
+      // On mobile, the first tap on the overlay plays the video (bypassing the
+      // autoplay block). Second tap or video-end calls finishBoot normally.
+      onBootTap: () => {
+        const v = this.videoRef.current;
+        if (v && v.paused) { v.play().catch(() => {}); return; }
+        this.finishBoot();
+      },
       bootWrapStyle: {
         position: 'absolute', inset: 0, zIndex: 100, background: '#000', overflow: 'hidden',
         opacity: booted ? 0 : 1,
