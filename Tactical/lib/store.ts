@@ -1209,7 +1209,7 @@ function pruneSilentOnStartup(): void {
         const drainedKg = (perf.ffLoiterKgH / 3600) * (offlineMs / 1000)
         ac.fuelRemainingPercent = Math.max(0, ((remKg - drainedKg) / perf.usableFuelKg) * 100)
       } else {
-        const enduranceMs = (ac.fuelEnduranceMinutes || 60) * 60_000
+        const enduranceMs = (ac.fuelEnduranceMinutes || (ac.role === 'rotary' ? 180 : 240)) * 60_000
         ac.fuelRemainingPercent = Math.max(0, (ac.fuelRemainingPercent ?? 100) - (100 / enduranceMs) * offlineMs)
       }
     }

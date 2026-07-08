@@ -2,7 +2,8 @@ import { getStore } from '@/lib/store'
 
 export const dynamic = 'force-dynamic'
 
-const RELAY_SECRET = process.env.WAZE_RELAY_SECRET || 'dev-secret'
+const RELAY_SECRET = process.env.WAZE_RELAY_SECRET ?? (process.env.NODE_ENV === 'development' ? 'dev-secret' : null)
+if (!RELAY_SECRET) throw new Error('WAZE_RELAY_SECRET env var is required in production')
 
 export async function POST(request: Request) {
   // Verify relay secret
