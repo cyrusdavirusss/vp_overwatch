@@ -1,7 +1,7 @@
 // Top status strip — blurs over map.
 // Shows: relay health · active aircraft · ground reports in radius · last update.
 
-function StatusStrip({ aircraftCount, reportsCount, scrubT, relay, theme, onThemeToggle }) {
+function StatusStrip({ aircraftCount, silentCount, reportsCount, scrubT, relay, theme, onThemeToggle }) {
   const scrubbed = scrubT > 0;
   return (
     <div className="vp-strip">
@@ -29,6 +29,7 @@ function StatusStrip({ aircraftCount, reportsCount, scrubT, relay, theme, onThem
       </div>
       <div className="vp-strip-stats">
         <Stat n={aircraftCount} label="airborne" tone="amber" />
+        {silentCount > 0 && <Stat n={silentCount} label="silent" tone="blue" />}
         <Stat n={reportsCount} label="ground"   tone="red" />
         <button className="vp-strip-theme" onClick={onThemeToggle} aria-label="Toggle theme">
           <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
