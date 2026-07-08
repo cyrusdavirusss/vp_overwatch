@@ -116,7 +116,7 @@ function BottomSheet({
           border-top-right-radius: var(--r-lg);
           box-shadow: var(--shadow-sheet);
           touch-action: none;
-          transition: ${dragRef.current ? 'none' : 'height var(--dur-panel) var(--ease-spring)'};
+          transition: ${dragging ? 'none' : 'height var(--dur-panel) var(--ease-spring)'};
           z-index: var(--z-sheet);
           display: flex; flex-direction: column;
           overflow: hidden;
