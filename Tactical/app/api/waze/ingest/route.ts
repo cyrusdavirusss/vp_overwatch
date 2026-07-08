@@ -23,16 +23,16 @@ export async function POST(request: Request) {
     }
 
     const store = getStore()
-    let count = 0
+    let newCount = 0
 
     for (const alert of alerts) {
-      store.upsertAlert(alert)
-      count++
+      const isNew = store.upsertAlert(alert)
+      if (isNew) newCount++
     }
 
-    store.updateRelayAfterIngest(count, alerts.length)
+    store.updateRelayAfterIngest(newCount, alerts.length)
 
-    return Response.json({ ingested: count, total: alerts.length })
+    return Response.json({ ingested: newCount, total: alerts.length })
   } catch (err: any) {
     console.error('[ingest] error:', err.message)
     return Response.json({ error: err.message }, { status: 400 })

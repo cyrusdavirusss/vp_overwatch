@@ -5,23 +5,34 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA, useCallback: useCallbackA } = React;
 
 function App(props) {
-  // Driven directly by the parent shell's props (no in-app Tweaks panel —
-  // this component is mounted as a fixed screen inside VP-Overwatch).
+  // Load persisted tweaks from localStorage, falling back to props then defaults.
+  const loadedTweaks = (() => {
+    try { return JSON.parse(localStorage.getItem('vp-tweaks') || '{}'); }
+    catch { return {}; }
+  })();
   const t = {
-    theme: props.theme || 'dark',
-    mapStyle: props.mapStyle || 'night',
-    density: props.density || 'comfortable',
-    showPredictive: props.showPredictive ?? true,
-    showTrails: props.showTrails ?? true,
-    showHeatmap: props.showHeatmap ?? false,
+    theme:         loadedTweaks.theme         || props.theme         || 'dark',
+    mapStyle:      loadedTweaks.mapStyle      || props.mapStyle      || 'night',
+    density:       loadedTweaks.density       || props.density       || 'comfortable',
+    showPredictive: loadedTweaks.showPredictive ?? props.showPredictive ?? true,
+    showTrails:    loadedTweaks.showTrails    ?? props.showTrails    ?? true,
+    showHeatmap:   loadedTweaks.showHeatmap   ?? props.showHeatmap   ?? false,
   };
-  const setTweak = () => {};
 
   // Onboarding disabled — the boot sequence delivers straight to the map.
   const [showOnboarding, setShowOnboarding] = useStateA(false);
 
   const [theme, setTheme] = useStateA(t.theme || 'dark');
   useEffectA(() => { document.documentElement.setAttribute('data-theme', theme); }, [theme]);
+
+  // setTweak: persists key/value pairs to localStorage and syncs theme state.
+  const setTweak = (update) => {
+    try {
+      const prev = JSON.parse(localStorage.getItem('vp-tweaks') || '{}');
+      localStorage.setItem('vp-tweaks', JSON.stringify({ ...prev, ...update }));
+    } catch {}
+    if (update.theme) setTheme(update.theme);
+  };
 
   const data = window.VP_DATA;
   const [scrubT, setScrubT] = useStateA(0);
@@ -33,6 +44,8 @@ function App(props) {
   const [inspectPos, setInspectPos] = useStateA(null);
   const [focusTarget, setFocusTarget] = useStateA(null);
   const [now, setNow] = useStateA(Date.now());
+  // relayTick counts seconds since the last relay poll. Resets to 0 each time
+  // the poll interval elapses (mock: pollIntervalSec=60).
   const [relayTick, setRelayTick] = useStateA(data.RELAY.lastTickAgo);
 
   const [filters, setFilters] = useStateA({
@@ -54,11 +67,14 @@ function App(props) {
     windowMin: 60,
   });
 
-  // Tick "now" so clock advances and relay tick counter updates
+  // Tick "now" so the clock advances; relay counter counts up then resets at pollIntervalSec.
   useEffectA(() => {
     const id = setInterval(() => {
       setNow(Date.now());
-      setRelayTick(p => (p + 1) % 60);
+      setRelayTick(p => {
+        const next = p + 1;
+        return next >= data.RELAY.pollIntervalSec ? 0 : next;
+      });
     }, 1000);
     return () => clearInterval(id);
   }, []);
@@ -149,7 +165,8 @@ function App(props) {
     <div className="vp-app" style={{ width: MAP_W, height: SCREEN_H, position: 'relative', overflow: 'hidden', background: 'var(--ink-0)' }}>
       {showOnboarding && <Onboarding onDone={() => setShowOnboarding(false)} />}
       <StatusStrip
-        aircraftCount={filteredAircraft.length}
+        aircraftCount={filteredAircraft.filter(a => a.isActive !== false).length}
+        silentCount={filteredAircraft.filter(a => a.isActive === false && a.lastSeen != null).length}
         reportsCount={filteredReports.length}
         scrubT={scrubT}
         relay={{ ...data.RELAY, lastTickAgo: relayTick }}

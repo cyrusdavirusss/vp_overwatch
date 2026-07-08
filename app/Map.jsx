@@ -178,7 +178,7 @@ function VPMap({
   useEffect(() => {
     if (!focusTarget) return;
     let raf;
-    const scale0 = PX_PER_METER_AT_1 * camRef.current.zoom;
+    // scale0 removed — not used in the focus-target animation
     const startTx = camRef.current.tx;
     const startTy = camRef.current.ty;
     const startZoom = camRef.current.zoom;
@@ -243,8 +243,18 @@ function VPMap({
       reports.forEach(r => {
         if (!CAR_KINDS.has(r.kind)) return;
         const s = grLiveStateRef.current[r.id] || { x: r.x, y: r.y };
-        const nx = s.x + (Math.random() * 2 - 1) * 35;
-        const ny = s.y + (Math.random() * 2 - 1) * 35;
+        // Clamp displacement within 60m of the report origin so the unit never
+        // drifts far from where it was actually spotted.
+        const MAX_DRIFT = 60;
+        const dx = s.x - r.x, dy = s.y - r.y;
+        const distFromOrigin = Math.hypot(dx, dy);
+        let nx = s.x + (Math.random() * 2 - 1) * 35;
+        let ny = s.y + (Math.random() * 2 - 1) * 35;
+        if (distFromOrigin > MAX_DRIFT) {
+          // Pull back toward origin
+          nx = r.x + (dx / distFromOrigin) * (MAX_DRIFT * 0.5);
+          ny = r.y + (dy / distFromOrigin) * (MAX_DRIFT * 0.5);
+        }
         grAnimRef.current[r.id] = {
           from: { x: s.x, y: s.y },
           to: { x: nx, y: ny },
@@ -490,7 +500,6 @@ function VPMap({
         if (a) {
           const pos = liveAircraftPos(a, scrubT);
           const next = sampleTrack(a.track, scrubT - 30); // 30s ahead
-          const farther = sampleTrack(a.track, scrubT - 75);
           if (pos && next) {
             // Forward vector: from current pos, project forward via heading & speed
             const hdgRad = (pos.hdg - 90) * Math.PI / 180;
