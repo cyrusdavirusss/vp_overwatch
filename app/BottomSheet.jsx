@@ -12,6 +12,7 @@ function BottomSheet({
   const sheetRef = React.useRef(null);
   const dragRef = React.useRef(null);
   const [dragOffset, setDragOffset] = React.useState(0);
+  const [tab, setTab] = React.useState('all'); // 'all' | 'air' | 'ground'
 
   const snaps = React.useMemo(() => {
     return {
@@ -46,20 +47,24 @@ function BottomSheet({
 
   const currentHeight = heightFor(snap) + dragOffset;
 
-  // Build feed: aircraft live first, then reports by recency
+  // Build feed: aircraft first, then reports by recency, filtered by active tab
   const feed = React.useMemo(() => {
     const items = [];
-    aircraft.forEach(a => {
-      const pos = sampleTrack(a.track, scrubT);
-      if (pos) items.push({ kind: 'aircraft', obj: a, pos, t: scrubT });
-    });
-    reports.forEach(r => {
-      const reportAgeAtScrub = r.reportedAgo - scrubT;
-      if (reportAgeAtScrub < 0) return;
-      items.push({ kind: 'report', obj: r, ageAtScrub: reportAgeAtScrub });
-    });
+    if (tab !== 'ground') {
+      aircraft.forEach(a => {
+        const pos = sampleTrack(a.track, scrubT);
+        if (pos) items.push({ kind: 'aircraft', obj: a, pos, t: scrubT });
+      });
+    }
+    if (tab !== 'air') {
+      reports.forEach(r => {
+        const reportAgeAtScrub = r.reportedAgo - scrubT;
+        if (reportAgeAtScrub < 0) return;
+        items.push({ kind: 'report', obj: r, ageAtScrub: reportAgeAtScrub });
+      });
+    }
     return items;
-  }, [aircraft, reports, scrubT]);
+  }, [aircraft, reports, scrubT, tab]);
 
   return (
     <div
@@ -79,9 +84,9 @@ function BottomSheet({
             <span className="vp-sheet-count num">{feed.length}</span>
           </div>
           <div className="vp-sheet-tabs">
-            <button className="vp-tab is-active">All</button>
-            <button className="vp-tab">Air</button>
-            <button className="vp-tab">Ground</button>
+            <button className={`vp-tab ${tab === 'all'    ? 'is-active' : ''}`} onClick={() => setTab('all')}>All</button>
+            <button className={`vp-tab ${tab === 'air'    ? 'is-active' : ''}`} onClick={() => setTab('air')}>Air</button>
+            <button className={`vp-tab ${tab === 'ground' ? 'is-active' : ''}`} onClick={() => setTab('ground')}>Ground</button>
           </div>
         </div>
       )}

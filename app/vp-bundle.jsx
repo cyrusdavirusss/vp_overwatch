@@ -526,7 +526,6 @@ function VPMap({
   useEffect(() => {
     if (!focusTarget) return;
     let raf;
-    const scale0 = PX_PER_METER_AT_1 * camRef.current.zoom;
     const startTx = camRef.current.tx;
     const startTy = camRef.current.ty;
     const startZoom = camRef.current.zoom;
@@ -591,8 +590,15 @@ function VPMap({
       reports.forEach(r => {
         if (!CAR_KINDS.has(r.kind)) return;
         const s = grLiveStateRef.current[r.id] || { x: r.x, y: r.y };
-        const nx = s.x + (Math.random() * 2 - 1) * 35;
-        const ny = s.y + (Math.random() * 2 - 1) * 35;
+        const MAX_DRIFT = 60;
+        const dx = s.x - r.x, dy = s.y - r.y;
+        const distFromOrigin = Math.hypot(dx, dy);
+        let nx = s.x + (Math.random() * 2 - 1) * 35;
+        let ny = s.y + (Math.random() * 2 - 1) * 35;
+        if (distFromOrigin > MAX_DRIFT) {
+          nx = r.x + (dx / distFromOrigin) * (MAX_DRIFT * 0.5);
+          ny = r.y + (dy / distFromOrigin) * (MAX_DRIFT * 0.5);
+        }
         grAnimRef.current[r.id] = {
           from: { x: s.x, y: s.y },
           to: { x: nx, y: ny },
@@ -838,7 +844,6 @@ function VPMap({
         if (a) {
           const pos = liveAircraftPos(a, scrubT);
           const next = sampleTrack(a.track, scrubT - 30); // 30s ahead
-          const farther = sampleTrack(a.track, scrubT - 75);
           if (pos && next) {
             // Forward vector: from current pos, project forward via heading & speed
             const hdgRad = (pos.hdg - 90) * Math.PI / 180;
@@ -1368,7 +1373,7 @@ window.sampleTrack = sampleTrack;
 // Top status strip — blurs over map.
 // Shows: relay health · active aircraft · ground reports in radius · last update.
 
-function StatusStrip({ aircraftCount, reportsCount, scrubT, relay, theme, onThemeToggle }) {
+function StatusStrip({ aircraftCount, silentCount, reportsCount, scrubT, relay, theme, onThemeToggle }) {
   const scrubbed = scrubT > 0;
   return (
     <div className="vp-strip">
@@ -1396,6 +1401,7 @@ function StatusStrip({ aircraftCount, reportsCount, scrubT, relay, theme, onThem
       </div>
       <div className="vp-strip-stats">
         <Stat n={aircraftCount} label="airborne" tone="amber" />
+        {silentCount > 0 && <Stat n={silentCount} label="silent" tone="blue" />}
         <Stat n={reportsCount} label="ground"   tone="red" />
         <button className="vp-strip-theme" onClick={onThemeToggle} aria-label="Toggle theme">
           <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
@@ -1851,6 +1857,7 @@ function BottomSheet({
   const sheetRef = React.useRef(null);
   const dragRef = React.useRef(null);
   const [dragOffset, setDragOffset] = React.useState(0);
+  const [tab, setTab] = React.useState('all'); // 'all' | 'air' | 'ground'
 
   const snaps = React.useMemo(() => {
     return {
@@ -1885,20 +1892,24 @@ function BottomSheet({
 
   const currentHeight = heightFor(snap) + dragOffset;
 
-  // Build feed: aircraft live first, then reports by recency
+  // Build feed: aircraft first, then reports by recency, filtered by active tab
   const feed = React.useMemo(() => {
     const items = [];
-    aircraft.forEach(a => {
-      const pos = sampleTrack(a.track, scrubT);
-      if (pos) items.push({ kind: 'aircraft', obj: a, pos, t: scrubT });
-    });
-    reports.forEach(r => {
-      const reportAgeAtScrub = r.reportedAgo - scrubT;
-      if (reportAgeAtScrub < 0) return;
-      items.push({ kind: 'report', obj: r, ageAtScrub: reportAgeAtScrub });
-    });
+    if (tab !== 'ground') {
+      aircraft.forEach(a => {
+        const pos = sampleTrack(a.track, scrubT);
+        if (pos) items.push({ kind: 'aircraft', obj: a, pos, t: scrubT });
+      });
+    }
+    if (tab !== 'air') {
+      reports.forEach(r => {
+        const reportAgeAtScrub = r.reportedAgo - scrubT;
+        if (reportAgeAtScrub < 0) return;
+        items.push({ kind: 'report', obj: r, ageAtScrub: reportAgeAtScrub });
+      });
+    }
     return items;
-  }, [aircraft, reports, scrubT]);
+  }, [aircraft, reports, scrubT, tab]);
 
   return (
     <div
@@ -1918,9 +1929,9 @@ function BottomSheet({
             <span className="vp-sheet-count num">{feed.length}</span>
           </div>
           <div className="vp-sheet-tabs">
-            <button className="vp-tab is-active">All</button>
-            <button className="vp-tab">Air</button>
-            <button className="vp-tab">Ground</button>
+            <button className={`vp-tab ${tab === 'all'    ? 'is-active' : ''}`} onClick={() => setTab('all')}>All</button>
+            <button className={`vp-tab ${tab === 'air'    ? 'is-active' : ''}`} onClick={() => setTab('air')}>Air</button>
+            <button className={`vp-tab ${tab === 'ground' ? 'is-active' : ''}`} onClick={() => setTab('ground')}>Ground</button>
           </div>
         </div>
       )}
@@ -3795,17 +3806,28 @@ window.clearOnboarded = clearOnboarded;
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA, useCallback: useCallbackA } = React;
 
 function App(props) {
-  // Driven directly by the parent shell's props (no in-app Tweaks panel —
-  // this component is mounted as a fixed screen inside VP-Overwatch).
+  // Load persisted tweaks from localStorage, falling back to props then defaults.
+  const loadedTweaks = (() => {
+    try { return JSON.parse(localStorage.getItem('vp-tweaks') || '{}'); }
+    catch { return {}; }
+  })();
   const t = {
-    theme: props.theme || 'dark',
-    mapStyle: props.mapStyle || 'night',
-    density: props.density || 'comfortable',
-    showPredictive: props.showPredictive ?? true,
-    showTrails: props.showTrails ?? true,
-    showHeatmap: props.showHeatmap ?? false,
+    theme:          loadedTweaks.theme          || props.theme          || 'dark',
+    mapStyle:       loadedTweaks.mapStyle       || props.mapStyle       || 'night',
+    density:        loadedTweaks.density        || props.density        || 'comfortable',
+    showPredictive: loadedTweaks.showPredictive ?? props.showPredictive ?? true,
+    showTrails:     loadedTweaks.showTrails     ?? props.showTrails     ?? true,
+    showHeatmap:    loadedTweaks.showHeatmap    ?? props.showHeatmap    ?? false,
   };
-  const setTweak = () => {};
+
+  // setTweak: persists key/value pairs to localStorage and syncs theme state.
+  const setTweak = (update) => {
+    try {
+      const prev = JSON.parse(localStorage.getItem('vp-tweaks') || '{}');
+      localStorage.setItem('vp-tweaks', JSON.stringify({ ...prev, ...update }));
+    } catch {}
+    if (update.theme) setTheme(update.theme);
+  };
 
   // Onboarding disabled — the boot sequence delivers straight to the map.
   const [showOnboarding, setShowOnboarding] = useStateA(false);
@@ -3844,11 +3866,14 @@ function App(props) {
     windowMin: 60,
   });
 
-  // Tick "now" so clock advances and relay tick counter updates
+  // Tick "now" so the clock advances; relay counter counts up then resets at pollIntervalSec.
   useEffectA(() => {
     const id = setInterval(() => {
       setNow(Date.now());
-      setRelayTick(p => (p + 1) % 60);
+      setRelayTick(p => {
+        const next = p + 1;
+        return next >= data.RELAY.pollIntervalSec ? 0 : next;
+      });
     }, 1000);
     return () => clearInterval(id);
   }, []);
@@ -3939,7 +3964,8 @@ function App(props) {
     <div className="vp-app" style={{ width: MAP_W, height: SCREEN_H, position: 'relative', overflow: 'hidden', background: 'var(--ink-0)' }}>
       {showOnboarding && <Onboarding onDone={() => setShowOnboarding(false)} />}
       <StatusStrip
-        aircraftCount={filteredAircraft.length}
+        aircraftCount={filteredAircraft.filter(a => a.isActive !== false).length}
+        silentCount={filteredAircraft.filter(a => a.isActive === false && a.lastSeen != null).length}
         reportsCount={filteredReports.length}
         scrubT={scrubT}
         relay={{ ...data.RELAY, lastTickAgo: relayTick }}

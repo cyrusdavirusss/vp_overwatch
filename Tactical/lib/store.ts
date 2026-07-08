@@ -98,12 +98,23 @@ function loadFromDisk(): void {
           existing.track = (ac.track || []).slice(-500)
           // Continue the fuel timer from where it was rather than the seeded 100%,
           // so a live contact's tank (and its silent-expiry bound) survives a
-          // restart. isActive/position are deliberately NOT restored — the next
-          // poll re-confirms them, so a restart never resurrects a stale phantom.
+          // restart. isActive is NOT restored — the next poll re-confirms it.
           if (typeof ac.fuelRemainingPercent === 'number') existing.fuelRemainingPercent = ac.fuelRemainingPercent
           if (typeof ac.timeAirborneSeconds === 'number') existing.timeAirborneSeconds = ac.timeAirborneSeconds
-          // Mark as last-seen so we don't immediately create a new sortie
-          existing.lastSeen = now
+          // Restore the ACTUAL lastSeen timestamp (not `now`). Setting it to `now`
+          // was a bug: it reset the silent-expiry clock so planes that should have
+          // expired hours ago stayed as SILENT phantoms forever after every restart.
+          existing.lastSeen = typeof ac.lastSeen === 'number' ? ac.lastSeen : null
+          // Restore last-known position so a silent contact stays on the map at its
+          // last fix instead of vanishing (lat=0/lng=0 → filtered by validLatLng).
+          if (typeof ac.latitude === 'number' && typeof ac.longitude === 'number' &&
+              validLatLng(ac.latitude, ac.longitude)) {
+            existing.latitude  = ac.latitude
+            existing.longitude = ac.longitude
+            existing.altitude  = typeof ac.altitude  === 'number' ? ac.altitude  : existing.altitude
+            existing.speed     = typeof ac.speed     === 'number' ? ac.speed     : existing.speed
+            existing.heading   = typeof ac.heading   === 'number' ? ac.heading   : existing.heading
+          }
           restored++
         }
       }
@@ -1178,10 +1189,52 @@ async function pollFastPolice(): Promise<void> {
   }
 }
 
+// ── Startup: drain offline fuel and purge stale silents ──────────────────
+// Called once after loadFromDisk — before the first ADS-B poll — so the UI
+// never shows silent phantom contacts whose fuel ran out while the server was
+// down. We use the best-endurance (ffLoiterKgH) burn rate as a CONSERVATIVE
+// lower bound: if even the most fuel-efficient profile would have exhausted the
+// tank, the aircraft must be on the ground.
+function pruneSilentOnStartup(): void {
+  const now = Date.now()
+  const s = getState()
+  for (const hex of Object.keys(KNOWN_AIRCRAFT)) {
+    const ac = s.aircraftMap.get(hex)
+    if (!ac || ac.isActive || ac.lastSeen == null || ac.landed) continue
+    const offlineMs = now - ac.lastSeen
+    if (offlineMs > 0 && offlineMs < 24 * 3_600_000) {
+      const perf = perfForHex(hex)
+      if (perf) {
+        const remKg     = (ac.fuelRemainingPercent / 100) * perf.usableFuelKg
+        const drainedKg = (perf.ffLoiterKgH / 3600) * (offlineMs / 1000)
+        ac.fuelRemainingPercent = Math.max(0, ((remKg - drainedKg) / perf.usableFuelKg) * 100)
+      } else {
+        const enduranceMs = (ac.fuelEnduranceMinutes || 60) * 60_000
+        ac.fuelRemainingPercent = Math.max(0, (ac.fuelRemainingPercent ?? 100) - (100 / enduranceMs) * offlineMs)
+      }
+    }
+  }
+  // pruneSilentKnown handles non-police hexes; police hexes need their own check
+  // because that function explicitly skips POLICE_HEXES.
+  pruneSilentKnown(now)
+  for (const hex of POLICE_HEXES) {
+    const ac = s.aircraftMap.get(hex)
+    if (!ac || ac.isActive || ac.lastSeen == null || ac.landed) continue
+    const dry      = (ac.fuelRemainingPercent ?? 0) <= 0
+    const silentMs = now - ac.lastSeen
+    if (silentMs >= SILENT_MIN_GRACE_MS && (dry || now >= silentExpiryMs(ac))) {
+      resetToDormant(ac)
+    }
+  }
+  const silentCount = [...s.aircraftMap.values()].filter(a => !a.isActive && a.lastSeen != null && !a.landed).length
+  console.log(`[store] startup prune complete — ${silentCount} silent contact(s) remain`)
+}
+
 function ensureFastPoliceLoop(): void {
   const g = globalThis as any
   if (g.__VP_FAST_POLICE_SET) return
   g.__VP_FAST_POLICE_SET = true
+  pruneSilentOnStartup()
   // Kick off immediately, then poll the 4 police hexes every 3 seconds.
   pollFastPolice()
   setInterval(() => { pollFastPolice() }, FAST_POLICE_INTERVAL)
@@ -1223,6 +1276,17 @@ export function getStore() {
       )
     },
 
+    /** Exact active / silent breakdown — used by status headers. */
+    getAircraftCounts(): { active: number; silent: number } {
+      let active = 0, silent = 0
+      for (const ac of s.aircraftMap.values()) {
+        if (!validLatLng(ac.latitude, ac.longitude)) continue
+        if (ac.isActive) active++
+        else if (ac.lastSeen != null && !ac.landed && (ac.fuelRemainingPercent ?? 0) > 0) silent++
+      }
+      return { active, silent }
+    },
+
     /**
      * All airborne contacts for the AR "sky" view: law-enforcement (known, active)
      * + civil traffic in range, tagged via `category` and sorted nearest-first so
@@ -1257,9 +1321,11 @@ export function getStore() {
     },
 
     /** Upsert Waze alert from relay */
-    upsertAlert(raw: any): void {
+    /** Returns true if the alert was new, false if it was a refresh of an existing one. */
+    upsertAlert(raw: any): boolean {
       const uuid = raw.uuid
-      if (!uuid) return
+      if (!uuid) return false
+      const isNew = !s.reportsMap.has(uuid)
 
       const type = raw.type || 'POLICE'
       const subtype = raw.subtype || null
@@ -1293,6 +1359,7 @@ export function getStore() {
       s.reportsMap.set(uuid, report)
       saveToDisk()
       touchWatchdog()
+      return isNew
     },
 
     /** Add a user ("VPS") ground report to the pending pool (hidden until confirmed). */
