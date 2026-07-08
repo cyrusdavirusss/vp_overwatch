@@ -3902,12 +3902,12 @@ function App(props) {
     });
   }, [filters]);
 
-  // Map dims — within the iPhone frame
-  const MAP_W = 393;
-  const SCREEN_H = 852;
-  const STRIP_H = 110;        // 54px island clearance + 56px strip body
-  const SCRUB_H = 96;
-  const MAP_H = SCREEN_H - STRIP_H - SCRUB_H;
+  // Map dims — shell passes actual viewport via app-w / app-h (camelCased by dc-runtime).
+  const MAP_W    = Number(props.appW)  || 393;
+  const SCREEN_H = Number(props.appH)  || 852;
+  const STRIP_H  = 110;
+  const SCRUB_H  = 96;
+  const MAP_H    = SCREEN_H - STRIP_H - SCRUB_H;
 
   // Container height for bottom sheet calculations
   const containerH = MAP_H;
@@ -4076,8 +4076,9 @@ function App(props) {
         .vp-filter-overlay {
           position: absolute;
           inset: 0;
-          background: color-mix(in srgb, var(--ink-0) 60%, transparent);
+          background: rgba(5, 6, 10, 0.6);
           backdrop-filter: blur(4px);
+          -webkit-backdrop-filter: blur(4px);
           z-index: var(--z-modal);
           display: flex; align-items: flex-end;
           padding-bottom: 16px;
