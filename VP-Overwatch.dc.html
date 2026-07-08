@@ -2,99 +2,173 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#05060A">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<script src="./support.js?v=20260709"></script>
+<script src="./support.js?v=20260709b"></script>
 </head>
 <body>
 <x-dc>
 <helmet>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <link rel="stylesheet" href="app/colors_and_type.css" />
   <style>
-    html, body { margin: 0; padding: 0; background: #05060A; }
-    a { color: var(--blue); }
-    a:hover { color: var(--blue-hi); }
-    @keyframes vpoFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes vpoPulseDot { 0%, 100% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.3); } }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: #05060A;
+      /* Prevent pull-to-refresh and overscroll on mobile */
+      overscroll-behavior: none;
+      overflow: hidden;
+      /* iOS safe area */
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    @keyframes vpoFadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes vpoPulseDot {
+      0%, 100% { opacity: 0.4; transform: scale(1); }
+      50%       { opacity: 1;   transform: scale(1.3); }
+    }
+
+    /* ── Outer stage ─────────────────────────────────────────────────── */
+    .vpo-stage {
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh; /* dynamic viewport height — respects mobile browser chrome */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--ink-0, #05060A);
+      overflow: hidden;
+    }
+
+    /* ── Phone-frame wrapper (desktop preview mode) ───────────────────── */
+    .vpo-frame-wrap {
+      transform-origin: center center;
+    }
+
+    /* ── The app frame itself ─────────────────────────────────────────── */
+    .vpo-frame {
+      position: relative;
+      background: #000;
+      overflow: hidden;
+    }
+
+    /* Desktop: phone mockup look */
+    .vpo-frame.is-desktop {
+      width: 393px;
+      height: 852px;
+      border-radius: 52px;
+      box-shadow:
+        0 0 0 10px #0F1115,
+        0 0 0 11px rgba(255,255,255,0.04),
+        0 50px 100px rgba(0,0,0,0.65),
+        0 0 90px rgba(77,124,255,0.10);
+    }
+
+    /* Mobile: fill the entire viewport */
+    .vpo-frame.is-mobile {
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    .vpo-app-host {
+      position: absolute;
+      inset: 0;
+    }
+
+    /* ── Boot overlay ─────────────────────────────────────────────────── */
+    .vpo-boot {
+      position: absolute;
+      inset: 0;
+      z-index: 100;
+      background: #000;
+      overflow: hidden;
+    }
   </style>
 </helmet>
-<div style="width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--ink-0); overflow: hidden;">
-  <div style="transform: scale({{ scale }}); transform-origin: center center;">
-    <div
-      style="width: 393px; height: 852px; border-radius: 52px; overflow: hidden; position: relative; background: #000; box-shadow: 0 0 0 10px #0F1115, 0 0 0 11px rgba(255,255,255,0.04), 0 50px 100px rgba(0,0,0,0.65), 0 0 90px rgba(77,124,255,0.10);"
-      style-before="content:'';position:absolute;top:10px;left:50%;transform:translateX(-50%);width:122px;height:36px;background:#000;border-radius:22px;z-index:200;pointer-events:none;"
-      style-after="content:'';position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:134px;height:5px;background:rgba(255,255,255,0.55);border-radius:3px;z-index:200;pointer-events:none;"
-      data-screen-label="VP-Overwatch · Live Map"
-    >
-      <div style="position: absolute; inset: 0;">
-        <x-import component-from-global-scope="VPApp" from="./app/vp-bundle.jsx?v=20260709" theme="dark" map-style="night" hint-size="393,852"></x-import>
+
+<div class="vpo-stage">
+  <div class="vpo-frame-wrap" style="{{ wrapStyle }}">
+    <div class="{{ frameClass }}">
+
+      <div class="vpo-app-host">
+        <x-import component-from-global-scope="VPApp" from="./app/vp-bundle.jsx?v=20260709b" theme="dark" map-style="night" app-w="{{ appW }}" app-h="{{ appH }}" hint-size="{{ appW }},{{ appH }}"></x-import>
       </div>
 
-      <div style="{{ bootWrapStyle }}" onClick="{{ onBootTap }}">
-        <video src="assets/intro.mp4" poster="assets/intro_frame.png" ref="{{ videoRef }}" autoPlay="{{ true }}" muted="{{ true }}" playsInline="{{ true }}" loop="{{ false }}" onEnded="{{ finishBoot }}"
-               style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: brightness(0.85);"></video>
-        <div style="position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,11,13,0.30) 0%, rgba(10,11,13,0.05) 35%, rgba(10,11,13,0.78) 100%);"></div>
+      <!-- Boot / intro overlay -->
+      <div class="vpo-boot" style="{{ bootWrapStyle }}" onClick="{{ onBootTap }}">
+        <video
+          src="assets/intro.mp4"
+          poster="assets/intro_frame.png"
+          ref="{{ videoRef }}"
+          autoPlay="{{ true }}"
+          muted="{{ true }}"
+          playsInline="{{ true }}"
+          loop="{{ false }}"
+          onEnded="{{ finishBoot }}"
+          style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:brightness(0.85);"
+        ></video>
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,11,13,0.30) 0%,rgba(10,11,13,0.05) 35%,rgba(10,11,13,0.78) 100%);"></div>
 
-        <button onClick="{{ finishBoot }}" style-hover="color:#fff;border-color:rgba(255,255,255,0.4);"
-                style="position: absolute; top: 16px; right: 16px; z-index: 20; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500; letter-spacing: 0.14em; color: rgba(255,255,255,0.72); background: rgba(10,11,13,0.4); border: 1px solid rgba(255,255,255,0.18); padding: 7px 12px; border-radius: 999px; cursor: pointer; text-transform: uppercase; backdrop-filter: blur(8px);">
-          Skip ▸
-        </button>
+        <button
+          onClick="{{ finishBoot }}"
+          style="position:absolute;top:max(16px, env(safe-area-inset-top, 16px));right:16px;z-index:20;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:500;letter-spacing:0.14em;color:rgba(255,255,255,0.72);background:rgba(10,11,13,0.4);border:1px solid rgba(255,255,255,0.18);padding:7px 12px;border-radius:999px;cursor:pointer;text-transform:uppercase;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);"
+        >Skip ▸</button>
 
-        <div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding: 0 24px 60px; gap: 12px; text-align: center;">
-          <div style="display: flex; align-items: center; gap: 10px; animation: vpoFadeUp 900ms cubic-bezier(0.16,1,0.3,1) both; animation-delay: 300ms;">
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:0 24px max(60px, calc(env(safe-area-inset-bottom, 0px) + 40px));gap:12px;text-align:center;">
+          <div style="display:flex;align-items:center;gap:10px;animation:vpoFadeUp 900ms cubic-bezier(0.16,1,0.3,1) both;animation-delay:300ms;">
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="12" r="10" stroke="#4D7CFF" stroke-width="1.2" opacity="0.5"/>
               <circle cx="12" cy="12" r="6.5" stroke="#4D7CFF" stroke-width="1.2" opacity="0.85"/>
               <path d="M12 6 L16.5 14.5 L12 12.5 L7.5 14.5 Z" fill="#FFB020"/>
             </svg>
-            <span style="font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 600; letter-spacing: 0.22em; color: #F2F4F8;">VP-OVERWATCH</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:600;letter-spacing:0.22em;color:#F2F4F8;">VP-OVERWATCH</span>
           </div>
-          <div style="display: flex; align-items: center; gap: 7px; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 500; letter-spacing: 0.16em; color: #8A93A3; text-transform: uppercase; animation: vpoFadeUp 900ms cubic-bezier(0.16,1,0.3,1) both; animation-delay: 480ms;">
-            <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #4D7CFF; animation: vpoPulseDot 1.2s ease-in-out infinite;"></span>
+          <div style="display:flex;align-items:center;gap:7px;font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.16em;color:#8A93A3;text-transform:uppercase;animation:vpoFadeUp 900ms cubic-bezier(0.16,1,0.3,1) both;animation-delay:480ms;">
+            <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4D7CFF;animation:vpoPulseDot 1.2s ease-in-out infinite;"></span>
             Fusing ADS-B + ground reports
           </div>
         </div>
       </div>
-    </div>
-  </div>
-</div>
+
+    </div><!-- .vpo-frame -->
+  </div><!-- .vpo-frame-wrap -->
+</div><!-- .vpo-stage -->
 
 </x-dc>
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
-  state = { booted: false, scale: 1 };
+  state = { booted: false, isMobile: false, appW: 393, appH: 852, desktopScale: 1 };
   videoRef = { current: null };
 
   componentDidMount() {
-    // Attempt imperative playback — mobile browsers need this after a user gesture.
+    this._recalc();
+    window.addEventListener('resize', this._recalc);
+
+    // Attempt imperative video playback — mobile blocks autoPlay without a gesture.
     const tryPlay = () => {
       const v = this.videoRef.current;
       if (!v) return;
-      v.play().catch(() => {
-        // Autoplay blocked (common on iOS without prior gesture). The overlay
-        // will auto-dismiss after the fallback timer below, or on first tap.
-      });
+      v.play().catch(() => {/* blocked — onBootTap handles tap-to-play */});
     };
     tryPlay();
-    this._playTimer = setTimeout(tryPlay, 250);
+    this._playTimer = setTimeout(tryPlay, 300);
 
-    this._recalc = () => {
-      const FRAME_W = 413, FRAME_H = 872;
-      const vw = window.innerWidth - 32;
-      const vh = window.innerHeight - 32;
-      if (vw <= 0 || vh <= 0) return;
-      const s = Math.max(0.3, Math.min(vw / FRAME_W, vh / FRAME_H, 1.4));
-      this.setState({ scale: s });
-    };
-    this._recalc();
-    window.addEventListener('resize', this._recalc);
-    // Fallback: auto-dismiss after 3.5s (shorter than the full video on mobile
-    // where autoplay is typically blocked and the video never starts).
-    this._bootTimer = setTimeout(() => this.finishBoot(), 3500);
+    // Auto-dismiss: use video duration if we know it, otherwise 4s fallback.
+    // On mobile where autoplay is blocked, 4s = user sees logo + can tap.
+    this._bootTimer = setTimeout(() => this.finishBoot(), 4000);
   }
 
   componentWillUnmount() {
@@ -103,35 +177,62 @@ class Component extends DCLogic {
     clearTimeout(this._playTimer);
   }
 
+  _recalc = () => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // A "mobile" device is any screen narrower than 500px logical pixels.
+    // On these, we fill the viewport entirely — no phone mockup chrome.
+    const isMobile = vw < 500;
+
+    if (isMobile) {
+      // Full-screen: the VPApp fills the actual device viewport.
+      this.setState({ isMobile: true, appW: vw, appH: vh, desktopScale: 1 });
+    } else {
+      // Desktop preview: show as iPhone mockup, scaled to fit with padding.
+      const MOCK_W = 393 + 20;  // frame + shadow border
+      const MOCK_H = 852 + 20;
+      const s = Math.max(0.3, Math.min(
+        (vw - 64) / MOCK_W,
+        (vh - 64) / MOCK_H,
+        1.4
+      ));
+      this.setState({ isMobile: false, appW: 393, appH: 852, desktopScale: s });
+    }
+  };
+
   finishBoot = () => {
     if (this.state.booted) return;
+    clearTimeout(this._bootTimer);
     this.setState({ booted: true });
   };
 
   renderVals() {
-    const booted = this.state.booted;
+    const { booted, isMobile, appW, appH, desktopScale } = this.state;
     return {
-      scale: this.state.scale,
+      // Frame class drives CSS: full-screen vs mockup
+      frameClass: `vpo-frame ${isMobile ? 'is-mobile' : 'is-desktop'}`,
+      // Desktop scale transform on the wrapper; mobile = identity
+      wrapStyle: isMobile ? {} : { transform: `scale(${desktopScale})`, transformOrigin: 'center center' },
+      // Pass actual dimensions to VPApp (app-w / app-h are camelCased to appW/appH by dc-runtime)
+      appW,
+      appH,
+      // Boot overlay
       finishBoot: this.finishBoot,
       videoRef: this.videoRef,
-      // On mobile, the first tap on the overlay plays the video (bypassing the
-      // autoplay block). Second tap or video-end calls finishBoot normally.
       onBootTap: () => {
         const v = this.videoRef.current;
         if (v && v.paused) { v.play().catch(() => {}); return; }
         this.finishBoot();
       },
       bootWrapStyle: {
-        position: 'absolute', inset: 0, zIndex: 100, background: '#000', overflow: 'hidden',
-        opacity: booted ? 0 : 1,
-        transform: booted ? 'scale(1.04)' : 'scale(1)',
+        opacity:       booted ? 0 : 1,
+        transform:     booted ? 'scale(1.04)' : 'scale(1)',
         pointerEvents: booted ? 'none' : 'auto',
-        transition: 'opacity 700ms cubic-bezier(0.16,1,0.3,1), transform 700ms cubic-bezier(0.16,1,0.3,1)',
+        transition:    'opacity 700ms cubic-bezier(0.16,1,0.3,1), transform 700ms cubic-bezier(0.16,1,0.3,1)',
       },
     };
   }
 }
-
 </script>
 </body>
 </html>
