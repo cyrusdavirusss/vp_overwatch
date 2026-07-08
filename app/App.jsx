@@ -137,7 +137,7 @@ function App(props) {
   const onThemeToggle = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
-    setTweak('theme', next);
+    setTweak({ theme: next });
   };
 
   const onRecenter = () => {
@@ -206,7 +206,7 @@ function App(props) {
               filters={filters}
               onFilterChange={onFilterChange}
               mapStyle={t.mapStyle}
-              onMapStyleChange={(v) => setTweak('mapStyle', v)}
+              onMapStyleChange={(v) => setTweak({ mapStyle: v })}
               onClose={() => setFilterOpen(false)}
             />
           </div>

@@ -1,6 +1,7 @@
 import https from 'https'
 import fs from 'fs'
 import path from 'path'
+import os from 'os'
 
 /**
  * Persistent data store for VP-Overwatch
@@ -12,7 +13,7 @@ import path from 'path'
  */
 
 // ── Disk snapshot path ────────────────────────────────────────────────────
-const SNAPSHOT_DIR = path.join(process.env.HOME || '/tmp', '.vp-overwatch')
+const SNAPSHOT_DIR = path.join(os.homedir(), '.vp-overwatch')
 const SNAPSHOT_PATH = path.join(SNAPSHOT_DIR, 'store.json')
 const WATCHDOG_PATH = path.join(SNAPSHOT_DIR, 'last-ingest.txt')
 let lastSave = 0
