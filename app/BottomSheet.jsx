@@ -12,6 +12,7 @@ function BottomSheet({
   const sheetRef = React.useRef(null);
   const dragRef = React.useRef(null);
   const [dragOffset, setDragOffset] = React.useState(0);
+  const [isDragging, setIsDragging] = React.useState(false);
   const [tab, setTab] = React.useState('all'); // 'all' | 'air' | 'ground'
 
   const snaps = React.useMemo(() => {
@@ -22,12 +23,18 @@ function BottomSheet({
     };
   }, [containerHeight]);
 
+  // Reset to peek on orientation change / viewport resize
+  React.useEffect(() => {
+    onSnapChange?.('peek');
+  }, [containerHeight]);
+
   const heightFor = (s) => snaps[s];
 
   const onPointerDown = (e) => {
     if (e.target.closest('.vp-feed-item')) return; // don't drag from items
     dragRef.current = { startY: e.clientY, startHeight: heightFor(snap) };
     sheetRef.current.setPointerCapture(e.pointerId);
+    setIsDragging(true);
   };
   const onPointerMove = (e) => {
     if (!dragRef.current) return;
@@ -43,6 +50,7 @@ function BottomSheet({
     onSnapChange?.(nearest);
     setDragOffset(0);
     dragRef.current = null;
+    setIsDragging(false);
   };
 
   const currentHeight = heightFor(snap) + dragOffset;
@@ -60,6 +68,7 @@ function BottomSheet({
       reports.forEach(r => {
         const reportAgeAtScrub = r.reportedAgo - scrubT;
         if (reportAgeAtScrub < 0) return;
+        if (reportAgeAtScrub > 24 * 3600) return; // expire reports older than 24h
         items.push({ kind: 'report', obj: r, ageAtScrub: reportAgeAtScrub });
       });
     }
@@ -121,7 +130,7 @@ function BottomSheet({
           border-top-right-radius: var(--r-lg);
           box-shadow: var(--shadow-sheet);
           touch-action: none;
-          transition: ${dragRef.current ? 'none' : 'height var(--dur-panel) var(--ease-spring)'};
+          transition: ${isDragging ? 'none' : 'height var(--dur-panel) var(--ease-spring)'};
           z-index: var(--z-sheet);
           display: flex; flex-direction: column;
           overflow: hidden;
