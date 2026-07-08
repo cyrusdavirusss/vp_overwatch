@@ -100,6 +100,7 @@ async function pushAlerts(alerts) {
 async function tick() {
   const startedAt = Date.now();
   let total = 0;
+  let tileErrors = 0;
   const merged = new Map();
   for (const b of BOUNDS) {
     try {
@@ -107,12 +108,18 @@ async function tick() {
       for (const a of alerts) if (a?.uuid) merged.set(a.uuid, a);
       total += alerts.length;
     } catch (e) {
+      tileErrors++;
       console.warn(`[tile] ${b.name}: ${e.message}`);
     }
   }
   const unique = [...merged.values()];
+  if (tileErrors === BOUNDS.length) {
+    console.error(`[${new Date().toISOString()}] all ${BOUNDS.length} tiles failed — possible IP block or network error`);
+    if (ONCE) process.exitCode = 1;
+    return;
+  }
   if (unique.length === 0) {
-    console.log(`[${new Date().toISOString()}] no alerts (Waze returned 0)`);
+    console.log(`[${new Date().toISOString()}] no alerts (Waze returned 0 across ${BOUNDS.length - tileErrors} tiles)`);
     return;
   }
   try {

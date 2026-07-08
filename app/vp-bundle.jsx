@@ -131,7 +131,7 @@ window.VP_DATA = (() => {
       cSpd += (Math.sin(i * 0.5) * 1.2);
       const vsign = (Math.sin(i * 0.3) > 0) ? 1 : -1;
       points.push({
-        t: -t,
+        t: t - totalSeconds,
         x: cx, y: cy,
         alt: Math.round(cAlt),
         hdg: Math.round(((cHdg % 360) + 360) % 360),
@@ -244,8 +244,8 @@ window.VP_DATA = (() => {
       for (let i = 0; i < n; i++) {
         const a = (i / n) * Math.PI * 2;
         pts.push({
-          x: cx + Math.cos(a) * (w / 2) * (0.8 + Math.random() * 0.4),
-          y: cy + Math.sin(a) * (h / 2) * (0.8 + Math.random() * 0.4),
+          x: cx + Math.cos(a) * (w / 2) * (0.8 + rnd() * 0.4),
+          y: cy + Math.sin(a) * (h / 2) * (0.8 + rnd() * 0.4),
         });
       }
       return pts;
@@ -1955,7 +1955,7 @@ function BottomSheet({
           border-top-right-radius: var(--r-lg);
           box-shadow: var(--shadow-sheet);
           touch-action: none;
-          transition: ${dragRef.current ? 'none' : 'height var(--dur-panel) var(--ease-spring)'};
+          transition: ${dragging ? 'none' : 'height var(--dur-panel) var(--ease-spring)'};
           z-index: var(--z-sheet);
           display: flex; flex-direction: column;
           overflow: hidden;
@@ -3927,7 +3927,7 @@ function App(props) {
   const onThemeToggle = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
-    setTweak('theme', next);
+    setTweak({ theme: next });
   };
 
   const onRecenter = () => {
@@ -3996,7 +3996,7 @@ function App(props) {
               filters={filters}
               onFilterChange={onFilterChange}
               mapStyle={t.mapStyle}
-              onMapStyleChange={(v) => setTweak('mapStyle', v)}
+              onMapStyleChange={(v) => setTweak({ mapStyle: v })}
               onClose={() => setFilterOpen(false)}
             />
           </div>
