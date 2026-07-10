@@ -9,7 +9,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<script src="./support.js?v=20260709c"></script>
+<script src="./support.js?v=20260710"></script>
 </head>
 <body>
 <x-dc>
@@ -22,12 +22,8 @@
     html, body {
       margin: 0; padding: 0;
       background: #05060A;
-      /* Prevent pull-to-refresh and overscroll on mobile */
       overscroll-behavior: none;
       overflow: hidden;
-      /* iOS safe area */
-      padding-top: env(safe-area-inset-top);
-      padding-bottom: env(safe-area-inset-bottom);
     }
     @keyframes vpoFadeUp {
       from { opacity: 0; transform: translateY(10px); }
@@ -104,7 +100,7 @@
     <div class="{{ frameClass }}">
 
       <div class="vpo-app-host">
-        <x-import component-from-global-scope="VPApp" from="./app/vp-bundle.jsx?v=20260709c" theme="dark" map-style="night" app-w="{{ appW }}" app-h="{{ appH }}" hint-size="{{ appW }},{{ appH }}"></x-import>
+        <x-import component-from-global-scope="VPApp" from="./app/vp-bundle.jsx?v=20260710" theme="dark" map-style="night" app-w="{{ appW }}" app-h="{{ appH }}" hint-size="{{ appW }},{{ appH }}"></x-import>
       </div>
 
       <!-- Boot / intro overlay -->
