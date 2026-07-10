@@ -1411,10 +1411,10 @@ function StatusStrip({ aircraftCount, silentCount, reportsCount, scrubT, relay, 
       <style>{`
         .vp-strip {
           position: absolute; top: 0; left: 0; right: 0;
-          height: 110px;
-          padding: 0 14px;
-          padding-top: max(env(safe-area-inset-top, 0px), 8px);
-          box-sizing: border-box;
+          height: 56px;
+          padding: 8px 14px 0;
+          padding-top: 54px;
+          box-sizing: content-box;
           display: flex; align-items: center; justify-content: space-between;
           background: color-mix(in srgb, var(--ink-1) 78%, transparent);
           backdrop-filter: blur(18px) saturate(140%);
