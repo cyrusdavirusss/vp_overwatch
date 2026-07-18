@@ -45,7 +45,6 @@ function VPMap({
   followUser = false,
   markerStyle = 'glyph',      // 'glyph' | 'minimal'
   onCameraChange,
-  focusTarget,                // {x, y} — when set, springs camera to that world coord
 }) {
   const canvasRef = useRef(null);
   const overlayRef = useRef(null);
@@ -173,22 +172,39 @@ function VPMap({
   }, [followUser]);
 
   // -----------------------------------------------------------------
-  // Focus on a target — spring camera to a world coord, optionally bumping zoom
+  // Focus camera on selected aircraft / report
+  // Uses live animated position for aircraft so the camera lands on where
+  // the marker is actually drawn, not the frozen track snapshot.
   // -----------------------------------------------------------------
   useEffect(() => {
-    if (!focusTarget) return;
+    if (!selectedAircraftId && !selectedReportId) return;
+    let wx, wy;
+    if (selectedAircraftId) {
+      const a = aircraft.find(x => x.id === selectedAircraftId);
+      if (!a) return;
+      const anim = acAnimRef.current[a.id];
+      if (anim) {
+        const u = Math.min(1, (Date.now() - anim.t0) / anim.dur);
+        wx = anim.from.x + (anim.to.x - anim.from.x) * u;
+        wy = anim.from.y + (anim.to.y - anim.from.y) * u;
+      } else {
+        const pos = sampleTrack(a.track, 0);
+        if (!pos) return;
+        wx = pos.x; wy = pos.y;
+      }
+    } else {
+      const r = reports.find(x => x.id === selectedReportId);
+      if (!r) return;
+      wx = r.x; wy = r.y;
+    }
     let raf;
-    // scale0 removed — not used in the focus-target animation
     const startTx = camRef.current.tx;
     const startTy = camRef.current.ty;
     const startZoom = camRef.current.zoom;
-    const targetZoom = Math.max(startZoom, 1.4);
-    // We want target to land at (0,0) screen-offset from center
-    // After scaling: screen_x = cx + tx + target.x * scale  -> we want screen_x == cx ->
-    // tx = -target.x * scale.
+    const targetZoom = Math.max(startZoom, 2.2);
     const endScale = PX_PER_METER_AT_1 * targetZoom;
-    const endTx = -focusTarget.x * endScale;
-    const endTy =  focusTarget.y * endScale;
+    const endTx = -wx * endScale;
+    const endTy =  wy * endScale;
     const t0 = Date.now();
     const tick = () => {
       const t = Math.min(1, (Date.now() - t0) / 700);
@@ -202,7 +218,7 @@ function VPMap({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [focusTarget]);
+  }, [selectedAircraftId, selectedReportId]);
 
   useEffect(() => { onCameraChange?.(cam); }, [cam, onCameraChange]);
 
