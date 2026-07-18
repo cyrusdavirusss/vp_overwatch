@@ -42,7 +42,6 @@ function App(props) {
   const [filterOpen, setFilterOpen] = useStateA(false);
   const [followUser, setFollowUser] = useStateA(false);
   const [inspectPos, setInspectPos] = useStateA(null);
-  const [focusTarget, setFocusTarget] = useStateA(null);
   const [now, setNow] = useStateA(Date.now());
   // relayTick counts seconds since the last relay poll. Resets to 0 each time
   // the poll interval elapses (mock: pollIntervalSec=60).
@@ -116,23 +115,12 @@ function App(props) {
   const onSelectAircraft = (id) => {
     setSelectedAircraftId(id);
     setSelectedReportId(null);
-    if (id) {
-      setSnap('half');
-      const a = data.AIRCRAFT.find(x => x.id === id);
-      if (a) {
-        const pos = sampleTrack(a.track, scrubT);
-        if (pos) setFocusTarget({ x: pos.x, y: pos.y });
-      }
-    }
+    if (id) setSnap('half');
   };
   const onSelectReport = (id) => {
     setSelectedReportId(id);
     setSelectedAircraftId(null);
-    if (id) {
-      setSnap('half');
-      const r = data.REPORTS.find(x => x.id === id);
-      if (r) setFocusTarget({ x: r.x, y: r.y });
-    }
+    if (id) setSnap('half');
   };
   const onCloseDetail = () => {
     setSelectedAircraftId(null);
@@ -192,7 +180,6 @@ function App(props) {
           mapStyle={t.mapStyle}
           theme={theme}
           followUser={followUser}
-          focusTarget={focusTarget}
         />
 
         {/* Long-press inspect pin */}
