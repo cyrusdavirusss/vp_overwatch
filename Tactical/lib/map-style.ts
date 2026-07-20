@@ -70,7 +70,11 @@ let protocolRegistered = false
 export function registerPmtilesProtocol(): void {
   if (protocolRegistered) return
   const protocol = new Protocol()
-  maplibregl.addProtocol('pmtiles', protocol.tile)
+  // MapLibre GL v5 requires a Promise-returning protocol handler. pmtiles
+  // exposes that as `tilev4`; the older `tile` is a callback-style shim for
+  // MapLibre v4 and silently never resolves under v5 — which left the basemap
+  // source unloaded and the whole map black. Register the v5 handler.
+  maplibregl.addProtocol('pmtiles', protocol.tilev4)
   protocolRegistered = true
 }
 
