@@ -2,13 +2,16 @@ import { getStore } from '@/lib/store'
 
 export const dynamic = 'force-dynamic'
 
-/** GPS relay secret for phone-to-server auth */
-const GPS_SECRET = process.env.GPS_RELAY_SECRET ?? (process.env.NODE_ENV === 'development' ? 'gps-dev' : null)
-if (!GPS_SECRET) throw new Error('GPS_RELAY_SECRET env var is required in production')
+/** GPS relay secret for phone-to-server auth. Resolved per-request (not at
+ *  module-eval) so a missing secret fails closed instead of breaking the build. */
+function gpsSecret(): string | null {
+  return process.env.GPS_RELAY_SECRET ?? (process.env.NODE_ENV !== 'production' ? 'gps-dev' : null)
+}
 
 export async function POST(request: Request) {
+  const GPS_SECRET = gpsSecret()
   const secret = request.headers.get('x-gps-secret')
-  if (secret !== GPS_SECRET) {
+  if (!GPS_SECRET || secret !== GPS_SECRET) {
     return Response.json({ error: 'unauthorized' }, { status: 401 })
   }
 

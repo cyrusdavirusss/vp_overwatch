@@ -706,19 +706,62 @@ function validLatLng(lat: any, lng: any): boolean {
 
 // ── ADSB.lol Polling ────────────────────────────────────────────────────
 
-function fetchJsonHttps(url: string, timeout: number): Promise<any> {
+// Identify the client — adsb.lol's public API rate-limits harder on requests
+// with no/generic User-Agent, and its etiquette asks callers to identify.
+const ADSB_UA = 'vp-overwatch/1.0 (+home-lab tactical map; contact: local)'
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** One raw GET returning the HTTP status + body (never parses). */
+function httpGetOnce(url: string, timeout: number): Promise<{ status: number; body: string; retryAfter?: number }> {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { timeout }, (res) => {
+    const req = https.get(url, { timeout, headers: { 'User-Agent': ADSB_UA, Accept: 'application/json' } }, (res) => {
       let data = ''
       res.on('data', (chunk) => { data += chunk })
       res.on('end', () => {
-        try { resolve(JSON.parse(data)) }
-        catch (e) { reject(new Error('Invalid JSON')) }
+        const ra = Number(res.headers['retry-after'])
+        resolve({ status: res.statusCode || 0, body: data, retryAfter: Number.isFinite(ra) ? ra : undefined })
       })
     })
     req.on('error', reject)
     req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')) })
   })
+}
+
+/**
+ * Fetch + parse JSON with rate-limit resilience. adsb.lol returns HTTP 429 with
+ * an HTML body when throttled (~1 req/s); the old code JSON.parse'd that and
+ * surfaced a misleading "Invalid JSON". We now inspect the status, honour
+ * Retry-After, and retry 429/5xx a couple times with backoff before giving up
+ * with a descriptive error (e.g. "HTTP 429 (rate limited)").
+ */
+async function fetchJsonHttps(url: string, timeout: number): Promise<any> {
+  const maxAttempts = 3
+  let lastErr: Error | null = null
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let res
+    try {
+      res = await httpGetOnce(url, timeout)
+    } catch (e: any) {
+      lastErr = e instanceof Error ? e : new Error(String(e))
+      if (attempt < maxAttempts) { await sleep(400 * attempt); continue }
+      throw lastErr
+    }
+    if (res.status === 200) {
+      try { return JSON.parse(res.body) }
+      catch { throw new Error('Invalid JSON (HTTP 200, non-JSON body)') }
+    }
+    // Retryable: rate limit or transient upstream error.
+    if (res.status === 429 || res.status >= 500) {
+      lastErr = new Error(`HTTP ${res.status}${res.status === 429 ? ' (rate limited)' : ''}`)
+      if (attempt < maxAttempts) {
+        const backoffMs = res.retryAfter ? Math.min(res.retryAfter * 1000, 5000) : 500 * attempt
+        await sleep(backoffMs)
+        continue
+      }
+    }
+    throw new Error(`HTTP ${res.status}`)
+  }
+  throw lastErr || new Error('fetch failed')
 }
 
 async function pollOpenSky(): Promise<void> {
