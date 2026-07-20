@@ -2,14 +2,19 @@ import { getStore } from '@/lib/store'
 
 export const dynamic = 'force-dynamic'
 
-const RELAY_SECRET = process.env.WAZE_RELAY_SECRET ?? (process.env.NODE_ENV === 'development' ? 'dev-secret' : null)
-if (!RELAY_SECRET) throw new Error('WAZE_RELAY_SECRET env var is required in production')
+// Resolve the shared relay secret at request time (not module-eval time).
+// Throwing at import broke `next build` page-data collection; instead we
+// fail closed here — a missing secret in production rejects every request.
+function relaySecret(): string | null {
+  return process.env.WAZE_RELAY_SECRET ?? (process.env.NODE_ENV !== 'production' ? 'dev-secret' : null)
+}
 
 export async function POST(request: Request) {
   // Verify relay secret
+  const RELAY_SECRET = relaySecret()
   const secret = request.headers.get('x-relay-secret')
   const src = request.headers.get('x-forwarded-for') || 'lan'
-  if (secret !== RELAY_SECRET) {
+  if (!RELAY_SECRET || secret !== RELAY_SECRET) {
     console.warn(`[ingest] 401 unauthorized from=${src}`)
     return Response.json({ error: 'unauthorized' }, { status: 401 })
   }

@@ -182,6 +182,28 @@ export function VPMap({
     })
     mapRef.current = map
 
+    // Surface basemap/source/tile errors instead of failing silently to a black
+    // screen. Logs to console always; in dev (or with ?mapdebug) also paints a
+    // visible overlay so a blank map is diagnosable on a phone in the field.
+    map.on('error', (e: any) => {
+      const msg = e?.error?.message || e?.error?.status || String(e?.error || e)
+      // eslint-disable-next-line no-console
+      console.error('[VP-MAP ERROR]', e?.error || e)
+      const debug =
+        process.env.NODE_ENV !== 'production' ||
+        (typeof window !== 'undefined' && window.location.search.includes('mapdebug'))
+      if (!debug || typeof document === 'undefined') return
+      let box = document.getElementById('__vp_maperr')
+      if (!box) {
+        box = document.createElement('div')
+        box.id = '__vp_maperr'
+        box.style.cssText =
+          'position:fixed;top:120px;left:8px;right:8px;z-index:99999;background:rgba(40,0,0,.9);color:#ff8888;font:11px/1.4 monospace;padding:8px;white-space:pre-wrap;max-height:40vh;overflow:auto;border:1px solid #f44'
+        document.body.appendChild(box)
+      }
+      box.textContent = (box.textContent ? box.textContent + '\n' : '') + msg
+    })
+
     // Tap-to-set position (only acts when pickMode is on, via the live callback).
     map.on('click', (e) => {
       onMapClickRef.current?.(e.lngLat.lat, e.lngLat.lng)
