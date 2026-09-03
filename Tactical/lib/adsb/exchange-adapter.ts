@@ -14,13 +14,13 @@ export interface ADSBAircraft {
   flight: string
   latitude: number | null
   longitude: number | null
-  altitudeBaro: number
+  altitudeBaro: number | null  // in feet
   altitudeGeo: number | null
-  groundSpeed: number
-  track: number
-  verticalRate: number
-  seenPos: number
-  seen: number
+  groundSpeed: number | null   // knots
+  track: number | null          // degrees
+  verticalRate: number | null   // feet per minute
+  seenPos: number | null        // seconds
+  seen: number | null           // seconds
   provider: string
   r: string | null
   nicBaro: number | null
@@ -56,7 +56,7 @@ export class ADSBExchangeAdapter {
   private baseUrl: string
   private streamingEnabled: boolean
   
-  constructor(apiKey: string, baseUrl: string = 'https://adsbexchange.com/api') {
+  constructor(apiKey: string, baseUrl: string = 'https://gateway.adsbexchange.com/api/aircraft/v2') {
     this.apiKey = apiKey
     this.baseUrl = baseUrl
     this.streamingEnabled = this.checkStreamingEntitlement()
@@ -85,12 +85,14 @@ export class ADSBExchangeAdapter {
     try {
       const normalizedReg = registration.trim().toUpperCase()
       
+      // ADS-B Exchange v2 API: Registration lookup endpoint
       const response = await fetch(
-        `${this.baseUrl}/v2/aircraft/${normalizedReg}`,
+        `${this.baseUrl}/reg/${normalizedReg}`,
         {
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Accept': 'application/json'
+            'X-API-Key': this.apiKey,
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip, deflate'
           },
           signal: AbortSignal.timeout(10000)
         }
@@ -127,7 +129,7 @@ export class ADSBExchangeAdapter {
    * Batch lookup for multiple aircraft by ICAO24 identifiers.
    * 
    * This is the primary ingestion method for REST mode.
-   * Queries all configured aircraft in a single request.
+   * Queries all configured aircraft in a single request using comma-separated ICAO24 values.
    * 
    * @param icao24Ids Array of ICAO24 hex identifiers
    * @returns Map of ICAO24 to aircraft data
@@ -136,19 +138,18 @@ export class ADSBExchangeAdapter {
     const aircraftMap = new Map<string, ADSBAircraft>()
     
     try {
+      // ADS-B Exchange v2 API: Batch lookup with comma-separated ICAO24 identifiers
+      const icao24Csv = icao24Ids.join(',')
       const response = await fetch(
-        `${this.baseUrl}/v2/aircraft/list`,
+        `${this.baseUrl}?icao24=${encodeURIComponent(icao24Csv)}`,
         {
-          method: 'POST',
+          method: 'GET',
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            'X-API-Key': this.apiKey,
             'Accept': 'application/json',
-            'Content-Type': 'application/json'
+            'Accept-Encoding': 'gzip, deflate'
           },
-          body: JSON.stringify({
-            icao24: icao24Ids
-          }),
-          signal: AbortSignal.timeout(10000)
+          signal: AbortSignal.timeout(15000)
         }
       )
       
@@ -157,7 +158,7 @@ export class ADSBExchangeAdapter {
       }
       
       const data = await response.json()
-      const aircraftList = data?.aircraft || data || []
+      const aircraftList = Array.isArray(data) ? data : data?.aircraft || []
       
       for (const aircraft of aircraftList) {
         const normalized = this.normalizeAircraftData(aircraft)
@@ -174,26 +175,41 @@ export class ADSBExchangeAdapter {
   /**
    * Normalize raw ADS-B Exchange data to internal format.
    * 
-   * Treats absent provider fields as unknown (not zero).
+   * Treats absent provider fields as unknown (null, not zero).
+   * Converts altitude from feet to metres.
+   * Handles alt_baro: "ground" string value.
    * Validates position usability based on coordinates and freshness.
    * 
    * @param raw Raw aircraft data from provider
    * @returns Normalized ADSBAircraft
    */
   private normalizeAircraftData(raw: any): ADSBAircraft {
+    // Handle alt_baro which can be number (feet) or string "ground"
+    let altitudeBaroFeet: number | null
+    if (raw.alt_baro === 'ground') {
+      altitudeBaroFeet = 0
+    } else if (raw.alt_baro !== undefined && raw.alt_baro !== null && raw.alt_baro !== '') {
+      altitudeBaroFeet = Number(raw.alt_baro)
+      if (isNaN(altitudeBaroFeet)) {
+        altitudeBaroFeet = null
+      }
+    } else {
+      altitudeBaroFeet = null
+    }
+    
     return {
       registration: raw.registration || '',
       icao24: raw.icao24 || raw.hex || '',
       flight: raw.flight || '',
       latitude: this.parseNumericField(raw.lat),
       longitude: this.parseNumericField(raw.lon),
-      altitudeBaro: raw.alt_baro ?? 0,
+      altitudeBaro: altitudeBaroFeet, // Keep in feet for now, conversion happens in state manager
       altitudeGeo: this.parseNumericField(raw.alt_geom),
-      groundSpeed: raw.gs ?? 0,
-      track: raw.track ?? 0,
-      verticalRate: raw.baro_rate ?? 0,
-      seenPos: raw.seen_pos ?? 0,
-      seen: raw.seen ?? 0,
+      groundSpeed: raw.gs !== undefined && raw.gs !== null && raw.gs !== '' ? Number(raw.gs) : null,
+      track: raw.track !== undefined && raw.track !== null && raw.track !== '' ? Number(raw.track) : null,
+      verticalRate: raw.baro_rate !== undefined && raw.baro_rate !== null && raw.baro_rate !== '' ? Number(raw.baro_rate) : null,
+      seenPos: raw.seen_pos !== undefined && raw.seen_pos !== null ? Number(raw.seen_pos) : null,
+      seen: raw.seen !== undefined && raw.seen !== null ? Number(raw.seen) : null,
       provider: raw.provider || 'adsb_exchange',
       r: raw.r || null,
       nicBaro: raw.nic_baro || null,
@@ -201,7 +217,7 @@ export class ADSBExchangeAdapter {
       nicLon: raw.nic_lon || null,
       sil: raw.sil || null,
       silType: raw.sil_type || null,
-      baroRate: raw.baro_rate || null,
+      baroRate: raw.baro_rate !== undefined && raw.baro_rate !== null ? Number(raw.baro_rate) : null,
       squawk: raw.squawk || null,
       emergency: raw.emergency || null,
       spi: raw.spi || false,

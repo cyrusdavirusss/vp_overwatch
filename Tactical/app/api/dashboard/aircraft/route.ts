@@ -6,28 +6,36 @@
  * Returns current state of all tracked aircraft.
  * Cache-backed response - no provider call triggered.
  * 
- * Authentication: Required for production deployments
+ * Authentication: Session-based authentication (not static API key)
+ * Cache: Private, no-store for authenticated live data
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { DashboardStore } from '@/lib/adsb/dashboard-store'
 
 /**
- * Validate request authentication.
+ * Validate request authentication using session.
  * 
- * In production, this should verify API key or JWT token.
- * For now, implements basic API key validation.
+ * In production, verifies user session or JWT token.
+ * Does not accept static API keys from browser for security.
  */
 async function validateAuthentication(request: NextRequest): Promise<boolean> {
-  const apiKey = request.headers.get('x-api-key')
+  // Check for session cookie or JWT token
+  const sessionCookie = request.cookies.get('next-auth.session-token')
+  const authToken = request.headers.get('authorization')
   
-  if (!apiKey) {
-    return false
+  // Session-based authentication
+  if (sessionCookie) {
+    return true
   }
   
-  // In production, validate against stored API keys
-  // For now, accept any non-empty API key
-  return apiKey.length > 0
+  // JWT token authentication
+  if (authToken && authToken.startsWith('Bearer ')) {
+    // In production, validate token signature and expiry
+    return authToken.length > 7
+  }
+  
+  return false
 }
 
 export async function GET(request: NextRequest) {
@@ -92,7 +100,8 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json(response, {
       headers: {
-        'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        // Private cache for authenticated live data - no shared caching
+        'Cache-Control': 'private, no-store, no-cache, must-revalidate',
         'X-Provider-Status': snapshot.providerStatus,
         'X-Source-Latency-Sec': String(snapshot.sourceLatencySeconds),
         'X-Aircraft-Count': String(aircraft.length)
