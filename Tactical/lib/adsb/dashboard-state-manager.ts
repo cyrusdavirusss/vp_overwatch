@@ -23,13 +23,13 @@ export interface DashboardAircraftState {
   positionFreshnessSeconds: number
   latitude: number | null
   longitude: number | null
-  altitudeMetres: number
-  groundSpeedKt: number
-  trackDegrees: number
+  altitudeMetres: number | null  // Converted from feet
+  groundSpeedKt: number | null   // Knots
+  trackDegrees: number | null     // Degrees
   isPositionUsable: boolean
   dataStatus: DataStatus
-  seenPos: number
-  seen: number
+  seenPos: number | null
+  seen: number | null
   eventVersion: number
 }
 
@@ -139,57 +139,61 @@ export class DashboardStateManager {
       }
       
       // Calculate freshness
-      const seenPosSeconds = aircraft.seenPos > 0 
-        ? (now - (aircraft.seenPos * 1000)) / 1000 
-        : Infinity
-      
-      const positionFreshness = this.calculatePositionFreshness(
-        aircraft.latitude,
-        aircraft.longitude,
-        seenPosSeconds
-      )
-      
-      // Determine state
-      const previousState = existingState.state
-      const newState = this.determineAircraftState(
-        aircraft,
-        positionFreshness,
-        existingState.icao24 === '' ? 'unresolved' : previousState
-      )
-      
-      // Detect state change events
-      if (newState !== previousState) {
-        const event = this.detectStateChangeEvent(
-          registration,
-          icao24,
-          previousState,
-          newState,
-          aircraft
-        )
-        if (event) {
-          events.push(event)
-        }
-      }
-      
-      // Update aircraft state
-      existingState.icao24 = icao24
-      existingState.state = newState
-      existingState.lastObservedAt = new Date(now)
-      existingState.positionFreshnessSeconds = positionFreshness
-      existingState.latitude = aircraft.latitude
-      existingState.longitude = aircraft.longitude
-      existingState.altitudeMetres = aircraft.altitudeBaro
-      existingState.groundSpeedKt = aircraft.groundSpeed
-      existingState.trackDegrees = aircraft.track
-      existingState.isPositionUsable = this.isPositionUsable(
-        aircraft.latitude,
-        aircraft.longitude,
-        seenPosSeconds
-      )
-      existingState.dataStatus = this.determineDataStatus(seenPosSeconds)
-      existingState.seenPos = aircraft.seenPos
-      existingState.seen = aircraft.seen
-      existingState.eventVersion = this.incrementEventVersion(registration)
+            const nowMs = Date.now()
+            const seenPosSeconds = aircraft.seenPos !== null && aircraft.seenPos > 0
+              ? (nowMs - (aircraft.seenPos * 1000)) / 1000
+              : Infinity
+
+            const positionFreshness = this.calculatePositionFreshness(
+              aircraft.latitude,
+              aircraft.longitude,
+              seenPosSeconds
+            )
+
+            // Determine state
+            const previousState = existingState.state
+            const newState = this.determineAircraftState(
+              aircraft,
+              positionFreshness,
+              existingState.icao24 === '' ? 'unresolved' : previousState
+            )
+
+            // Detect state change events
+            if (newState !== previousState) {
+              const event = this.detectStateChangeEvent(
+                registration,
+                icao24,
+                previousState,
+                newState,
+                aircraft
+              )
+              if (event) {
+                events.push(event)
+              }
+            }
+
+            // Update aircraft state with feet-to-metres conversion
+            existingState.icao24 = icao24
+            existingState.state = newState
+            existingState.lastObservedAt = new Date(nowMs)
+            existingState.positionFreshnessSeconds = positionFreshness
+            existingState.latitude = aircraft.latitude
+            existingState.longitude = aircraft.longitude
+            // Convert altitude from feet to metres (1 foot = 0.3048 metres)
+            existingState.altitudeMetres = aircraft.altitudeBaro !== null
+              ? aircraft.altitudeBaro * 0.3048
+              : null
+            existingState.groundSpeedKt = aircraft.groundSpeed
+            existingState.trackDegrees = aircraft.track
+            existingState.isPositionUsable = this.isPositionUsable(
+              aircraft.latitude,
+              aircraft.longitude,
+              seenPosSeconds
+            )
+            existingState.dataStatus = this.determineDataStatus(seenPosSeconds)
+            existingState.seenPos = aircraft.seenPos
+            existingState.seen = aircraft.seen
+            existingState.eventVersion = this.incrementEventVersion(registration)
     }
     
     // Update ingestion metadata
@@ -239,35 +243,36 @@ export class DashboardStateManager {
   }
   
   /**
-   * Determine aircraft state based on data.
-   */
-  private determineAircraftState(
-    aircraft: ADSBAircraft,
-    positionFreshness: number,
-    currentState: AircraftState
-  ): AircraftState {
-    // Check if unresolved (no ICAO24 mapping)
-    if (!aircraft.icao24 || aircraft.icao24 === '') {
-      return 'unresolved'
+     * Determine aircraft state based on data.
+     */
+    private determineAircraftState(
+      aircraft: ADSBAircraft,
+      positionFreshness: number,
+      currentState: AircraftState
+    ): AircraftState {
+      // Check if unresolved (no ICAO24 mapping)
+      if (!aircraft.icao24 || aircraft.icao24 === '') {
+        return 'unresolved'
+      }
+
+      // Check for unavailable (no recent data)
+      if (positionFreshness > this.freshnessThresholdSeconds) {
+        return 'unavailable'
+      }
+
+      // Check for stale (data between 60s and 300s)
+      if (positionFreshness > this.positionFreshnessThresholdSeconds) {
+        return 'stale'
+      }
+
+      // Determine airborne vs ground with null-safe checks
+      // Altitude in feet, convert threshold to feet (1000 metres ≈ 3281 feet)
+      const isAirborne =
+        aircraft.altitudeBaro !== null && aircraft.altitudeBaro > 3281 && // Above 1000m (3281ft)
+        aircraft.groundSpeed !== null && aircraft.groundSpeed > 50 // Moving at significant speed
+
+      return isAirborne ? 'live_airborne' : 'live_ground'
     }
-    
-    // Check for unavailable (no recent data)
-    if (positionFreshness > this.freshnessThresholdSeconds) {
-      return 'unavailable'
-    }
-    
-    // Check for stale (data between 60s and 300s)
-    if (positionFreshness > this.positionFreshnessThresholdSeconds) {
-      return 'stale'
-    }
-    
-    // Determine airborne vs ground
-    const isAirborne = 
-      aircraft.altitudeBaro > 1000 && // Above 1000m
-      aircraft.groundSpeed > 50 // Moving at significant speed
-    
-    return isAirborne ? 'live_airborne' : 'live_ground'
-  }
   
   /**
    * Determine data status based on freshness.

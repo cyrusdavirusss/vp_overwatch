@@ -68,7 +68,7 @@ export class DashboardPersistence {
         connectionTimeoutMillis: 10000
       })
       
-      this.pool.on('error', (err) => {
+      this.pool.on('error', (err: Error) => {
         console.error('[Dashboard Persistence] Unexpected pool error:', err)
       })
       
