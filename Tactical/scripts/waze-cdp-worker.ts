@@ -244,13 +244,15 @@ class WazeCdpAdapter {
   }
 
   private async fetchFromWazeApi(endpoint: string): Promise<any[]> {
+    const http = await import('http')
     const https = await import('https')
     
     return new Promise((resolve) => {
       const apiUrl = process.env.WAZE_API_URL || 'http://100.80.115.26:8080'
       const url = `${apiUrl}${endpoint}`
+      const protocol = url.startsWith('https') ? https : http
       
-      https.get(url, (res) => {
+      protocol.get(url, (res) => {
         let data = ''
         
         res.on('data', (chunk) => { data += chunk })
