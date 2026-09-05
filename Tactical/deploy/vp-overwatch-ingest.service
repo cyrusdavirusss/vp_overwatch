@@ -1,0 +1,23 @@
+[Unit]
+Description=VP-Overwatch ADS-B ingestion worker (single-writer, holds PG lease)
+Documentation=https://github.com/ (vp_overwatch/Tactical/scripts/adsb-ingest.ts)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/cyrus/Documents/vp_overwatch/Tactical
+Environment=PATH=/usr/bin:/usr/local/bin:/home/cyrus/.npm-global/bin
+Environment=NODE_ENV=production
+# Server-only runtime secrets: DATABASE_URL, ADSB_EXCHANGE_API_KEY, AUTH_SECRET,
+# PROXIMITY_* etc. Injected via this file (never committed). Leading '-' = optional.
+EnvironmentFile=-/home/cyrus/Documents/vp_overwatch/Tactical/.env.local
+# The worker does NOT build; the web unit owns the build step.
+ExecStart=/usr/bin/node --experimental-strip-types scripts/adsb-ingest.ts
+Restart=on-failure
+RestartSec=5
+# Give the lease a moment to release on restart.
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

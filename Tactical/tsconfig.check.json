@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true, "types": ["node"] },
+  "include": ["lib/**/*.ts", "scripts/adsb-ingest.ts", "scripts/smoke-persistence.ts", "tools/**/*.ts"],
+  "exclude": ["node_modules"]
+}
