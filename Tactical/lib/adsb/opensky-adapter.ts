@@ -136,6 +136,7 @@ export class OpenSkyAdapter {
 
   private async request(url: string): Promise<any> {
     let lastErr: ProviderError | null = null
+    let tokenRefreshed = false
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       const started = this.now()
       try {
@@ -152,6 +153,13 @@ export class OpenSkyAdapter {
         const cls = this.classify(res.status)
         lastErr = new ProviderError(`HTTP ${res.status} ${res.statusText}`, cls, res.status)
         this.health = { ...this.health, status: cls === 'rate_limit' ? 'degraded' : 'unavailable', errorClass: cls, errorMessage: lastErr.message, responseTimeMs: elapsed }
+        // OAuth2: a 401 may just be an expired token — drop it and retry once
+        // with a freshly minted token before treating it as an auth failure.
+        if (res.status === 401 && this.clientId && this.clientSecret && this.token && !tokenRefreshed) {
+          this.token = null
+          tokenRefreshed = true
+          continue
+        }
         if (cls === 'authentication_failure' || cls === 'client_error') throw lastErr
       } catch (e) {
         if (e instanceof ProviderError && (e.errorClass === 'authentication_failure' || e.errorClass === 'client_error')) throw e

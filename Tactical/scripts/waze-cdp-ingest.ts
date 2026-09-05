@@ -20,11 +20,11 @@
  *   WAZE_FAKE             - If '1', runs in simulation mode without network calls
  */
 
-import { WazeCdpAdapter, createDefaultWazeCdpAdapter, type WazeAlert, type WazeJam, type CollectionMetrics } from '../lib/waze-cdp/waze-cdp-adapter.ts'
-import { getStore } from '../lib/store.ts'
-import { acquireIngestLease } from '../lib/db/lease.ts'
-import { getPool } from '../lib/db/pool.ts'
-import * as P from '../lib/adsb/persistence/dashboard-persistence.ts'
+import { WazeCdpAdapter, createDefaultWazeCdpAdapter, type WazeAlert, type WazeJam, type CollectionMetrics } from '../lib/waze-cdp/waze-cdp-adapter.js'
+import { getStore } from '../lib/store.js'
+import { acquireIngestLease } from '../lib/db/lease.js'
+import { getPool } from '../lib/db/pool.js'
+import * as P from '../lib/adsb/persistence/dashboard-persistence.js'
 
 const log = (...a: unknown[]) => console.log('[waze-cdp-ingest]', ...a)
 
