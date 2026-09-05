@@ -27,8 +27,8 @@ test('restIntervalSeconds: anon OpenSky paces to budget; authed/explicit differ'
   withEnv({ ADSB_PROVIDER: 'opensky', ADSB_REST_INTERVAL_SECONDS: undefined, OPENSKY_CLIENT_ID: undefined, OPENSKY_CLIENT_SECRET: undefined }, () => {
     assert.equal(restIntervalSeconds(), 864) // anonymous → budget-paced
   })
-  withEnv({ ADSB_PROVIDER: 'opensky', ADSB_REST_INTERVAL_SECONDS: undefined, OPENSKY_CLIENT_ID: 'a', OPENSKY_CLIENT_SECRET: 'b' }, () => {
-    assert.equal(restIntervalSeconds(), 30) // authenticated → 30s
+  withEnv({ ADSB_PROVIDER: 'opensky', ADSB_REST_INTERVAL_SECONDS: undefined, OPENSKY_CLIENT_ID: 'a', OPENSKY_CLIENT_SECRET: 'b', OPENSKY_DAILY_CREDITS: undefined }, () => {
+    assert.equal(restIntervalSeconds(), 87) // authenticated Standard (4000/day) → 87s
   })
   withEnv({ ADSB_PROVIDER: 'opensky', ADSB_REST_INTERVAL_SECONDS: '120' }, () => {
     assert.equal(restIntervalSeconds(), 120) // explicit wins

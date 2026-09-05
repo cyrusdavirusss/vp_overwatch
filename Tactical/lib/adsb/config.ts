@@ -89,9 +89,10 @@ export function restIntervalSeconds(): number {
     const n = Number(explicit)
     if (Number.isFinite(n) && n > 0) return n
   }
-  const anonymousOpenSky = adsbProvider() === 'opensky' &&
-    !(process.env.OPENSKY_CLIENT_ID && process.env.OPENSKY_CLIENT_SECRET)
-  return anonymousOpenSky ? openSkyBudgetIntervalSeconds() : 30
+  // Pace every OpenSky mode to its daily credit budget (anon 400, authed 4000)
+  // so we never overspend. adsbexchange (paid, no credit metering) uses 30s.
+  if (adsbProvider() === 'opensky') return openSkyBudgetIntervalSeconds()
+  return 30
 }
 
 /**
@@ -101,7 +102,11 @@ export function restIntervalSeconds(): number {
  * Both figures are env-overridable.
  */
 export function openSkyBudgetIntervalSeconds(): number {
-  const creditsPerDay = envInt('OPENSKY_DAILY_CREDITS', 400)
+  // Standard (authenticated) accounts get ~4000 credits/day; anonymous ~400.
+  const authed = !!(process.env.OPENSKY_CLIENT_ID && process.env.OPENSKY_CLIENT_SECRET)
+  const creditsPerDay = envInt('OPENSKY_DAILY_CREDITS', authed ? 4000 : 400)
+  // A /states/all call with no bounding box (our icao24 filter) = whole world =
+  // 4 credits. Override to 1-2 if you switch to a small bounding box.
   const creditsPerCall = envInt('OPENSKY_CREDITS_PER_CALL', 4)
   return Math.ceil((86400 * creditsPerCall) / Math.max(1, creditsPerDay))
 }
