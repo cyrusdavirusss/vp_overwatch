@@ -70,7 +70,7 @@ export interface CollectionMetrics {
   lastError?: string
 }
 
-// ── Waze CDP Adapter (inline for standalone) ──────────────────────────────
+// ── Waze CDP Adapter ───────────────────────────────────────────────────────
 class WazeCdpAdapter {
   private ws: any
   private connected: boolean = false
@@ -89,35 +89,29 @@ class WazeCdpAdapter {
     this.fakeMode = fakeMode
   }
 
-  async connect(): Promise<void> {
+  async connect(): Promise<boolean> {
     this.connectionAttempts++
     this.metrics.connectionAttempts = this.connectionAttempts
 
     if (this.fakeMode) {
       console.log('[WazeCdpAdapter] Connected in FAKE mode')
       this.connected = true
-      return
+      return true
     }
 
+    console.log('[WazeCdpAdapter] Attempting connection to Waze CDP endpoint...')
     const WebSocket = (await import('ws')).default
     this.ws = new WebSocket(this.endpoint)
 
     this.ws.on('open', () => {
       console.log('[WazeCdpAdapter] WebSocket connection established')
-<<<<<<< HEAD
-=======
       console.log(`[WazeCdpAdapter] Connected to Waze CDP at ${this.endpoint}`)
->>>>>>> d72115a (feat: implement Waze CDP worker for real-time traffic data collection)
       this.connected = true
     })
 
     this.ws.on('error', (error: Error) => {
       console.error('[WazeCdpAdapter] Connection error:', error.message)
       this.metrics.lastError = error.message
-<<<<<<< HEAD
-=======
-      console.log('[WazeCdpAdapter] Will retry on next collection cycle')
->>>>>>> d72115a (feat: implement Waze CDP worker for real-time traffic data collection)
     })
 
     this.ws.on('close', () => {
@@ -125,55 +119,45 @@ class WazeCdpAdapter {
       this.connected = false
     })
 
-<<<<<<< HEAD
-    // Wait for connection
-    await new Promise<void>((resolve) => {
-      if (this.ws.readyState === WebSocket.OPEN) {
-        this.connected = true
-=======
     this.ws.on('message', (data: any) => {
       this.handleCdpMessage(data)
     })
 
-    // Wait for connection with timeout
-    await new Promise<void>((resolve) => {
+    // Wait for connection with 30s timeout
+    return await new Promise<boolean>((resolve) => {
       const timeout = setTimeout(() => {
-        console.log('[WazeCdpAdapter] Connection attempt completed (may be retrying)')
-        resolve()
+        console.log('[WazeCdpAdapter] Connection attempt timed out after 30s')
+        console.log('[WazeCdpAdapter] Worker will continue with periodic reconnection attempts')
+        resolve(false)
       }, 30000)
 
       if (this.ws.readyState === WebSocket.OPEN) {
         this.connected = true
         clearTimeout(timeout)
->>>>>>> d72115a (feat: implement Waze CDP worker for real-time traffic data collection)
-        resolve()
+        resolve(true)
       } else {
         this.ws.once('open', () => {
           this.connected = true
-<<<<<<< HEAD
-          resolve()
-        })
-        this.ws.once('error', () => resolve())
-=======
           clearTimeout(timeout)
-          resolve()
+          resolve(true)
         })
-        this.ws.once('error', () => {
+        this.ws.once('error', (err: Error) => {
           clearTimeout(timeout)
-          resolve()
+          console.log(`[WazeCdpAdapter] Connection attempt completed: ${err.message}`)
+          resolve(false)
         })
->>>>>>> d72115a (feat: implement Waze CDP worker for real-time traffic data collection)
+        this.ws.once('close', () => {
+          clearTimeout(timeout)
+          resolve(false)
+        })
       }
     })
   }
 
-<<<<<<< HEAD
-=======
   private handleCdpMessage(data: any): void {
     try {
       const message = JSON.parse(typeof data === 'string' ? data : data.toString())
       
-      // Handle CDP responses for page navigation and data collection
       if (message.method === 'Page.loadEventFired') {
         console.log('[WazeCdpAdapter] Page loaded, ready for data collection')
       }
@@ -182,7 +166,7 @@ class WazeCdpAdapter {
         this.processNetworkResponse(message.params)
       }
     } catch (error) {
-      console.debug('[WazeCdpAdapter] Message processing:', error.message)
+      console.debug('[WazeCdpAdapter] Message processing:', (error as Error).message)
     }
   }
 
@@ -190,11 +174,9 @@ class WazeCdpAdapter {
     const response = params.response
     const url = response.url
     
-    // Filter for Waze API endpoints
     if (url.includes('waze.com') || url.includes('waze-api')) {
       console.log('[WazeCdpAdapter] Waze API response:', url)
       
-      // Process response body if available
       if (params.responseBody) {
         this.extractTrafficData(params.responseBody, url)
       }
@@ -205,35 +187,26 @@ class WazeCdpAdapter {
     try {
       const data = typeof body === 'string' ? JSON.parse(body) : body
       
-      // Extract alerts from response
       if (data.alerts || data.incidents) {
         const alerts = data.alerts || data.incidents || []
         console.log(`[WazeCdpAdapter] Extracted ${alerts.length} alerts from ${url}`)
       }
       
-      // Extract traffic jams/congestion
       if (data.jams || data.congestion) {
         const jams = data.jams || data.congestion || []
         console.log(`[WazeCdpAdapter] Extracted ${jams.length} traffic jams from ${url}`)
       }
     } catch (error) {
-      console.debug('[WazeCdpAdapter] Data extraction:', error.message)
+      console.debug('[WazeCdpAdapter] Data extraction:', (error as Error).message)
     }
   }
 
->>>>>>> d72115a (feat: implement Waze CDP worker for real-time traffic data collection)
   async collectAlerts(): Promise<WazeAlert[]> {
     if (this.fakeMode) {
       return this.generateFakeAlerts()
     }
 
-<<<<<<< HEAD
-    // In production, this would query the Waze CDP endpoint
-    // For now, return empty array when not in fake mode
-=======
-    // Send CDP command to collect real-time alerts
     if (this.ws && this.ws.readyState === (await import('ws')).default.OPEN) {
-      // Request current page state and traffic data
       this.ws.send(JSON.stringify({
         id: Date.now(),
         method: 'Runtime.evaluate',
@@ -243,11 +216,9 @@ class WazeCdpAdapter {
         }
       }))
 
-      // Also try to fetch from Waze's REST API if available
       return this.fetchFromWazeApi('/alerts')
     }
 
->>>>>>> d72115a (feat: implement Waze CDP worker for real-time traffic data collection)
     return []
   }
 
@@ -255,11 +226,6 @@ class WazeCdpAdapter {
     if (this.fakeMode) {
       return this.generateFakeJams()
     }
-<<<<<<< HEAD
-    return []
-  }
-
-=======
 
     if (this.ws && this.ws.readyState === (await import('ws')).default.OPEN) {
       this.ws.send(JSON.stringify({
@@ -281,7 +247,6 @@ class WazeCdpAdapter {
     const https = await import('https')
     
     return new Promise((resolve) => {
-      // Use Waze for Cities API or local Waze instance
       const apiUrl = process.env.WAZE_API_URL || 'http://100.80.115.26:8080'
       const url = `${apiUrl}${endpoint}`
       
@@ -305,10 +270,9 @@ class WazeCdpAdapter {
     })
   }
 
->>>>>>> d72115a (feat: implement Waze CDP worker for real-time traffic data collection)
   private generateFakeAlerts(): WazeAlert[] {
     const now = new Date().toISOString()
-    const baseLat = -37.8136 // Melbourne CBD
+    const baseLat = -37.8136
     const baseLon = 144.9631
 
     return [
@@ -471,7 +435,6 @@ async function runWorker(): Promise<void> {
   console.log(`[WazeWorker] Endpoint: ${endpoint}`)
   console.log(`[WazeWorker] Interval: ${baseInterval}ms ±${jitterRange}ms`)
 
-  // Initialize database connection
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) {
     console.warn('[WazeWorker] DATABASE_URL not set — persistence will be skipped')
@@ -487,25 +450,20 @@ async function runWorker(): Promise<void> {
       console.log('[WazeWorker] Acquired ingest lease:', lease.id)
     }
 
-    // Initialize Waze CDP adapter
     const adapter = new WazeCdpAdapter(endpoint, fakeMode)
+    const connected = await adapter.connect()
 
-    // Connect to Waze CDP
-    await adapter.connect()
-
-    if (!adapter.connected) {
-      console.error('[WazeWorker] Failed to connect to Waze CDP endpoint')
-      process.exit(1)
+    if (!connected && !fakeMode) {
+      console.warn('[WazeWorker] Waze CDP endpoint is currently unreachable')
+      console.warn('[WazeWorker] Worker will continue and retry connection on each collection cycle')
     }
 
-    // Collection loop
     let collectionCount = 0
 
-    const collect = async (): Promise<void> => {
+    const collect = async (): Promise<boolean> => {
       collectionCount++
       console.log(`[WazeWorker] Collection cycle #${collectionCount} at ${new Date().toISOString()}`)
 
-      // Collect alerts and jams
       const [alerts, jams] = await Promise.all([
         adapter.collectAlerts(),
         adapter.collectJams()
@@ -513,7 +471,6 @@ async function runWorker(): Promise<void> {
 
       console.log(`[WazeWorker] Collected ${alerts.length} alerts and ${jams.length} jams`)
 
-      // Persist to database
       if (pool) {
         await Promise.all([
           saveWazeAlerts(pool, alerts),
@@ -521,7 +478,6 @@ async function runWorker(): Promise<void> {
         ])
       }
 
-      // Update metrics
       adapter.metrics.alertsCollected += alerts.length
       adapter.metrics.jamsCollected += jams.length
       adapter.metrics.lastCollectionAt = new Date()
@@ -531,18 +487,15 @@ async function runWorker(): Promise<void> {
 
       if (oneShot) {
         console.log('[WazeWorker] One-shot mode — exiting after single collection')
-        return false // Signal to stop
+        return false
       }
 
-      return true // Continue
+      return true
     }
 
-    // Run first collection
     let shouldContinue = await collect()
 
-    // Continue collection loop
     while (shouldContinue) {
-      // Calculate next interval with jitter for detection evasion
       const jitter = Math.floor(Math.random() * jitterRange * 2) - jitterRange
       const nextInterval = baseInterval + jitter
 
@@ -556,7 +509,6 @@ async function runWorker(): Promise<void> {
     console.error('[WazeWorker] Error:', error)
     throw error
   } finally {
-    // Cleanup
     if (lease) {
       await lease.release()
       console.log('[WazeWorker] Released ingest lease')
