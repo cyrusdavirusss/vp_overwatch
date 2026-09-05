@@ -9,7 +9,8 @@
     "lint": "next lint",
     "test": "node --experimental-strip-types --test tools/adsb-adapter.test.ts tools/geo-proximity.test.ts tools/adsb-state-machine.test.ts tools/adsb-persistence.test.ts tools/auth-crypto.test.ts tools/dead-reckoning.test.ts tools/rate-limit.test.ts tools/opensky-adapter.test.ts tools/config-interval.test.ts",
     "migrate": "node scripts/migrate.mjs",
-    "worker": "node --experimental-strip-types scripts/adsb-ingest.ts"
+    "worker": "node --experimental-strip-types scripts/adsb-ingest.ts",
+    "waze-worker": "node --experimental-strip-types scripts/waze-cdp-ingest.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.4",
