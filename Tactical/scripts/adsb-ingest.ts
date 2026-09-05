@@ -14,7 +14,8 @@
  * the full loop can be verified against a scratch database.
  */
 import { ADSBExchangeAdapter, type CollectionResult } from '../lib/adsb/exchange-adapter.ts'
-import { TRACKED_AIRCRAFT, trackedRegistrations, freshnessConfig, movementConfig, restIntervalSeconds, ingestionMode } from '../lib/adsb/config.ts'
+import { createProvider, type AircraftProvider } from '../lib/adsb/provider.ts'
+import { TRACKED_AIRCRAFT, trackedRegistrations, freshnessConfig, movementConfig, restIntervalSeconds, ingestionMode, adsbProvider, hexOverride } from '../lib/adsb/config.ts'
 import { applyObservation, sweepAircraft, emptyRecord, type ApplyContext } from '../lib/adsb/state-machine.ts'
 import * as P from '../lib/adsb/persistence/dashboard-persistence.ts'
 import { evaluateProximityForUser } from '../lib/alerts/engine.ts'
@@ -25,8 +26,7 @@ import type { AircraftRecord } from '../lib/adsb/types.ts'
 
 const log = (...a: unknown[]) => console.log('[adsb-ingest]', ...a)
 
-function buildAdapter(): ADSBExchangeAdapter {
-  const key = process.env.ADSB_EXCHANGE_API_KEY
+function buildAdapter(): AircraftProvider {
   if (process.env.ADSB_FAKE === '1') {
     // Fixture provider — returns the tracked hexes as live airborne aircraft.
     const fake = (async (url: any) => {
@@ -40,11 +40,10 @@ function buildAdapter(): ADSBExchangeAdapter {
     }) as unknown as typeof fetch
     return new ADSBExchangeAdapter('fake-key', { fetchImpl: fake })
   }
-  if (!key) { console.error('[adsb-ingest] ADSB_EXCHANGE_API_KEY is required (or set ADSB_FAKE=1)'); process.exit(1) }
-  return new ADSBExchangeAdapter(key)
+  return createProvider()
 }
 
-async function resolveMappings(adapter: ADSBExchangeAdapter, records: Map<string, AircraftRecord>): Promise<void> {
+async function resolveMappings(adapter: AircraftProvider, records: Map<string, AircraftRecord>): Promise<void> {
   for (const reg of trackedRegistrations()) {
     const rec = records.get(reg)
     if (rec && rec.mappingStatus === 'verified' && rec.icao24) continue
@@ -55,7 +54,15 @@ async function resolveMappings(adapter: ADSBExchangeAdapter, records: Map<string
         if (rec) { rec.icao24 = lookup.icao24; rec.mappingStatus = 'verified'; await P.upsertRecord(rec) }
         log(`resolved ${reg} -> ${lookup.icao24}`)
       } else {
-        log(`unresolved: ${reg}`)
+        // Provider can't resolve reg→hex (e.g. OpenSky) → use a configured hex.
+        const ov = hexOverride(reg)
+        if (ov) {
+          await P.saveMapping(reg, ov, 'verified')
+          if (rec) { rec.icao24 = ov; rec.mappingStatus = 'verified'; await P.upsertRecord(rec) }
+          log(`mapped ${reg} -> ${ov} (hex override)`)
+        } else {
+          log(`unresolved: ${reg} (no provider match, no ADSB_HEX_ override)`)
+        }
       }
     } catch (e) {
       log(`mapping resolve failed for ${reg}:`, (e as Error).message)
@@ -63,7 +70,7 @@ async function resolveMappings(adapter: ADSBExchangeAdapter, records: Map<string
   }
 }
 
-async function runCycle(adapter: ADSBExchangeAdapter, records: Map<string, AircraftRecord>): Promise<void> {
+async function runCycle(adapter: AircraftProvider, records: Map<string, AircraftRecord>): Promise<void> {
   const nowMs = Date.now()
   const fresh = freshnessConfig()
   const move = movementConfig()
@@ -113,7 +120,7 @@ async function runCycle(adapter: ADSBExchangeAdapter, records: Map<string, Aircr
 }
 
 async function main(): Promise<void> {
-  log(`starting (mode=${ingestionMode()}, interval=${restIntervalSeconds()}s, fake=${process.env.ADSB_FAKE === '1'})`)
+  log(`starting (provider=${adsbProvider()}, mode=${ingestionMode()}, interval=${restIntervalSeconds()}s, fake=${process.env.ADSB_FAKE === '1'})`)
   const lease = await acquireIngestLease()
   if (!lease) { log('another ingester holds the lease; exiting'); await getPool().end(); process.exit(0) }
   log('acquired ingest lease')

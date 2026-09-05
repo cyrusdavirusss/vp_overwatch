@@ -37,8 +37,14 @@ export interface DashboardSnapshotDTO {
 
 function recompute(rec: AircraftRecord, nowMs: number): { state: AircraftLifecycleState; dataStatus: DataStatus; ageSec: number | null } {
   const f = freshnessConfig()
-  if (rec.mappingStatus !== 'verified' || rec.lastObservedAt === null) {
-    return { state: rec.state === 'unresolved' ? 'unresolved' : rec.state, dataStatus: 'unavailable', ageSec: null }
+  // No verified hex mapping → genuinely unresolved.
+  if (rec.mappingStatus !== 'verified') {
+    return { state: 'unresolved', dataStatus: 'unavailable', ageSec: null }
+  }
+  // Mapped but never observed (aircraft not currently broadcasting) → no signal,
+  // NOT 'unresolved' (which would wrongly imply we don't know the aircraft).
+  if (rec.lastObservedAt === null) {
+    return { state: 'unavailable', dataStatus: 'unavailable', ageSec: null }
   }
   const ageSec = Math.max(0, (nowMs - rec.lastObservedAt) / 1000)
   let dataStatus: DataStatus

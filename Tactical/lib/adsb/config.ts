@@ -9,14 +9,20 @@ export interface TrackedAircraftDef {
   description: string
   /** Neutral type label used in notifications (never alarmist). */
   typeLabel: string
+  /** Known Mode-S hex (icao24), used as the default reg->hex mapping for
+   *  providers that can't resolve it live (OpenSky). Overridable via
+   *  ADSB_HEX_<REG>. These are public broadcast identifiers, not secrets. */
+  hex?: string
+  callsign?: string
 }
 
-/** The four MVP aircraft. Descriptions/labels are static; hex is resolved live. */
+/** Victoria Police Air Wing — the four tracked aircraft, with their public
+ *  Mode-S hex codes (used directly by the OpenSky provider). */
 export const TRACKED_AIRCRAFT: TrackedAircraftDef[] = [
-  { registration: 'VH-PVO', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter' },
-  { registration: 'VH-PVP', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter' },
-  { registration: 'VH-PVQ', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter' },
-  { registration: 'VH-PVE', description: 'Beechcraft 350i Super King Air', typeLabel: 'King Air 350i' },
+  { registration: 'VH-PVO', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef2', callsign: 'POL30' },
+  { registration: 'VH-PVQ', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef4', callsign: 'POL31' },
+  { registration: 'VH-PVR', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef5', callsign: 'POL32' },
+  { registration: 'VH-PVE', description: 'Beechcraft King Air 350ER', typeLabel: 'King Air 350ER', hex: '7c4ee8', callsign: 'POL35' },
 ]
 
 export function trackedRegistrations(): string[] {
@@ -77,4 +83,24 @@ export function restIntervalSeconds(): number {
 
 export function ingestionMode(): 'streaming' | 'rest' {
   return process.env.ADSB_INGESTION_MODE === 'streaming' ? 'streaming' : 'rest'
+}
+
+export function adsbProvider(): 'opensky' | 'adsbexchange' {
+  // Default OpenSky: keyless and works with the baked Mode-S hexes. Set
+  // ADSB_PROVIDER=adsbexchange (with a key) to use the Enterprise gateway.
+  return process.env.ADSB_PROVIDER === 'adsbexchange' ? 'adsbexchange' : 'opensky'
+}
+
+/**
+ * Static registration→hex override (Mode-S hex), for providers that can't
+ * resolve reg→hex live (e.g. OpenSky). Env var per registration, '-'→'_':
+ *   ADSB_HEX_VH_PVO=7c... . Returns lowercase hex or null.
+ */
+export function hexOverride(registration: string): string | null {
+  const reg = registration.trim().toUpperCase()
+  const key = 'ADSB_HEX_' + reg.replace(/[^A-Z0-9]/g, '_')
+  const v = process.env[key]
+  if (v && v.trim()) return v.trim().toLowerCase()
+  const def = TRACKED_AIRCRAFT.find((a) => a.registration === reg)
+  return def?.hex ? def.hex.toLowerCase() : null
 }
