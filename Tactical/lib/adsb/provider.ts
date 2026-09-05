@@ -5,7 +5,7 @@
  */
 import { ADSBExchangeAdapter, type CollectionResult, type ProviderHealth, type RegistrationLookup } from './exchange-adapter.ts'
 import { OpenSkyAdapter } from './opensky-adapter.ts'
-import { adsbProvider } from './config.ts'
+import { adsbProvider, openSkyBbox } from './config.ts'
 
 export interface AircraftProvider {
   fetchByIcaos(icaos: string[]): Promise<CollectionResult>
@@ -17,7 +17,9 @@ export interface AircraftProvider {
 /** Build the configured provider. Throws only if a required key is missing. */
 export function createProvider(): AircraftProvider {
   if (adsbProvider() === 'opensky') {
-    return new OpenSkyAdapter() // anonymous, or OAuth2 via OPENSKY_CLIENT_ID/SECRET
+    // Reads OAuth2 (OPENSKY_CLIENT_ID/SECRET) or basic (OPENSKY_USERNAME/PASSWORD)
+    // from env; bbox defaults to Melbourne (config.openSkyBbox()).
+    return new OpenSkyAdapter({ bbox: openSkyBbox() ?? undefined })
   }
   const key = process.env.ADSB_EXCHANGE_API_KEY
   if (!key) throw new Error('ADSB_EXCHANGE_API_KEY required for adsbexchange provider (or set ADSB_PROVIDER=opensky)')

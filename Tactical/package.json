@@ -2,6 +2,10 @@
   "name": "vp-overwatch",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
+  "imports": {
+    "@/*": "./*"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build && node scripts/copy-standalone.mjs && node scripts/sync-dist.mjs",
@@ -10,7 +14,7 @@
     "test": "node --experimental-strip-types --test tools/adsb-adapter.test.ts tools/geo-proximity.test.ts tools/adsb-state-machine.test.ts tools/adsb-persistence.test.ts tools/auth-crypto.test.ts tools/dead-reckoning.test.ts tools/rate-limit.test.ts tools/opensky-adapter.test.ts tools/config-interval.test.ts tools/opensky-oauth.test.ts",
     "migrate": "node scripts/migrate.mjs",
     "worker": "node --experimental-strip-types scripts/adsb-ingest.ts",
-    "waze-worker": "node --experimental-strip-types scripts/waze-cdp-ingest.ts"
+    "waze-worker": "node --experimental-strip-types scripts/waze-cdp-worker.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.4",
@@ -32,6 +36,8 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@swc-node/register": "^1.12.1",
+    "@swc/core": "^1.16.2",
     "@tailwindcss/postcss": "^4.3.0",
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",

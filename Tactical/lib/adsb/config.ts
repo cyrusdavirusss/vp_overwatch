@@ -2,7 +2,7 @@
  * Tracked-aircraft roster + environment-configurable tracking thresholds.
  * Server-only. No secrets here.
  */
-import type { FreshnessConfig, MovementConfig, ProximityConfigMetres } from './types.ts'
+import type { Bbox, FreshnessConfig, MovementConfig, ProximityConfigMetres } from './types.ts'
 
 export interface TrackedAircraftDef {
   registration: string
@@ -102,13 +102,58 @@ export function restIntervalSeconds(): number {
  * Both figures are env-overridable.
  */
 export function openSkyBudgetIntervalSeconds(): number {
-  // Standard (authenticated) accounts get ~4000 credits/day; anonymous ~400.
-  const authed = !!(process.env.OPENSKY_CLIENT_ID && process.env.OPENSKY_CLIENT_SECRET)
+  // Authenticated accounts (OAuth2 client OR basic username/password) get ~4000
+  // credits/day (Standard); anonymous ~400.
+  const authed = openSkyAuthenticated()
   const creditsPerDay = envInt('OPENSKY_DAILY_CREDITS', authed ? 4000 : 400)
-  // A /states/all call with no bounding box (our icao24 filter) = whole world =
-  // 4 credits. Override to 1-2 if you switch to a small bounding box.
-  const creditsPerCall = envInt('OPENSKY_CREDITS_PER_CALL', 4)
+  const creditsPerCall = openSkyCreditsPerCall()
   return Math.ceil((86400 * creditsPerCall) / Math.max(1, creditsPerDay))
+}
+
+export function openSkyAuthenticated(): boolean {
+  return !!(process.env.OPENSKY_CLIENT_ID && process.env.OPENSKY_CLIENT_SECRET) ||
+         !!(process.env.OPENSKY_USERNAME && process.env.OPENSKY_PASSWORD)
+}
+
+/** Greater Melbourne (metro + surrounds); ~2.5 sq deg → 1 OpenSky credit/call. */
+export const MELBOURNE_BBOX: Bbox = { lamin: -38.6, lomin: 144.0, lamax: -37.2, lomax: 145.8 }
+
+/**
+ * Bounding box for OpenSky queries. Default: Melbourne only (1 credit/call, so
+ * fast polling fits the budget) — the tradeoff is aircraft outside the box are
+ * not seen. OPENSKY_BBOX="lamin,lomin,lamax,lomax" sets a custom box;
+ * OPENSKY_BBOX=global uses the whole-world icao24 query (4 credits/call).
+ */
+export function openSkyBbox(): Bbox | null {
+  const v = process.env.OPENSKY_BBOX
+  if (v && v.trim() !== '') {
+    const t = v.trim().toLowerCase()
+    if (t === 'global' || t === 'world' || t === 'off' || t === 'none') return null
+    const p = t.split(',').map((x) => Number(x))
+    if (p.length === 4 && p.every((n) => Number.isFinite(n))) {
+      return { lamin: p[0], lomin: p[1], lamax: p[2], lomax: p[3] }
+    }
+  }
+  return MELBOURNE_BBOX
+}
+
+export function bboxAreaSqDeg(b: Bbox): number {
+  return Math.abs(b.lamax - b.lamin) * Math.abs(b.lomax - b.lomin)
+}
+
+/** OpenSky /states/all credit cost by requested area band. */
+export function creditsForArea(areaSqDeg: number): number {
+  if (areaSqDeg <= 25) return 1
+  if (areaSqDeg <= 100) return 2
+  if (areaSqDeg <= 400) return 3
+  return 4
+}
+
+export function openSkyCreditsPerCall(): number {
+  const env = process.env.OPENSKY_CREDITS_PER_CALL
+  if (env && env.trim() !== '') { const n = Number(env); if (Number.isFinite(n) && n > 0) return n }
+  const b = openSkyBbox()
+  return b ? creditsForArea(bboxAreaSqDeg(b)) : 4
 }
 
 export function ingestionMode(): 'streaming' | 'rest' {

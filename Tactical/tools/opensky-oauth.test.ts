@@ -53,3 +53,30 @@ test('anonymous (no creds): no token call, no Authorization header', async () =>
   assert.ok(!calls.some((c) => c.url.includes('/token')), 'no token endpoint hit')
   assert.equal(calls[0].init.headers['Authorization'], undefined)
 })
+
+test('basic-auth fallback: sends Authorization: Basic, no token endpoint', async () => {
+  const calls: any[] = []
+  const fetchImpl = (async (url: any, init: any) => {
+    calls.push({ url: String(url), init })
+    return { ok: true, status: 200, statusText: 'ok', headers: { get: () => null }, json: async () => STATES } as any
+  }) as unknown as typeof fetch
+  const a = new OpenSkyAdapter({ username: 'joe', password: 'pw', fetchImpl })
+  await a.fetchByIcaos(['7c4ef2'])
+  assert.ok(!calls.some((c) => c.url.includes('/token')), 'no OAuth2 token call for basic auth')
+  const auth = calls[0].init.headers['Authorization']
+  assert.equal(auth, 'Basic ' + Buffer.from('joe:pw').toString('base64'))
+})
+
+test('bbox mode: queries the box once and filters to the requested hexes', async () => {
+  const many = { time: 1_788_614_166, states: [
+    ['7c4ef2', 'POL30', 'AU', 1_788_614_165, 1_788_614_165, 144.9, -37.72, 200, false, 40, 90, 0, null, 210, '1', false, 0, 0],
+    ['abc123', 'OTHER', 'AU', 1_788_614_165, 1_788_614_165, 145.0, -37.80, 300, false, 50, 90, 0, null, 310, '2', false, 0, 0],
+  ] }
+  let url = ''
+  const fetchImpl = (async (u: any) => { url = String(u); return { ok: true, status: 200, statusText: 'ok', headers: { get: () => null }, json: async () => many } as any }) as unknown as typeof fetch
+  const a = new OpenSkyAdapter({ bbox: { lamin: -38.6, lomin: 144.0, lamax: -37.2, lomax: 145.8 }, fetchImpl })
+  const r = await a.fetchByIcaos(['7c4ef2'])
+  assert.match(url, /lamin=-38.6.*lomin=144.*lamax=-37.2.*lomax=145.8/)  // bbox query, not icao24
+  assert.equal(r.aircraft.size, 1)             // filtered down to the tracked hex
+  assert.ok(r.aircraft.has('7c4ef2') && !r.aircraft.has('abc123'))
+})
