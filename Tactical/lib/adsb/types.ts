@@ -100,3 +100,11 @@ export interface ProximityConfigMetres {
   enterMetres: number
   exitMetres: number
 }
+
+/** Geographic bounding box (degrees) for area-limited provider queries. */
+export interface Bbox {
+  lamin: number
+  lomin: number
+  lamax: number
+  lomax: number
+}

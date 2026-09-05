@@ -1,0 +1,25 @@
+{
+  "jsc": {
+    "externalHelpers": true,
+    "keepClassNames": true,
+    "parser": {
+      "decorators": false,
+      "dynamicImport": true,
+      "syntax": "typescript",
+      "tsx": true
+    },
+    "target": "es2022",
+    "transform": {
+      "react": {
+        "runtime": "automatic"
+      }
+    }
+  },
+  "module": {
+    "rootMode": "root-dir",
+    "strict": true,
+    "strictRoot": true,
+    "type": "es6"
+  },
+  "tsconfig": "./tsconfig.json"
+}

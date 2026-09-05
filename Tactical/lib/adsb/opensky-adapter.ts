@@ -18,6 +18,7 @@ import {
   ProviderError, type ADSBAircraft, type CollectionResult, type ProviderHealth,
   type RegistrationLookup, type ProviderErrorClass,
 } from './exchange-adapter.ts'
+import type { Bbox } from './types.ts'
 
 const STATES_URL = 'https://opensky-network.org/api/states/all'
 const TOKEN_URL = 'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token'
@@ -78,6 +79,9 @@ export function parseStates(body: any): CollectionResult {
 interface OpenSkyOptions {
   clientId?: string
   clientSecret?: string
+  username?: string      // basic-auth fallback (legacy OpenSky login)
+  password?: string
+  bbox?: Bbox            // when set, fetchByIcaos queries this box (cheaper) + filters
   maxRetries?: number
   requestTimeoutMs?: number
   now?: () => number
@@ -87,6 +91,9 @@ interface OpenSkyOptions {
 export class OpenSkyAdapter {
   private readonly clientId?: string
   private readonly clientSecret?: string
+  private readonly username?: string
+  private readonly password?: string
+  private readonly bbox?: Bbox
   private readonly maxRetries: number
   private readonly requestTimeoutMs: number
   private readonly now: () => number
@@ -100,6 +107,9 @@ export class OpenSkyAdapter {
   constructor(options: OpenSkyOptions = {}) {
     this.clientId = options.clientId ?? process.env.OPENSKY_CLIENT_ID
     this.clientSecret = options.clientSecret ?? process.env.OPENSKY_CLIENT_SECRET
+    this.username = options.username ?? process.env.OPENSKY_USERNAME
+    this.password = options.password ?? process.env.OPENSKY_PASSWORD
+    this.bbox = options.bbox
     this.maxRetries = options.maxRetries ?? 2
     this.requestTimeoutMs = options.requestTimeoutMs ?? 12_000
     this.now = options.now ?? Date.now
@@ -108,7 +118,8 @@ export class OpenSkyAdapter {
 
   getHealth(): ProviderHealth { return { ...this.health } }
   getConfiguration() {
-    return { baseUrl: STATES_URL, provider: 'opensky', streamingEnabled: false, authenticated: !!(this.clientId && this.clientSecret) }
+    const authMode = (this.clientId && this.clientSecret) ? 'oauth2' : (this.username && this.password) ? 'basic' : 'anonymous'
+    return { baseUrl: STATES_URL, provider: 'opensky', streamingEnabled: false, authenticated: authMode !== 'anonymous', authMode, bbox: this.bbox ?? null }
   }
 
   private classify(status: number): ProviderErrorClass {
@@ -143,6 +154,9 @@ export class OpenSkyAdapter {
         const headers: Record<string, string> = { Accept: 'application/json', 'Accept-Encoding': 'gzip' }
         const token = await this.getToken()
         if (token) headers['Authorization'] = `Bearer ${token}`
+        else if (this.username && this.password) {
+          headers['Authorization'] = 'Basic ' + Buffer.from(`${this.username}:${this.password}`).toString('base64')
+        }
         const res = await this.fetchImpl(url, { headers, signal: AbortSignal.timeout(this.requestTimeoutMs) })
         const elapsed = this.now() - started
         if (res.ok) {
@@ -175,6 +189,17 @@ export class OpenSkyAdapter {
   async fetchByIcaos(icao24Ids: string[]): Promise<CollectionResult> {
     const ids = icao24Ids.map((h) => h.trim().toLowerCase()).filter(Boolean)
     if (ids.length === 0) return { aircraft: new Map(), providerNow: null }
+    // Bounding-box mode: one small-area query (cheaper credits) then filter to
+    // the tracked hexes. Aircraft outside the box are simply not returned.
+    if (this.bbox) {
+      const coll = await this.fetchByBbox(this.bbox.lamin, this.bbox.lomin, this.bbox.lamax, this.bbox.lomax)
+      const filtered = new Map<string, ADSBAircraft>()
+      for (const id of ids) {
+        const a = coll.aircraft.get(id)
+        if (a) filtered.set(id, a)
+      }
+      return { aircraft: filtered, providerNow: coll.providerNow }
+    }
     const qs = ids.map((h) => `icao24=${encodeURIComponent(h)}`).join('&')
     return parseStates(await this.request(`${STATES_URL}?${qs}`))
   }
