@@ -77,8 +77,33 @@ export function locationExpirySeconds(): number {
   return envInt('LOCATION_EXPIRY_SECONDS', 600)
 }
 
+/**
+ * Poll interval for the ingestion worker. An explicit ADSB_REST_INTERVAL_SECONDS
+ * always wins. Otherwise, when running OpenSky ANONYMOUSLY (no OAuth2 creds), the
+ * interval auto-paces to the free daily credit budget so we never exceed it;
+ * authenticated OpenSky and ADS-B Exchange default to 30s.
+ */
 export function restIntervalSeconds(): number {
-  return envInt('ADSB_REST_INTERVAL_SECONDS', 30)
+  const explicit = process.env.ADSB_REST_INTERVAL_SECONDS
+  if (explicit && explicit.trim() !== '') {
+    const n = Number(explicit)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  const anonymousOpenSky = adsbProvider() === 'opensky' &&
+    !(process.env.OPENSKY_CLIENT_ID && process.env.OPENSKY_CLIENT_SECRET)
+  return anonymousOpenSky ? openSkyBudgetIntervalSeconds() : 30
+}
+
+/**
+ * Seconds between polls that exhaust exactly the OpenSky daily credit budget.
+ * A /states/all call with no bounding box (our icao24 filter) covers the whole
+ * world = 4 credits; anonymous tier = 400 credits/day → 100 calls/day → 864s.
+ * Both figures are env-overridable.
+ */
+export function openSkyBudgetIntervalSeconds(): number {
+  const creditsPerDay = envInt('OPENSKY_DAILY_CREDITS', 400)
+  const creditsPerCall = envInt('OPENSKY_CREDITS_PER_CALL', 4)
+  return Math.ceil((86400 * creditsPerCall) / Math.max(1, creditsPerDay))
 }
 
 export function ingestionMode(): 'streaming' | 'rest' {
