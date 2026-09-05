@@ -26,18 +26,23 @@
       "@/*": [
         "./*"
       ]
-    }
+    },
+    "allowImportingTsExtensions": true
   },
   "include": [
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next-verify/types/**/*.ts",
+    ".next-verify/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "uploads",
-    "vp_ui_integration"
+    "vp_ui_integration",
+    "tools",
+    "scripts"
   ]
 }
