@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build && node scripts/copy-standalone.mjs && node scripts/sync-dist.mjs",
     "start": "node .next/standalone/server.js",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --experimental-strip-types --test tools/adsb-adapter.test.ts tools/geo-proximity.test.ts tools/adsb-state-machine.test.ts tools/adsb-persistence.test.ts tools/auth-crypto.test.ts tools/dead-reckoning.test.ts tools/rate-limit.test.ts",
+    "migrate": "node scripts/migrate.mjs",
+    "worker": "node --experimental-strip-types scripts/adsb-ingest.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.4",

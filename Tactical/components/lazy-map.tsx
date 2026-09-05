@@ -51,11 +51,10 @@ export function LazyMap(props: VPMapProps) {
   }
 
   if (!Module) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-[var(--map-bg)]">
-        <div className="text-fg-3 text-sm font-mono tracking-[0.1em]">INITIALIZING MAP...</div>
-      </div>
-    )
+    // Instant start: paint the map's own dark canvas immediately (no spinner, no
+    // "INITIALIZING" text) so the hand-off to the real map is visually seamless.
+    // The module is a dynamic import that resolves in a tick on a warm cache.
+    return <div className="w-full h-full bg-[var(--map-bg)]" aria-hidden="true" />
   }
 
   return <Module.VPMap {...props} />
