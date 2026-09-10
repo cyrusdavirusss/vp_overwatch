@@ -58,7 +58,8 @@ const ETA_INCREMENTAL = 0.26
 
 // ISA density ratio σ = ρ/ρ0 in the troposphere, from pressure altitude (ft).
 export function densityRatio(altFt: number): number {
-  const a = 1 - 6.8753e-6 * Math.max(0, altFt)
+  const ft = Number.isFinite(altFt) ? altFt : 0
+  const a = 1 - 6.8753e-6 * Math.max(0, ft)
   if (a <= 0) return 0.25
   return Math.min(1.05, Math.pow(a, 4.2561))
 }
@@ -116,10 +117,13 @@ export function instantFuelFlowKgH(
     ff += (accelW / (LHV_JET_A * ETA_INCREMENTAL)) * 3600
   }
 
-  // Floor at flight idle, ceiling at max-continuous burn.
+  // Floor at flight idle, ceiling at max-continuous burn. Guard against a NaN
+  // slipping through from a bad telemetry sample — clamping NaN yields NaN,
+  // which would propagate to NaN fuel (→ JSON null). Fall back to idle burn.
   const idle = 0.35 * perf.ffCruiseKgH
   const max = 1.6 * perf.ffCruiseKgH
-  return Math.max(idle, Math.min(max, ff))
+  const safe = Number.isFinite(ff) ? ff : idle
+  return Math.max(idle, Math.min(max, safe))
 }
 
 export interface BurnResult {

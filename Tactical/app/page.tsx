@@ -43,8 +43,12 @@ export default function VPOverwatch() {
   }, [])
 
   const liveData = useRealtimeData({
-    aircraftInterval: 30_000,
-    reportsInterval: 15_000,
+    // The backend fast-police loop refreshes adsb.lol every 3s (FAST_POLICE_INTERVAL);
+    // poll the client at the same cadence so the map is near-real-time instead of
+    // lagging up to 30s behind the store. /api/aircraft/active just returns in-memory
+    // state (the OpenSky sub-poll is independently throttled to 60s), so this is cheap.
+    aircraftInterval: 3_000,
+    reportsInterval: 10_000,
     relayInterval: 3_000,
   })
 
