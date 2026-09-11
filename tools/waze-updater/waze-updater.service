@@ -1,0 +1,31 @@
+[Unit]
+Description=VP-Overwatch Waze Updater
+Documentation=file:///home/cyrus/Documents/vp_overwatch/tools/waze-updater/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cyrus
+WorkingDirectory=/home/cyrus/Documents/vp_overwatch/tools/waze-updater
+EnvironmentFile=/home/cyrus/Documents/vp_overwatch/tools/waze-updater/.env
+ExecStart=/usr/bin/node /home/cyrus/Documents/vp_overwatch/tools/waze-updater/waze-updater.mjs
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=waze-updater
+
+# Resource limits
+MemoryLimit=256M
+CPUQuota=50%
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/cyrus/Documents/vp_overwatch/tools/waze-updater
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
