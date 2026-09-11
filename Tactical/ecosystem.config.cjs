@@ -1,18 +1,21 @@
-// PM2 process definition for VP-Overwatch.
+// PM2 process definitions for VP-Overwatch.
 //
-// IMPORTANT: PM2 and the systemd unit (vp-overwatch.service) both supervise the
-// SAME app on the SAME port — they cannot run at once or they fight over the
-// port. systemd is the active supervisor in this setup. To drive the app with
-// PM2 instead:
+// Two SEPARATE processes:
+//   1. vp-overwatch        — the Next.js standalone web/API server (read-only:
+//                            serves cached state, never calls ADS-B Exchange).
+//   2. vp-overwatch-ingest — the ADS-B ingestion WORKER (the ONLY component that
+//                            calls ADS-B Exchange). Holds a Postgres advisory
+//                            lease so exactly one ingester runs across replicas.
 //
-//   systemctl --user stop vp-overwatch.service      # free the port
-//   cd /home/cyrus/Documents/vp_overwatch/Tactical
-//   pnpm build                                       # PM2 doesn't build; do it first
-//   pm2 start ecosystem.config.cjs
-//   pm2 save
+// systemd is the active supervisor in this deployment (vp-overwatch.service +
+// vp-overwatch-ingest.service). Use PM2 only if you switch supervisors; the web
+// and worker must not double-run under both.
 //
-// Port 3000 is taken by the Hermes WhatsApp bridge, so this uses 3100 to match
-// the systemd unit.
+// Build is `npm run build` (next build + copy-standalone + sync-dist). NEVER a
+// bare `next build` — that desyncs the running standalone server (500 chunks /
+// blank page). PM2 does not build; build first.
+//
+// Port 3000 is taken by the Hermes bridge, so the web app uses 3100.
 
 module.exports = {
   apps: [
@@ -23,11 +26,19 @@ module.exports = {
       interpreter: 'node',
       autorestart: true,
       max_restarts: 10,
-      env: {
-        NODE_ENV: 'production',
-        HOSTNAME: '0.0.0.0',
-        PORT: '3100',
-      },
+      env: { NODE_ENV: 'production', HOSTNAME: '0.0.0.0', PORT: '3100' },
+    },
+    {
+      name: 'vp-overwatch-ingest',
+      cwd: '/home/cyrus/Documents/vp_overwatch/Tactical',
+      script: 'scripts/adsb-ingest.ts',
+      interpreter: 'node',
+      interpreter_args: '--experimental-strip-types',
+      autorestart: true,
+      max_restarts: 20,
+      // Server-only env (DATABASE_URL, ADSB_EXCHANGE_API_KEY, AUTH_SECRET, …)
+      // is provided by the environment / secret manager, never committed here.
+      env: { NODE_ENV: 'production' },
     },
   ],
 }

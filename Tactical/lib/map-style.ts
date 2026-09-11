@@ -206,6 +206,25 @@ function radarFlavor(): Flavor {
 export type MapViewType = 'radar' | 'dark' | 'light' | 'grayscale' | 'satellite'
 
 /**
+ * Bounding box actually covered by the self-hosted vector basemap
+ * (victoria.pmtiles — really just Greater Melbourne). Used at runtime to decide
+ * when to reveal the Esri satellite underlay: the map is "off coverage" when the
+ * view centre leaves this box, and the tactical vector view has nothing to draw.
+ * A small margin keeps the fallback from flickering right at the edge.
+ */
+export const COVERAGE_BBOX = { west: 143.9, south: -38.6, east: 146.1, north: -36.4 }
+
+/** True when a lng/lat sits outside the vector basemap coverage. */
+export function outsideCoverage(lng: number, lat: number): boolean {
+  return (
+    lng < COVERAGE_BBOX.west ||
+    lng > COVERAGE_BBOX.east ||
+    lat < COVERAGE_BBOX.south ||
+    lat > COVERAGE_BBOX.north
+  )
+}
+
+/**
  * Build the complete MapLibre style for a given view mode. Sources, glyphs and
  * sprite are env-driven with keyless Protomaps fallbacks.
  */
@@ -234,7 +253,14 @@ export function buildMapStyle(viewType: MapViewType = 'radar'): StyleSpecificati
     }
   }
 
-  // Vector flavors over the self-hosted PMTiles basemap.
+  // Vector flavors over the self-hosted PMTiles basemap. The vector data only
+  // covers Greater Melbourne (~144–146°E, 36.5–38.5°S), so a global Esri World
+  // Imagery raster is included as a DIMMED underlay — but it ships HIDDEN
+  // (visibility: none) and is toggled on at runtime (see map.tsx) ONLY when the
+  // view moves off the Melbourne coverage, so normal use stays pure radar with
+  // no external tiles. When toggled on, the vector `background` fill is also made
+  // transparent so the satellite shows through the uncovered void; inside
+  // Melbourne the opaque earth/water fills keep it hidden.
   const flavor: Flavor =
     viewType === 'light' ? LIGHT :
     viewType === 'grayscale' ? GRAYSCALE :
@@ -246,6 +272,12 @@ export function buildMapStyle(viewType: MapViewType = 'radar'): StyleSpecificati
     glyphs,
     sprite,
     sources: {
+      'esri-imagery': {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: 'Imagery © Esri, Maxar, Earthstar Geographics',
+      },
       [SOURCE]: {
         type: 'vector',
         url: `pmtiles://${pmtilesUrl}`,
@@ -253,6 +285,23 @@ export function buildMapStyle(viewType: MapViewType = 'radar'): StyleSpecificati
           '<a href="https://protomaps.com">Protomaps</a> © <a href="https://openstreetmap.org">OpenStreetMap</a>',
       },
     },
-    layers: layers(SOURCE, flavor, { lang: 'en' }),
+    // Raster underlay first (bottom) but HIDDEN by default; dimmed/desaturated so
+    // that when the runtime toggle reveals it over off-map areas it reads as a
+    // subdued tactical ground. Vector layers on top.
+    layers: [
+      {
+        id: 'esri-imagery',
+        type: 'raster',
+        source: 'esri-imagery',
+        layout: { visibility: 'none' },
+        paint: {
+          'raster-opacity': 0.6,
+          'raster-saturation': -0.3,
+          'raster-brightness-max': 0.8,
+          'raster-contrast': -0.05,
+        },
+      },
+      ...layers(SOURCE, flavor, { lang: 'en' }),
+    ],
   }
 }

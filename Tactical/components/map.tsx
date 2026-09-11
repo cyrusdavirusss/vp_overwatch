@@ -11,7 +11,7 @@ import {
   sampleTrailUntil,
   computeDistance,
 } from '@/lib/data'
-import { buildMapStyle, registerPmtilesProtocol, type MapViewType } from '@/lib/map-style'
+import { buildMapStyle, registerPmtilesProtocol, outsideCoverage, type MapViewType } from '@/lib/map-style'
 import type { CommunityDot } from '@/lib/visual-sighting'
 import { aircraftMarkerSVG, reportMarkerSVG, RED, GREEN } from '@/lib/markers'
 
@@ -228,9 +228,17 @@ export function VPMap({
     map.on('zoom', syncCalloutZoom)
     syncCalloutZoom()
 
+    // Satellite fallback: keep the tactical vector view pure radar, and only
+    // reveal the (hidden) Esri underlay when the map centre leaves the
+    // Melbourne-only vector coverage — following an aircraft out to a region the
+    // vector basemap doesn't cover. Inside coverage it stays fully off (no
+    // external tiles). Skips satellite mode, where Esri is the whole basemap.
+    map.on('moveend', () => applySatFallback(map))
+
     map.on('load', () => {
       // ── Data-overlay sources + layers (idempotent; re-added after style swaps) ──
       addVpOverlays(map)
+      applySatFallback(map)
 
       // User position marker (DOM) — dot + pulse.
       const uel = document.createElement('div')
@@ -268,19 +276,34 @@ export function VPMap({
   }, [])
 
   // ── Map view switcher: swap the basemap, then re-add overlay layers ─────
-  // setStyle() drops every source/layer, so the imperatively-managed overlays
-  // are re-added once the new style finishes loading. DOM markers survive.
+  // Swap the basemap and keep the imperatively-managed overlays on top of it.
+  // NB: setStyle defaults to { diff: true }, which KEEPS the existing overlay
+  // layers/sources but appends the new basemap on top of them — so switching to
+  // the satellite raster buried the trails/markers-vectors under the opaque
+  // Esri imagery. (Forcing diff:false is worse: the raster style's async tile
+  // load leaves isStyleLoaded()=false, so a deferred re-add never fires and the
+  // overlays vanish entirely.) So we KEEP the diff, and simply re-assert order:
+  // addVpOverlays is idempotent (re-adds only if a reload dropped them), then we
+  // move every overlay to the top. We listen on `styledata` (not once) so order
+  // is re-asserted as the raster source finishes loading, detaching after 4s.
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map) return
     if (lastViewType.current === viewType) return
     lastViewType.current = viewType
-    map.setStyle(buildMapStyle(viewType))
-    const reAdd = () => {
-      if (!map.isStyleLoaded()) { map.once('styledata', reAdd); return }
-      addVpOverlays(map)
+    const OVERLAY_IDS = ['vp-hex-fill', 'vp-hex-line', 'vp-conn-line', 'vp-trails-line', 'vp-acc-fill', 'vp-acc-line', 'vp-predict-line']
+    const fixOrder = () => {
+      try {
+        addVpOverlays(map)
+        for (const id of OVERLAY_IDS) if (map.getLayer(id)) map.moveLayer(id) // no beforeId → top
+        applySatFallback(map)
+      } catch { /* style mid-swap — the styledata listener will retry */ }
     }
-    map.once('styledata', reAdd)
+    map.setStyle(buildMapStyle(viewType))
+    fixOrder()
+    map.on('styledata', fixOrder)
+    const t = setTimeout(() => map.off('styledata', fixOrder), 4000)
+    return () => { clearTimeout(t); map.off('styledata', fixOrder) }
   }, [ready, viewType])
 
   // ── Camera focus (flyTo with momentum + spring ease) ───────────────────
@@ -405,12 +428,20 @@ export function VPMap({
         entry.rot.style.transform = `rotate(${pos.hdg}deg)`
         const markerEl = entry.marker.getElement() as HTMLDivElement
         markerEl.classList.toggle('selected', isSel)
-        // Silent (off-ADS-B) aircraft fade with their draining fuel so they read
-        // as a last-known/maybe-landed ghost, never a live airborne contact; an
-        // active contact is always full-opacity.
-        markerEl.style.opacity = a.isActive
-          ? '1'
-          : String(Math.max(0.18, Math.min(0.8, (a.fuelRemainingPercent ?? 0) / 100)))
+        // Silent (off-ADS-B) aircraft read as a last-known/maybe-landed ghost,
+        // never a live airborne contact. Map remaining fuel onto a deliberately
+        // low 0.2–0.5 opacity band so EVEN a freshly-silent, near-full-tank
+        // contact is visibly ghosted (the old 0.18–0.8 band left a 70%-fuel
+        // contact at ~0.7 — indistinguishable from an active one); it then fades
+        // further toward 0.2 as the tank drains. Active contacts stay full.
+        // NB: apply to the INNER icon + callout, NOT the marker root — maplibre-gl
+        // manages the root element's style.opacity itself (occlusion handling) and
+        // resets it to 1 on every setLngLat() in moveMarker, so a root-level fade
+        // silently reverted each poll. The inner nodes are ours alone.
+        const fuelFrac = Math.max(0, Math.min(1, (a.fuelRemainingPercent ?? 0) / 100))
+        const acOpacity = a.isActive ? '1' : String(0.2 + 0.3 * fuelFrac)
+        entry.rot.style.opacity = acOpacity
+        entry.callout.style.opacity = acOpacity
         moveMarker(entry, target, !scrubbing)
       }
     }
@@ -427,7 +458,10 @@ export function VPMap({
     if (layers.trails) {
       for (const a of aircraft) {
         const isSel = a.id === selectedAircraftId
-        const trail = sampleTrailUntil(a.track, scrubT, (isSel ? 15 : 4) * 60)
+        // Show a real breadcrumb history, not a 4-min stub that hides under the
+        // aircraft icon while it orbits: the full retained track for the selected
+        // contact (~the whole ~500-pt buffer), a generous tail for the rest.
+        const trail = sampleTrailUntil(a.track, scrubT, (isSel ? 120 : 30) * 60)
         if (trail.length < 2) continue
         trailFeatures.push({
           type: 'Feature',
@@ -638,13 +672,36 @@ function addVpOverlays(map: maplibregl.Map) {
   if (!map.getLayer('vp-conn-line'))
     map.addLayer({ id: 'vp-conn-line', type: 'line', source: 'vp-conn', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': ['get', 'o'], 'line-dasharray': [3, 6] } })
   if (!map.getLayer('vp-trails-line'))
-    map.addLayer({ id: 'vp-trails-line', type: 'line', source: 'vp-trails', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#00d4ff', 'line-width': ['get', 'w'], 'line-opacity': ['get', 'o'] } })
+    map.addLayer({ id: 'vp-trails-line', type: 'line', source: 'vp-trails', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#fcee0a', 'line-width': ['get', 'w'], 'line-opacity': ['get', 'o'] } })
   if (!map.getLayer('vp-acc-fill'))
     map.addLayer({ id: 'vp-acc-fill', type: 'fill', source: 'vp-acc', paint: { 'fill-color': '#4D7CFF', 'fill-opacity': 0.12 } })
   if (!map.getLayer('vp-acc-line'))
     map.addLayer({ id: 'vp-acc-line', type: 'line', source: 'vp-acc', paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': 0.4 } })
   if (!map.getLayer('vp-predict-line'))
     map.addLayer({ id: 'vp-predict-line', type: 'line', source: 'vp-predict', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#00d4ff', 'line-width': 2, 'line-opacity': 0.6, 'line-dasharray': [8, 6] } })
+}
+
+// Toggle the (dimmed) Esri satellite underlay based on where the map is looking.
+// The self-hosted vector basemap only covers Greater Melbourne, so when the view
+// centre leaves that box we reveal the raster and drop the opaque vector
+// background so the satellite fills the otherwise-black void; back inside
+// coverage we hide it again → pure radar, no external tiles. No-ops in satellite
+// mode (no vector source there — Esri is the whole basemap and must stay shown).
+function applySatFallback(map: maplibregl.Map) {
+  try {
+    if (!map.getLayer('esri-imagery')) return
+    const sources = map.getStyle()?.sources || {}
+    const hasVector = Object.values(sources).some((s: any) => s?.type === 'vector')
+    if (!hasVector) return // satellite mode — leave the imagery as the base
+    const c = map.getCenter()
+    const off = outsideCoverage(c.lng, c.lat)
+    map.setLayoutProperty('esri-imagery', 'visibility', off ? 'visible' : 'none')
+    // Drop the opaque vector background when off-coverage so the satellite shows
+    // through the void; restore it inside coverage. Found by type (the flavor's
+    // background layer id isn't guaranteed).
+    const bg = (map.getStyle()?.layers || []).find((l: any) => l.type === 'background') as any
+    if (bg?.id) map.setPaintProperty(bg.id, 'background-opacity', off ? 0 : 1)
+  } catch { /* style mid-swap — a later moveend/styledata re-applies */ }
 }
 
 function setData(map: maplibregl.Map, id: string, features: GeoJSON.Feature[]) {

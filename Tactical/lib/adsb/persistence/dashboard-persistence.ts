@@ -1,354 +1,135 @@
 /**
- * Dashboard Persistence Layer
- * 
- * PostgreSQL-backed persistence for normalized aircraft state.
- * Provides durable storage across hot reloads, container restarts,
- * and multiple instances in production deployments.
- * 
- * This is the source of truth in production, replacing in-memory-only state.
+ * PostgreSQL persistence for the ADS-B dashboard. Source of truth. Uses the
+ * shared pool; pure mapping lives in ./mapping.ts.
  */
+import { query, withClient } from '../../db/pool.ts'
+import { rowToRecord, recordToParams, type AircraftStateRow } from './mapping.ts'
+import type { TrackedAircraftDef } from '../config.ts'
+import type { AircraftEvent, AircraftRecord, MappingStatus } from '../types.ts'
+import { emptyRecord } from '../state-machine.ts'
 
-export interface AircraftStateRecord {
-  registration: string
-  icao24: string
-  description: string
-  state: string
-  lastObservedAt: Date
-  positionFreshnessSeconds: number
-  latitude: number | null
-  longitude: number | null
-  altitudeMetres: number
-  groundSpeedKt: number
-  trackDegrees: number
-  isPositionUsable: boolean
-  dataStatus: string
-  seenPos: number
-  seen: number
-  eventVersion: number
-  createdAt: Date
-  updatedAt: Date
+const UPSERT_STATE = `
+INSERT INTO aircraft_current_state (
+  registration, icao24, mapping_status, state, data_status, last_observed_at,
+  latitude, longitude, altitude_metres, ground_speed_kt, track_degrees,
+  vertical_rate_fpm, on_ground, seen_pos_seconds, seen_seconds, is_position_usable,
+  confirmed_movement, candidate_movement, candidate_count, airborne_episode_seq,
+  not_seen_seq, last_provider_contact_at, event_version, updated_at
+) VALUES (
+  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
+)
+ON CONFLICT (registration) DO UPDATE SET
+  icao24=EXCLUDED.icao24, mapping_status=EXCLUDED.mapping_status, state=EXCLUDED.state,
+  data_status=EXCLUDED.data_status, last_observed_at=EXCLUDED.last_observed_at,
+  latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, altitude_metres=EXCLUDED.altitude_metres,
+  ground_speed_kt=EXCLUDED.ground_speed_kt, track_degrees=EXCLUDED.track_degrees,
+  vertical_rate_fpm=EXCLUDED.vertical_rate_fpm, on_ground=EXCLUDED.on_ground,
+  seen_pos_seconds=EXCLUDED.seen_pos_seconds, seen_seconds=EXCLUDED.seen_seconds,
+  is_position_usable=EXCLUDED.is_position_usable, confirmed_movement=EXCLUDED.confirmed_movement,
+  candidate_movement=EXCLUDED.candidate_movement, candidate_count=EXCLUDED.candidate_count,
+  airborne_episode_seq=EXCLUDED.airborne_episode_seq, not_seen_seq=EXCLUDED.not_seen_seq,
+  last_provider_contact_at=EXCLUDED.last_provider_contact_at, event_version=EXCLUDED.event_version,
+  updated_at=EXCLUDED.updated_at
+`
+
+export interface IngestionRunRecord {
+  mode: string
+  success: boolean
+  errorClass?: string | null
+  errorMessage?: string | null
+  sourceLatencyMs?: number | null
+  aircraftCount?: number | null
+  lastSuccessfulCycleAt?: number | null
 }
 
-export interface Icao24Mapping {
-  registration: string
-  icao24: string
-  verified: boolean
-  resolvedAt: Date
-  lastVerifiedAt: Date
+/** Ensure roster rows exist and seed empty state rows for new registrations. */
+export async function ensureRoster(defs: TrackedAircraftDef[]): Promise<void> {
+  await withClient(async (c) => {
+    for (const d of defs) {
+      await c.query(
+        `INSERT INTO tracked_aircraft (registration, description, type_label)
+         VALUES ($1,$2,$3)
+         ON CONFLICT (registration) DO UPDATE SET description=EXCLUDED.description, type_label=EXCLUDED.type_label`,
+        [d.registration, d.description, d.typeLabel],
+      )
+      const rec = emptyRecord(d.registration, d.description, Date.now())
+      await c.query(
+        `INSERT INTO aircraft_current_state (registration) VALUES ($1) ON CONFLICT (registration) DO NOTHING`,
+        [rec.registration],
+      )
+    }
+  })
 }
 
-export interface IngestionMetadata {
-  lastIngestionAt: Date
-  ingestionMode: 'streaming' | 'batch'
-  providerStatus: string
-  sourceLatencySeconds: number
-  errorClass: string | null
-  errorMessage: string | null
+/** Hydrate all durable records into memory (called on worker + web read boot). */
+export async function loadAllRecords(): Promise<Map<string, AircraftRecord>> {
+  const { rows } = await query<AircraftStateRow & { description: string | null }>(
+    `SELECT s.*, t.description
+       FROM aircraft_current_state s
+       JOIN tracked_aircraft t ON t.registration = s.registration
+      WHERE t.active = TRUE`,
+  )
+  const out = new Map<string, AircraftRecord>()
+  for (const row of rows) out.set(row.registration, rowToRecord(row, row.description ?? ''))
+  return out
 }
 
-export class DashboardPersistence {
-  private connectionString: string
-  private pool: any | null = null
-  
-  constructor(connectionString: string) {
-    this.connectionString = connectionString
-  }
-  
-  /**
-   * Initialize database connection pool.
-   */
-  async initialize(): Promise<void> {
-    try {
-      // Import pg dynamically to support server-side rendering
-      const pg = await import('pg')
-      this.pool = new pg.Pool({
-        connectionString: this.connectionString,
-        max: 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000
-      })
-      
-      this.pool.on('error', (err: Error) => {
-        console.error('[Dashboard Persistence] Unexpected pool error:', err)
-      })
-      
-      await this.ensureTables()
-      console.log('[Dashboard Persistence] Database connection established')
-    } catch (error) {
-      console.error('[Dashboard Persistence] Failed to initialize database:', error)
-      throw error
-    }
-  }
-  
-  /**
-   * Ensure required tables exist.
-   */
-  private async ensureTables(): Promise<void> {
-    if (!this.pool) return
-    
-    const client = await this.pool.connect()
-    try {
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS adsb_aircraft_state (
-          registration VARCHAR(20) PRIMARY KEY,
-          icao24 VARCHAR(12) NOT NULL,
-          description TEXT,
-          state VARCHAR(50) NOT NULL,
-          last_observed_at TIMESTAMPTZ NOT NULL,
-          position_freshness_seconds INTEGER NOT NULL,
-          latitude DOUBLE PRECISION,
-          longitude DOUBLE PRECISION,
-          altitude_metres INTEGER NOT NULL,
-          ground_speed_kt INTEGER NOT NULL,
-          track_degrees INTEGER NOT NULL,
-          is_position_usable BOOLEAN NOT NULL,
-          data_status VARCHAR(50) NOT NULL,
-          seen_pos INTEGER NOT NULL,
-          seen INTEGER NOT NULL,
-          event_version BIGINT NOT NULL DEFAULT 0,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `)
-      
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS adsb_icao24_mappings (
-          registration VARCHAR(20) PRIMARY KEY,
-          icao24 VARCHAR(12) NOT NULL,
-          verified BOOLEAN NOT NULL DEFAULT false,
-          resolved_at TIMESTAMPTZ NOT NULL,
-          last_verified_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `)
-      
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS adsb_ingestion_metadata (
-          id SERIAL PRIMARY KEY,
-          last_ingestion_at TIMESTAMPTZ NOT NULL,
-          ingestion_mode VARCHAR(20) NOT NULL,
-          provider_status VARCHAR(50) NOT NULL,
-          source_latency_seconds DOUBLE PRECISION NOT NULL,
-          error_class VARCHAR(100),
-          error_message TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `)
-      
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_aircraft_state_icao24 
-        ON adsb_aircraft_state(icao24)
-      `)
-      
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_aircraft_state_state 
-        ON adsb_aircraft_state(state)
-      `)
-      
-      console.log('[Dashboard Persistence] Database schema ensured')
-    } finally {
-      client.release()
-    }
-  }
-  
-  /**
-   * Save aircraft state atomically.
-   * 
-   * @param state Aircraft state record
-   */
-  async saveAircraftState(state: any): Promise<void> {
-    if (!this.pool) throw new Error('Persistence not initialized')
-    
-    const client = await this.pool.connect()
-    try {
-      await client.query(`
-        INSERT INTO adsb_aircraft_state (
-          registration, icao24, description, state, last_observed_at,
-          position_freshness_seconds, latitude, longitude, altitude_metres,
-          ground_speed_kt, track_degrees, is_position_usable, data_status,
-          seen_pos, seen, event_version, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
-        ON CONFLICT (registration) DO UPDATE SET
-          icao24 = EXCLUDED.icao24,
-          description = EXCLUDED.description,
-          state = EXCLUDED.state,
-          last_observed_at = EXCLUDED.last_observed_at,
-          position_freshness_seconds = EXCLUDED.position_freshness_seconds,
-          latitude = EXCLUDED.latitude,
-          longitude = EXCLUDED.longitude,
-          altitude_metres = EXCLUDED.altitude_metres,
-          ground_speed_kt = EXCLUDED.ground_speed_kt,
-          track_degrees = EXCLUDED.track_degrees,
-          is_position_usable = EXCLUDED.is_position_usable,
-          data_status = EXCLUDED.data_status,
-          seen_pos = EXCLUDED.seen_pos,
-          seen = EXCLUDED.seen,
-          event_version = EXCLUDED.event_version,
-          updated_at = NOW()
-      `, [
-        state.registration,
-        state.icao24,
-        state.description,
-        state.state,
-        state.lastObservedAt,
-        state.positionFreshnessSeconds,
-        state.latitude,
-        state.longitude,
-        state.altitudeMetres,
-        state.groundSpeedKt,
-        state.trackDegrees,
-        state.isPositionUsable,
-        state.dataStatus,
-        state.seenPos,
-        state.seen,
-        state.eventVersion
-      ])
-    } finally {
-      client.release()
-    }
-  }
-  
-  /**
-   * Load all aircraft state from database.
-   * 
-   * @returns Array of aircraft state records
-   */
-  async loadAllAircraftState(): Promise<AircraftStateRecord[]> {
-    if (!this.pool) throw new Error('Persistence not initialized')
-    
-    const result = await this.pool.query(`
-      SELECT * FROM adsb_aircraft_state
-      ORDER BY registration
-    `)
-    
-    return result.rows.map((row: any) => ({
-      registration: row.registration,
-      icao24: row.icao24,
-      description: row.description,
-      state: row.state,
-      lastObservedAt: row.last_observed_at,
-      positionFreshnessSeconds: row.position_freshness_seconds,
-      latitude: row.latitude,
-      longitude: row.longitude,
-      altitudeMetres: row.altitude_metres,
-      groundSpeedKt: row.ground_speed_kt,
-      trackDegrees: row.track_degrees,
-      isPositionUsable: row.is_position_usable,
-      dataStatus: row.data_status,
-      seenPos: row.seen_pos,
-      seen: row.seen,
-      eventVersion: row.event_version,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    }))
-  }
-  
-  /**
-   * Save ICAO24 mapping.
-   * 
-   * @param mapping ICAO24 mapping record
-   */
-  async saveIcao24Mapping(mapping: Icao24Mapping): Promise<void> {
-    if (!this.pool) throw new Error('Persistence not initialized')
-    
-    await this.pool.query(`
-      INSERT INTO adsb_icao24_mappings (registration, icao24, verified, resolved_at, last_verified_at)
-      VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (registration) DO UPDATE SET
-        icao24 = EXCLUDED.icao24,
-        verified = EXCLUDED.verified,
-        last_verified_at = EXCLUDED.last_verified_at
-    `, [
-      mapping.registration,
-      mapping.icao24,
-      mapping.verified,
-      mapping.resolvedAt,
-      mapping.lastVerifiedAt
-    ])
-  }
-  
-  /**
-   * Load ICAO24 mapping for a registration.
-   * 
-   * @param registration Aircraft registration
-   * @returns ICAO24 mapping or null
-   */
-  async loadIcao24Mapping(registration: string): Promise<Icao24Mapping | null> {
-    if (!this.pool) throw new Error('Persistence not initialized')
-    
-    const result = await this.pool.query(`
-      SELECT * FROM adsb_icao24_mappings WHERE registration = $1
-    `, [registration])
-    
-    if (result.rows.length === 0) return null
-    
-    const row = result.rows[0]
-    return {
-      registration: row.registration,
-      icao24: row.icao24,
-      verified: row.verified,
-      resolvedAt: row.resolved_at,
-      lastVerifiedAt: row.last_verified_at
-    }
-  }
-  
-  /**
-   * Save ingestion metadata.
-   * 
-   * @param metadata Ingestion metadata record
-   */
-  async saveIngestionMetadata(metadata: IngestionMetadata): Promise<void> {
-    if (!this.pool) throw new Error('Persistence not initialized')
-    
-    await this.pool.query(`
-      INSERT INTO adsb_ingestion_metadata (
-        last_ingestion_at, ingestion_mode, provider_status,
-        source_latency_seconds, error_class, error_message
-      ) VALUES ($1, $2, $3, $4, $5, $6)
-    `, [
-      metadata.lastIngestionAt,
-      metadata.ingestionMode,
-      metadata.providerStatus,
-      metadata.sourceLatencySeconds,
-      metadata.errorClass,
-      metadata.errorMessage
-    ])
-  }
-  
-  /**
-   * Load latest ingestion metadata.
-   * 
-   * @returns Latest ingestion metadata or null
-   */
-  async loadLatestIngestionMetadata(): Promise<IngestionMetadata | null> {
-    if (!this.pool) throw new Error('Persistence not initialized')
-    
-    const result = await this.pool.query(`
-      SELECT * FROM adsb_ingestion_metadata
-      ORDER BY created_at DESC
-      LIMIT 1
-    `)
-    
-    if (result.rows.length === 0) return null
-    
-    const row = result.rows[0]
-    return {
-      lastIngestionAt: row.last_ingestion_at,
-      ingestionMode: row.ingestion_mode,
-      providerStatus: row.provider_status,
-      sourceLatencySeconds: row.source_latency_seconds,
-      errorClass: row.error_class,
-      errorMessage: row.error_message
-    }
-  }
-  
-  /**
-   * Close database connection pool.
-   */
-  async close(): Promise<void> {
-    if (this.pool) {
-      await this.pool.end()
-      this.pool = null
-      console.log('[Dashboard Persistence] Database connection closed')
-    }
-  }
+export async function upsertRecord(rec: AircraftRecord): Promise<void> {
+  await query(UPSERT_STATE, recordToParams(rec))
+}
+
+export async function saveMapping(registration: string, icao24: string, status: MappingStatus): Promise<void> {
+  await query(
+    `UPDATE tracked_aircraft
+        SET icao24=$2, mapping_status=$3, resolved_at=NOW(), last_verified_at=NOW()
+      WHERE registration=$1`,
+    [registration, icao24 || null, status],
+  )
+}
+
+export async function loadMapping(registration: string): Promise<{ icao24: string | null; status: string } | null> {
+  const { rows } = await query<{ icao24: string | null; mapping_status: string }>(
+    `SELECT icao24, mapping_status FROM tracked_aircraft WHERE registration=$1`,
+    [registration],
+  )
+  if (rows.length === 0) return null
+  return { icao24: rows[0].icao24, status: rows[0].mapping_status }
+}
+
+/**
+ * Insert an event idempotently. Returns true only if this call actually created
+ * the row (first occurrence of the dedup_key) — callers use that to decide
+ * whether to enqueue a notification exactly once.
+ */
+export async function insertEventIfNew(ev: AircraftEvent, userId: number | null = null): Promise<boolean> {
+  const { rowCount } = await query(
+    `INSERT INTO aircraft_events
+       (dedup_key, event_type, registration, icao24, occurred_at, previous_state, current_state, message, user_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (dedup_key) DO NOTHING`,
+    [ev.dedupKey, ev.eventType, ev.registration, ev.icao24 || null,
+     new Date(ev.occurredAt).toISOString(), ev.previousState, ev.currentState, ev.message, userId],
+  )
+  return rowCount > 0
+}
+
+export async function recordIngestionRun(r: IngestionRunRecord): Promise<void> {
+  await query(
+    `INSERT INTO ingestion_runs
+       (finished_at, mode, success, error_class, error_message, source_latency_ms, aircraft_count, last_successful_cycle_at)
+     VALUES (NOW(),$1,$2,$3,$4,$5,$6,$7)`,
+    [r.mode, r.success, r.errorClass ?? null, r.errorMessage ?? null,
+     r.sourceLatencyMs ?? null, r.aircraftCount ?? null,
+     r.lastSuccessfulCycleAt ? new Date(r.lastSuccessfulCycleAt).toISOString() : null],
+  )
+}
+
+export async function lastSuccessfulCycleAt(): Promise<number | null> {
+  const { rows } = await query<{ last_successful_cycle_at: Date | null }>(
+    `SELECT last_successful_cycle_at FROM ingestion_runs
+      WHERE success = TRUE AND last_successful_cycle_at IS NOT NULL
+      ORDER BY started_at DESC LIMIT 1`,
+  )
+  const v = rows[0]?.last_successful_cycle_at
+  return v ? new Date(v).getTime() : null
 }
