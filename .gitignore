@@ -27,3 +27,6 @@ dist/web/
 Tactical/data/tracker.log
 Tactical/data/tracker.pid
 Tactical/scripts/__pycache__/
+
+# Claude Code tooling (skills/agents/config) — not app code
+.claude/
