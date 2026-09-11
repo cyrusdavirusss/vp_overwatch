@@ -278,7 +278,7 @@ export default function VPOverwatch() {
   const selectedReport = filteredReports.find((r) => r.id === selectedReportId)
 
   const detailContent = selectedAircraft ? (
-    <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} />
+    <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} user={userPosition} />
   ) : selectedReport ? (
     <ReportDetail report={selectedReport} user={userPosition} onClose={onCloseDetail} />
   ) : null
@@ -485,7 +485,7 @@ export default function VPOverwatch() {
             )}
           {/* Aircraft detail — slide-in panel (right 280px on desktop) */}
           {selectedAircraft && (
-            <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} />
+            <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} user={userPosition} />
           )}
 
           {/* Ground report detail — right panel */}
@@ -631,7 +631,7 @@ export default function VPOverwatch() {
 
           {/* Aircraft detail — slide-in overlay panel (bottom 60% on mobile) */}
           {selectedAircraft && (
-            <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} />
+            <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} user={userPosition} />
           )}
 
           {/* Ground report detail — bottom overlay */}
