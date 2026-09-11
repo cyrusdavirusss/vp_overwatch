@@ -186,6 +186,11 @@ export default function VPOverwatch() {
   const hasSilentAircraft = silentCount > 0
   const isLostSignal = hasSilentAircraft
 
+  // Header LIVE/OFFLINE status: online whenever a tracked aircraft is actually
+  // airborne (proof the ADS-B feed is live), or the Waze relay is connected.
+  const airborneCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive).length, [liveData.aircraft])
+  const isOnline = airborneCount > 0 || liveData.relay.connected
+
   // MLAT / "Blind Sky" awareness — count active aircraft by ADS-B source quality
   const mlatCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive && a.isMlat).length, [liveData.aircraft])
   const modeSCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive && a.isModeS).length, [liveData.aircraft])
@@ -340,7 +345,7 @@ export default function VPOverwatch() {
           gndCount={filteredReports.length}
           silentCount={silentCount}
           isLostSignal={isLostSignal}
-          isConnected={liveData.relay.connected}
+          isConnected={isOnline}
           onSubscribeClick={() => setShowSubscribe(true)}
         />
 
@@ -523,7 +528,7 @@ export default function VPOverwatch() {
           gndCount={filteredReports.length}
           silentCount={silentCount}
           isLostSignal={isLostSignal}
-          isConnected={liveData.relay.connected}
+          isConnected={isOnline}
           onSubscribeClick={() => setShowSubscribe(true)}
         />
 
