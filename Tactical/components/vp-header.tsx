@@ -32,18 +32,39 @@ interface VPHeaderProps {
 }
 
 function LiveClock() {
-  const [time, setTime] = useState(() => new Date());
+  // `now` stays null until mount so SSR and first client render agree (no React
+  // #418 hydration mismatch); the interval then ticks it every second.
+  const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
-    const t = setInterval(() => setTime(new Date()), 1000);
+    setNow(new Date());
+    const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
-  const hh = String(time.getHours()).padStart(2, "0");
-  const mm = String(time.getMinutes()).padStart(2, "0");
-  const ss = String(time.getSeconds()).padStart(2, "0");
+
+  // Always render MELBOURNE time with the correct AEST/AEDT label, regardless of
+  // the viewer's or server's timezone (the host runs on UTC — getHours() was
+  // showing UTC mislabelled "AEST", 10h off). Intl does the DST-aware conversion.
+  let time = "--:--:--";
+  let label = "AEST";
+  if (now) {
+    const parts = new Intl.DateTimeFormat("en-AU", {
+      timeZone: "Australia/Melbourne",
+      hourCycle: "h23",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZoneName: "short",
+    }).formatToParts(now);
+    const val = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    time = `${val("hour")}:${val("minute")}:${val("second")}`;
+    const tz = val("timeZoneName");
+    if (/^A[EC][SD]T$/.test(tz)) label = tz; // AEST / AEDT
+  }
+
   return (
-    <span className="vp-metric" style={{ fontSize: 10 }}>
-      {hh}:{mm}:{ss}{" "}
-      <span style={{ color: "rgba(255,255,255,0.25)" }}>AEST</span>
+    <span className="vp-metric" style={{ fontSize: 10 }} suppressHydrationWarning>
+      {time}{" "}
+      <span style={{ color: "rgba(255,255,255,0.25)" }}>{label}</span>
     </span>
   );
 }
@@ -136,11 +157,11 @@ export function VPHeader({
           {/* Connection status */}
           <button
             className={`vp-btn ${isConnected ? "vp-btn--active" : ""}`}
-            title={isConnected ? "Live — connected" : "Disconnected"}
+            title={isConnected ? "Online — aircraft tracked" : "Offline — no aircraft up"}
             style={!isConnected ? { color: "var(--vp-red)", borderColor: "rgba(255,45,45,0.3)" } : {}}
           >
             {isConnected ? <WifiIcon /> : <WifiOffIcon />}
-            <span>{isConnected ? "LIVE" : "OFFLINE"}</span>
+            <span>{isConnected ? "ONLINE" : "OFFLINE"}</span>
           </button>
 
           {/* Subscribe */}
