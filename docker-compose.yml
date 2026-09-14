@@ -77,12 +77,13 @@ services:
     image: vp-overwatch:latest
     pull_policy: never
     working_dir: /app/tools/waze-relay
-    command: ["node", "relay-openwebninja.mjs"]
+    command: ["node", "relay-wazeapi.mjs"]
     environment:
       API_URL: http://web:3100
       RELAY_SECRET: ${WAZE_RELAY_SECRET:?set WAZE_RELAY_SECRET in .env}
-      OPENWEBNINJA_API_KEY: ${OPENWEBNINJA_API_KEY:-}
-      POLL_SECONDS: ${POLL_SECONDS:-300}
+      WAZEAPI_KEY: ${WAZEAPI_KEY:-}
+      WAZEAPI_COUNTRY: ${WAZEAPI_COUNTRY:-aus}
+      POLL_SECONDS: ${POLL_SECONDS:-1800}
     depends_on:
       web: { condition: service_started }
     restart: unless-stopped

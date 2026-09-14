@@ -15,7 +15,7 @@ Open http://localhost:3100
 ## What you must put in `.env`
 - `POSTGRES_PASSWORD`, `WAZE_RELAY_SECRET`, `GPS_RELAY_SECRET`, `AUTH_SECRET` — any long random strings (relay secret is shared by the app + relay automatically).
 - `OPENSKY_CLIENT_ID` / `OPENSKY_CLIENT_SECRET` — free OpenSky account (ADS-B aircraft).
-- `OPENWEBNINJA_API_KEY` — Waze police alerts (being replaced by a free API).
+- `WAZEAPI_KEY` — Waze POLICE alerts via WazeAPI.com (free key, or pay-as-you-go $0.002/query, credits never expire).
 
 ## Map basemap
 Leave `NEXT_PUBLIC_PMTILES_URL` blank to use the hosted Protomaps basemap (works
