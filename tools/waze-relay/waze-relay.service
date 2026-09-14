@@ -1,0 +1,20 @@
+[Unit]
+Description=VP-Overwatch Waze Relay (Kali)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cyrus
+WorkingDirectory=/home/cyrus/Documents/vp_overwatch/tools/waze-relay
+ExecStart=/usr/bin/node relay-kali.mjs --once
+Restart=on-failure
+RestartSec=60
+Environment=NODE_ENV=production
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target
