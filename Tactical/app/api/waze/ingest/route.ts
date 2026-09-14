@@ -21,11 +21,16 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json()
-    const alerts: any[] = body?.alerts ?? []
-    console.log(`[ingest] ${alerts.length} alerts from=${src}`)
+    const rawAlerts: any[] = body?.alerts ?? []
+    // POLICE-only: VP-Overwatch ingests police sightings only, regardless of
+    // what the relay sends (Waze georss returns all alert types per tile).
+    const alerts = Array.isArray(rawAlerts)
+      ? rawAlerts.filter((a) => String(a?.type ?? '').toUpperCase().startsWith('POLICE'))
+      : []
+    console.log(`[ingest] ${alerts.length} police / ${rawAlerts.length} raw from=${src}`)
 
-    if (!Array.isArray(alerts) || alerts.length === 0) {
-      return Response.json({ ingested: 0 })
+    if (alerts.length === 0) {
+      return Response.json({ ingested: 0, total: Array.isArray(rawAlerts) ? rawAlerts.length : 0 })
     }
 
     const store = getStore()
