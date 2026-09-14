@@ -85,6 +85,27 @@ export interface Relay {
   coverageRegions: number
 }
 
+export interface GroundUnit {
+  id: string
+  type: 'POLICE' | 'SUPPORT' | 'COMMAND'
+  subtype?: string
+  callsign?: string
+  unitNumber?: string
+  location: {
+    lat: number
+    lon: number
+    street?: string
+    suburb?: string
+  }
+  status: 'PATROL' | 'ACTIVE' | 'STANDBY' | 'INCIDENT' | 'RESPONDING'
+  lastUpdate: number
+  metadata?: {
+    source?: string
+    reliability?: number
+    confidence?: number
+  }
+}
+
 // Helper functions
 // Position `scrubT` seconds in the past (0 = live/current). Track points are
 // stored chronologically (newest last). We sample on the ABSOLUTE `ts` timeline
