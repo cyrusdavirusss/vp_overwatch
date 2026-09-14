@@ -1,0 +1,91 @@
+name: vp-overwatch
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: vp_overwatch
+      POSTGRES_USER: vpuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vppass}
+    volumes:
+      - vp_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vpuser -d vp_overwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # One-shot schema migration; web/ingest wait for it to finish.
+  migrate:
+    image: vp-overwatch:latest
+    pull_policy: never
+    working_dir: /app/Tactical
+    command: ["node", "scripts/migrate.mjs"]
+    environment:
+      DATABASE_URL: postgres://vpuser:${POSTGRES_PASSWORD:-vppass}@postgres:5432/vp_overwatch
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_PMTILES_URL: ${NEXT_PUBLIC_PMTILES_URL:-}
+        NEXT_PUBLIC_HOME_LAT: ${NEXT_PUBLIC_HOME_LAT:-}
+        NEXT_PUBLIC_HOME_LNG: ${NEXT_PUBLIC_HOME_LNG:-}
+    image: vp-overwatch:latest
+    working_dir: /app/Tactical
+    command: ["node", ".next/standalone/server.js"]
+    environment:
+      NODE_ENV: production
+      PORT: "3100"
+      HOSTNAME: "0.0.0.0"
+      DATABASE_URL: postgres://vpuser:${POSTGRES_PASSWORD:-vppass}@postgres:5432/vp_overwatch
+      WAZE_RELAY_SECRET: ${WAZE_RELAY_SECRET:?set WAZE_RELAY_SECRET in .env}
+      GPS_RELAY_SECRET: ${GPS_RELAY_SECRET:?set GPS_RELAY_SECRET in .env}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
+      ADSB_PROVIDER: ${ADSB_PROVIDER:-opensky}
+      OPENSKY_CLIENT_ID: ${OPENSKY_CLIENT_ID:-}
+      OPENSKY_CLIENT_SECRET: ${OPENSKY_CLIENT_SECRET:-}
+    ports:
+      - "${WEB_PORT:-3100}:3100"
+    depends_on:
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  ingest:
+    image: vp-overwatch:latest
+    pull_policy: never
+    working_dir: /app/Tactical
+    command: ["node", "--experimental-strip-types", "scripts/adsb-ingest.ts"]
+    environment:
+      DATABASE_URL: postgres://vpuser:${POSTGRES_PASSWORD:-vppass}@postgres:5432/vp_overwatch
+      ADSB_PROVIDER: ${ADSB_PROVIDER:-opensky}
+      OPENSKY_CLIENT_ID: ${OPENSKY_CLIENT_ID:-}
+      OPENSKY_CLIENT_SECRET: ${OPENSKY_CLIENT_SECRET:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  # Waze POLICE-only relay (Victoria). Swap command to the free API later.
+  relay:
+    image: vp-overwatch:latest
+    pull_policy: never
+    working_dir: /app/tools/waze-relay
+    command: ["node", "relay-openwebninja.mjs"]
+    environment:
+      API_URL: http://web:3100
+      RELAY_SECRET: ${WAZE_RELAY_SECRET:?set WAZE_RELAY_SECRET in .env}
+      OPENWEBNINJA_API_KEY: ${OPENWEBNINJA_API_KEY:-}
+      POLL_SECONDS: ${POLL_SECONDS:-300}
+    depends_on:
+      web: { condition: service_started }
+    restart: unless-stopped
+
+volumes:
+  vp_pg_data:
