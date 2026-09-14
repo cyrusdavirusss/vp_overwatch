@@ -39,3 +39,11 @@ Tactical/assets/relay/.env
 
 # local test env (never commit)
 /.env
+
+# Covert Waze scraper tools (scope carve-out) — never commit; keeps stray keys out of git
+tools/chrome-police-scanner/
+tools/waze-relay/relay-kali.mjs
+tools/waze-relay/relay-cdp.mjs
+tools/waze-relay/relay.mjs
+tools/waze-relay/waze-tab-scanner.mjs
+tools/waze-relay/waze-chrome.sh
