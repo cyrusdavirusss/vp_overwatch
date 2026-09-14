@@ -36,3 +36,6 @@ tools/**/.env
 Tactical/assets/relay/.env
 *.bak
 *.bak.*
+
+# local test env (never commit)
+/.env

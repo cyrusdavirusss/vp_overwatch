@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/dist
+.git
+**/*.pmtiles
+**/.env
+**/.env.*
+!**/.env.example
+**/*.bak
+**/*.bak.*
+Tactical/data/fuel-flights
+tools/chrome-police-scanner
