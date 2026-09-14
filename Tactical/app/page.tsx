@@ -19,7 +19,7 @@ import { useClientLocation } from '@/hooks/useClientLocation'
 import { useCommunityDots } from '@/hooks/useCommunityDots'
 import { useRouteAlerts } from '@/hooks/useRouteAlerts'
 import type { MapViewType } from '@/lib/map-style'
-import type { User } from '@/lib/data'
+import type { User, Report } from '@/lib/data'
 
 const STRIP_H = 36
 const SCRUB_H = 64
@@ -180,6 +180,38 @@ export default function VPOverwatch() {
     })
   }, [liveData.reports, filters])
 
+  // ── Police ground units (live locations) → Report shape for map + count ──
+  // Live police locations come from /api/ground-units (fed by the Waze relay /
+  // direct police feed). We project them onto the map as ground contacts using
+  // the existing Report marker pipeline so they render alongside community
+  // reports and count toward GND.
+  const policeReports = useMemo((): Report[] => {
+    const units = liveData.groundUnits || []
+    return units.map((u) => ({
+      id: `gu-${u.id}`,
+      wazeUuid: u.id,
+      type: 'POLICE',
+      subtype: u.subtype ?? null,
+      kind: 'marked' as const,
+      lat: u.location.lat,
+      lng: u.location.lon,
+      street: u.location.street ?? '',
+      city: u.location.suburb ?? '',
+      reliability: u.metadata?.reliability ?? 0.9,
+      confidence: u.metadata?.confidence ?? 0.9,
+      nThumbsUp: 0,
+      reportedAgo: Math.max(0, Math.round((Date.now() - u.lastUpdate) / 1000)),
+      lastConfirmedAgo: Math.max(0, Math.round((Date.now() - u.lastUpdate) / 1000)),
+      descr: `${u.callsign ?? 'POLICE'}${u.status ? ' · ' + u.status : ''}`,
+    }))
+  }, [liveData.groundUnits])
+
+  // Combined ground contacts: live police locations + community reports.
+  const allGroundContacts = useMemo(
+    () => [...policeReports, ...filteredReports],
+    [policeReports, filteredReports]
+  )
+
   const silentCount = useMemo(() => {
     return liveData.aircraft.filter((a) => a.isActive === false && a.lastSeen !== null && !a.landed).length
   }, [liveData.aircraft])
@@ -305,7 +337,7 @@ export default function VPOverwatch() {
   const arOverlay = showAR ? (
     <AROverlay
       aircraft={liveData.aircraft}
-      reports={filteredReports}
+      reports={allGroundContacts}
       communityDots={communityDots}
       userLocation={userPosition}
       onClose={() => setShowAR(false)}
@@ -342,7 +374,7 @@ export default function VPOverwatch() {
       <div className="w-screen h-screen bg-ink-0 flex flex-col overflow-hidden" style={{ fontFamily: 'var(--font-ui)' }}>
         <VPHeader
           airCount={filteredAircraft.length}
-          gndCount={filteredReports.length}
+          gndCount={allGroundContacts.length}
           silentCount={silentCount}
           isLostSignal={isLostSignal}
           isConnected={isOnline}
@@ -361,7 +393,7 @@ export default function VPOverwatch() {
           {isLostSignal && <div className="vp-map-lost-tint" />}
             <LazyMap
               aircraft={filteredAircraft}
-              reports={filteredReports}
+              reports={allGroundContacts}
               user={userPosition}
               selectedAircraftId={selectedAircraftId}
               selectedReportId={selectedReportId}
@@ -525,7 +557,7 @@ export default function VPOverwatch() {
       >
         <VPHeader
           airCount={filteredAircraft.length}
-          gndCount={filteredReports.length}
+          gndCount={allGroundContacts.length}
           silentCount={silentCount}
           isLostSignal={isLostSignal}
           isConnected={isOnline}
@@ -551,7 +583,7 @@ export default function VPOverwatch() {
           {isLostSignal && <div className="vp-map-lost-tint" />}
           <LazyMap
             aircraft={filteredAircraft}
-            reports={filteredReports}
+            reports={allGroundContacts}
             user={userPosition}
             selectedAircraftId={selectedAircraftId}
             selectedReportId={selectedReportId}

@@ -6,6 +6,7 @@ import type {
   Report,
   User,
   Relay,
+  GroundUnit,
 } from '@/lib/data'
 
 export {
@@ -17,6 +18,7 @@ export {
 export interface RealtimeData {
   aircraft: Aircraft[]
   reports: Report[]
+  groundUnits: GroundUnit[]
   user: User
   relay: Relay
   loading: boolean
@@ -42,6 +44,7 @@ export function useRealtimeData(options: UseRealtimeOptions = {}): RealtimeData 
   const [data, setData] = useState<RealtimeData>({
     aircraft: [],
     reports: [],
+    groundUnits: [],
     user: { lat: -37.8136, lng: 144.9631, hdg: 0, accuracy: 5000 },
     relay: { connected: false, lastTickAgo: 0, pollIntervalSec: 60, lastIngested: 0, lastRaw: 0, coverageRegions: 0 },
     loading: true,
@@ -129,6 +132,26 @@ export function useRealtimeData(options: UseRealtimeOptions = {}): RealtimeData 
     const id = setInterval(poll, relayInterval)
     return () => { mounted = false; clearInterval(id) }
   }, [enabled, relayInterval, fetchJson])
+
+  // ── Ground Units poll (Police Locations) ──────────────────────────────
+  useEffect(() => {
+    if (!enabled) return
+    let mounted = true
+
+    async function poll() {
+      const result = await fetchJson<GroundUnit[]>('/api/ground-units', [])
+      if (!mounted) return
+      setData((prev) => ({
+        ...prev,
+        groundUnits: Array.isArray(result) ? result : prev.groundUnits,
+        lastUpdate: Date.now(),
+      }))
+    }
+
+    poll()
+    const id = setInterval(poll, reportsInterval)
+    return () => { mounted = false; clearInterval(id) }
+  }, [enabled, reportsInterval, fetchJson])
 
   return data
 }

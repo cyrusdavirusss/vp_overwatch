@@ -13,7 +13,7 @@ import {
 } from '@/lib/data'
 import { buildMapStyle, registerPmtilesProtocol, outsideCoverage, type MapViewType } from '@/lib/map-style'
 import type { CommunityDot } from '@/lib/visual-sighting'
-import { aircraftMarkerSVG, reportMarkerSVG, RED, GREEN } from '@/lib/markers'
+import { aircraftMarkerSVG, reportMarkerSVG, RED, BLUE } from '@/lib/markers'
 
 // Register the pmtiles:// protocol once, at the map module root. This module
 // is only ever loaded client-side (via the lazy map loader), so it is safe to
@@ -557,7 +557,8 @@ export function VPMap({
       const isSel = r.id === selectedReportId
       // CONFIRMED ground threat → threat red; single-source Reported → softer green.
       const confirmed = r.nThumbsUp >= 5 && r.lastConfirmedAgo < 120
-      const color = confirmed ? RED : GREEN
+      // Police kind colour: marked = red; unmarked / hidden / speed camera = blue.
+      const color = r.kind === 'marked' ? RED : BLUE
 
       let marker = reportMarkers.current.get(r.id)
       if (!marker) {
