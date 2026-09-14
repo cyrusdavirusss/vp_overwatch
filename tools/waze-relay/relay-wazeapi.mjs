@@ -34,9 +34,12 @@ if (!WAZEAPI_KEY) { console.error('Missing WAZEAPI_KEY — get one free at https
    Per-query billing → fewer tiles = cheaper. Override with WAZEAPI_TILES
    (JSON: [["name","blat,blng","tlat,tlng"],...]). */
 const DEFAULT_TILES = [
-  ['VIC West & Metro',    '-38.60,141.00', '-37.30,145.70'],
-  ['VIC East & Gippsland','-38.90,145.60', '-36.90,148.50'],
-  ['VIC North & Central', '-36.60,143.30', '-34.10,146.20'],
+  // Inner Melbourne + south-east corridor. Tiles kept small so none hit
+  // WazeAPI's 200-alert/query cap (which would silently truncate police).
+  ['Inner City', '-37.85,144.88', '-37.75,145.05'],
+  ['Inner SE',   '-37.95,144.98', '-37.82,145.15'],
+  ['SE Mid',     '-38.00,145.10', '-37.87,145.30'],
+  ['SE Outer',   '-38.15,145.15', '-37.98,145.45'],
 ];
 let TILES = DEFAULT_TILES;
 try { if (process.env.WAZEAPI_TILES) TILES = JSON.parse(process.env.WAZEAPI_TILES); } catch { console.warn('[wazeapi] bad WAZEAPI_TILES JSON, using defaults'); }
