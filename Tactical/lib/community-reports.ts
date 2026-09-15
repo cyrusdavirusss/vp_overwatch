@@ -32,7 +32,21 @@ export interface CommunityReportItem {
 
 export const CONFIRM_RADIUS_M = 50
 export const CONFIRM_COUNT = 3
-export const REPORT_TTL_MS = 45 * 60 * 1000 // 45 minutes
+/**
+ * How long a police sighting is worth showing, counted from when it was PUBLISHED
+ * (Waze) or created (community report) — NOT from the last poll that re-served it.
+ * A unit reported 40 minutes ago has almost certainly moved on.
+ */
+export const POLICE_MAX_AGE_MS = 40 * 60 * 1000
+
+/**
+ * Cameras get longer, because they do not move: a speed/red-light/mobile camera
+ * reported 90 minutes ago is very often still sitting on that stretch of road.
+ */
+export const CAMERA_MAX_AGE_MS = 90 * 60 * 1000
+
+/** Police lifetime — the community-report pool and the legacy restore window. */
+export const REPORT_TTL_MS = POLICE_MAX_AGE_MS
 
 const R = 6371000
 const toRad = (d: number) => (d * Math.PI) / 180
