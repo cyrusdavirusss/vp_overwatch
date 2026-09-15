@@ -540,6 +540,26 @@ samp,
   transition: transform var(--dur-panel) var(--ease-out);
 }
 
+/* ── Helicopter rotor ───────────────────────────────────────────────────── */
+/* The translucent disc drawn in lib/markers.ts is what reads as "spinning
+   rotor" in any frozen frame; this sweep adds the visible movement, like the
+   rotor of the little pictogram chopper. It is faint and never leaves the disc,
+   so a stopped frame still looks like a rotor and never like a stray line
+   across the icon. The cross's bounding-box centre IS the rotor hub, so
+   `center` is the correct origin — no magic pixel values to drift. */
+.vp-rotor-sweep {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: vp-rotor-spin 0.55s linear infinite;
+}
+@keyframes vp-rotor-spin {
+  to { transform: rotate(360deg); }
+}
+/* Reduced motion: the static disc still says "rotor", so nothing is lost. */
+@media (prefers-reduced-motion: reduce) {
+  .vp-rotor-sweep { animation: none; }
+}
+
 /* ── Floating callouts above map markers ────────────────────────────── */
 /* Aircraft: callsign + live alt/spd, always visible. Never rotates. */
 .vp-ac-callout {
