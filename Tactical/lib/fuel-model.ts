@@ -209,6 +209,36 @@ export const PERF_C208: AirframePerf = {
   ffLoiterKgH: 162, // → ~374 min endurance
 }
 
+/**
+ * Beechcraft King Air 350ER — the fixed-wing VicPol airframe (VH-PVE).
+ *
+ * It was previously mapped to PERF_AW139, i.e. treated as a helicopter: 1,530 kg
+ * of fuel burning at 410 kg/h, giving a ~4.5 h endurance. That is why its tank
+ * drained roughly two and a half times too fast. A 350ER carries 5,192 lb
+ * (2,355 kg) — the ER's aft fuel tanks are the whole point of the variant — and
+ * Beechcraft publishes +12 h endurance with 45 min reserve.
+ *
+ * Figures below are from the Beechcraft 350ER product card (max fuel 5,192 lb,
+ * operating weight 10,400 lb, max cruise 303 kt) and the King Air Magazine
+ * proving flights, where a 350ER flew 2,121 nm in 8 h 52 min and landed with
+ * 790 lb of 5,192 lb remaining — a measured burn of ~496 lb/h ≈ 225 kg/h.
+ *
+ * Nothing in this repo has measured the King Air: the fuel collector only ever
+ * scored the two AW139s (7c4ef4, 7c4ef5). So these are published type figures,
+ * not fitted data, and should be replaced with measured values once the
+ * collector covers 7c4ee8.
+ */
+export const PERF_KINGAIR350ER: AirframePerf = {
+  type: 'King Air 350ER',
+  cls: 'fixedwing',
+  usableFuelKg: 2300, // 5,192 lb max fuel
+  oewKg: 4700, // operating weight ~10,400 lb
+  cruiseTASkt: 260, // long-range cruise (max cruise 303 kt)
+  loiterTASkt: 150, // low-altitude surveillance orbit
+  ffCruiseKgH: 240, // measured ~496 lb/h on the proving flight, with margin
+  ffLoiterKgH: 200, // → ~690 min endurance (11.5 h vs published +12 h with reserve)
+}
+
 // Map each known ICAO hex to its performance profile.
 export const PERF_BY_HEX: Record<string, AirframePerf> = {
   '7C7F8C': PERF_AW139, // VH-PVH
@@ -216,7 +246,7 @@ export const PERF_BY_HEX: Record<string, AirframePerf> = {
   '7C4EF2': PERF_AW139, // VH-PVO
   '7C4EF4': PERF_AW139, // VH-PVQ
   '7C4EF5': PERF_AW139, // VH-PVR
-  '7C4EE8': PERF_AW139, // VH-PVE
+  '7C4EE8': PERF_KINGAIR350ER, // VH-PVE (King Air 350ER — fixed wing, not an AW139)
   '7C2B22': PERF_EC135, // VH-PVI
   '7CF102': PERF_C208, // VH-AFC (AFP, fixed-wing)
 }
