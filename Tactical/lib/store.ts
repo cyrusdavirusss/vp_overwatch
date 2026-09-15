@@ -324,7 +324,7 @@ export interface SortieEntry {
 
 // ── Notification system ────────────────────────────────────────────────────
 import { createNotifState, notifyTakeoff, notifyLand, notifyStealth, resetHexNotifications, addSubscriber, removeSubscriber, updateSubscriber, type Subscriber, type NotificationEvent, type AircraftBrief } from '@/lib/notifications'
-import { computeCommunityReports, haversineM, REPORT_TTL_MS, type PendingGroundReport, type GroundKind } from '@/lib/community-reports'
+import { computeCommunityReports, haversineM, REPORT_TTL_MS, POLICE_MAX_AGE_MS, CAMERA_MAX_AGE_MS, type PendingGroundReport, type GroundKind } from '@/lib/community-reports'
 import {
   perfForHex,
   trueAirspeedKt,
@@ -366,6 +366,25 @@ function wazeKind(subtype: string | null, type: string): Report['kind'] {
   if (type === 'CAMERA') return 'camera'
   if (subtype && KIND_MAP[subtype]) return KIND_MAP[subtype]
   return 'unmarked'
+}
+
+/**
+ * How long this report may stay on the map, in ms — or null when it should never
+ * appear at all.
+ *
+ * The clock runs from PUBLICATION (pubMillis), not from the last poll that
+ * re-served it: `lastSeenAt` refreshes on every re-report, so a unit Waze keeps
+ * returning would otherwise sit on the map for hours. (Reports were showing up
+ * four hours old for exactly that reason.)
+ *
+ * Only police sightings belong on the map. Accidents, jams, hazards and closures
+ * are excluded — the relay already filters to POLICE, and this is the second gate
+ * so a widened filter cannot quietly put roadworks on a police-awareness map.
+ */
+function maxAgeMsForReport(r: { type?: string | null; kind?: string | null }): number | null {
+  if (r.kind === 'camera') return CAMERA_MAX_AGE_MS
+  if (r.type === 'POLICE') return POLICE_MAX_AGE_MS
+  return null
 }
 
 function wazeLabel(kind: Report['kind'], subtype: string | null, street: string): string {
@@ -1511,9 +1530,10 @@ export function getStore() {
         lastConfirmedAgo: reportedAgo,
         descr: wazeLabel(kind, subtype, raw.street || 'Unknown'),
         pubMillis, // original publication timestamp for dynamic age calculation
-        lastSeenAt: now, // wall-clock time this unit was last seen in the relay feed;
-                         // refreshed on every re-report so a still-present unit's
-                         // 45-min timer keeps resetting ("the unit is still there").
+        lastSeenAt: now, // wall-clock time this unit was last seen in the relay feed.
+                         // Refreshed on every re-report, which is exactly why it must
+                         // NOT be the expiry clock — display age comes from pubMillis
+                         // (see maxAgeMsForReport/pruneReports).
       }
 
       s.reportsMap.set(uuid, report)
@@ -1538,24 +1558,36 @@ export function getStore() {
     },
 
     /**
-     * Drop ground units that haven't been seen in the relay feed for 45 min.
-     * Each re-report refreshes lastSeenAt, so a unit that's still on the ground
-     * (data keeps coming back) keeps its timer reset and stays on the map. Only
-     * after REPORT_TTL_MS of silence is the unit pruned ("put down").
+     * Expire ground units by AGE FROM PUBLICATION: police after 40 min, cameras
+     * after 90 min, and anything that is not police not at all (maxAgeMsForReport
+     * returns null, so the entry is dropped).
+     *
+     * Ageing from lastSeenAt is what let reports linger for hours: every re-report
+     * refreshed it, so a unit Waze kept returning never expired. That rule measured
+     * silence, not staleness.
      */
     pruneReports(): void {
       const now = Date.now()
       for (const [uuid, r] of s.reportsMap) {
-        // Fall back to pubMillis for legacy reports ingested before lastSeenAt existed.
-        const lastSeen = (r as any).lastSeenAt ?? (r as any).pubMillis ?? (now - r.reportedAgo * 1000)
-        if (now - lastSeen > REPORT_TTL_MS) s.reportsMap.delete(uuid)
+        const maxAge = maxAgeMsForReport(r)
+        // Legacy reports ingested before pubMillis existed fall back to lastSeenAt.
+        const published = (r as any).pubMillis ?? (r as any).lastSeenAt ?? (now - r.reportedAgo * 1000)
+        if (maxAge === null || now - published > maxAge) s.reportsMap.delete(uuid)
       }
     },
 
     /** Get all ground reports: Waze relay + confirmed community (VPS) reports. */
     getReports(): Report[] {
       this.pruneReports()
-      const waze = [...s.reportsMap.values()]
+      const now = Date.now()
+      // Age is recomputed on read. It is cached at ingest, and these now live up to
+      // 90 min, so a frozen "5 min ago" on a 40-minute-old camera would be a lie.
+      const waze = [...s.reportsMap.values()].map((r): Report => {
+        const pub = (r as any).pubMillis
+        if (!pub) return r
+        const ageSec = Math.max(0, Math.round((now - pub) / 1000))
+        return { ...r, reportedAgo: ageSec, lastConfirmedAgo: ageSec }
+      })
       const community = computeCommunityReports(s.groundReports).map((c): Report => ({
         id: c.id,
         wazeUuid: c.id,
