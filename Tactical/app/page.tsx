@@ -12,6 +12,7 @@ import { LazyMap } from '@/components/lazy-map'
 import { MlatBanner } from '@/components/mlat-banner'
 import { AROverlay } from '@/components/ar-overlay'
 import { SubscribeModal } from '@/components/subscribe-modal'
+import { TermsGate } from '@/components/terms-gate'
 import { VPSButton } from '@/components/vps-button'
 import { RouteAlertPanel } from '@/components/route-alert-panel'
 import { useRealtimeData, sampleTrack } from '@/hooks/useRealtimeData'
@@ -535,6 +536,7 @@ export default function VPOverwatch() {
         {arLaunch}
         {arOverlay}
       {showSubscribe && <SubscribeModal onClose={() => setShowSubscribe(false)} />}
+      <TermsGate />
       </div>
     )
   }
@@ -682,6 +684,7 @@ export default function VPOverwatch() {
       {arLaunch}
       {arOverlay}
       {showSubscribe && <SubscribeModal onClose={() => setShowSubscribe(false)} />}
+      <TermsGate />
     </div>
   )
 }
