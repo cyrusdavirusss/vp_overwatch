@@ -48,12 +48,16 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), 'data', 'fuel-flights')
 STATE_FILE = os.path.join(DATA_DIR, 'collector-state.json')
 
-# ── roster: the VicPol Air Wing rotary aircraft (helicopters) ───────────────
-# POL35 (7c4ee8) is the fixed-wing King Air; add it here if you want it too.
+# ── roster: the VicPol Air Wing fleet — three rotary, one fixed wing ────────
+# Add a hex here and it is collected, scored and graphed like the rest. The
+# King Air is fixed wing: it flies faster, higher and further than the AW139s,
+# but the airborne/ground gates below are shared with lib/adsb/config.ts and
+# hold for it, and the scorer picks its profile up from PERF_BY_HEX.
 ROSTER = {
     '7c4ef2': {'callsign': 'POL30', 'registration': 'VH-PVO', 'type': 'AW139', 'role': 'rotary'},
     '7c4ef4': {'callsign': 'POL31', 'registration': 'VH-PVQ', 'type': 'AW139', 'role': 'rotary'},
     '7c4ef5': {'callsign': 'POL32', 'registration': 'VH-PVR', 'type': 'AW139', 'role': 'rotary'},
+    '7c4ee8': {'callsign': 'POL35', 'registration': 'VH-PVE', 'type': 'King Air 350ER', 'role': 'fixedwing'},
 }
 
 # ── feed ────────────────────────────────────────────────────────────────────
@@ -142,12 +146,25 @@ def is_groundlike(s: dict) -> bool:
 
 # ── state ───────────────────────────────────────────────────────────────────
 def load_state() -> dict:
+    """State for every aircraft in ROSTER, including any added since the last run.
+
+    The saved file is MERGED, never trusted wholesale: the state dict is keyed by
+    hex, so a hex added to ROSTER was previously missing here, and the first
+    `state[hex]['phase']` access then raised KeyError and crash-looped the service
+    (it runs under Restart=always).
+    """
+    state = {}
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as f:
-            return json.load(f)
-    return {h: {'phase': 'ground', 'air_streak': 0, 'gnd_streak': 0,
-                'completed': 0, 'open': False, 'start_ms': None, 'last_ms': None}
-            for h in ROSTER}
+        try:
+            with open(STATE_FILE) as f:
+                state = json.load(f)
+        except (OSError, ValueError) as e:
+            log(f'state file unreadable ({e}) — starting fresh')
+            state = {}
+    for h in ROSTER:
+        state.setdefault(h, {'phase': 'ground', 'air_streak': 0, 'gnd_streak': 0,
+                             'completed': 0, 'open': False, 'start_ms': None, 'last_ms': None})
+    return state
 
 
 def save_state(state: dict):
