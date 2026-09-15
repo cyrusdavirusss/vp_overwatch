@@ -16,6 +16,7 @@
  *   • Event dedup keys are built from monotonic episode sequences, never a
  *     timestamp → replay/restart/duplicate-safe and idempotent.
  */
+import { announceNameFor } from './config.ts'
 import type { ADSBAircraft } from './exchange-adapter.ts'
 import type {
   AircraftEvent,
@@ -126,12 +127,16 @@ export interface ApplyContext {
 }
 
 function messageFor(type: AircraftEvent['eventType'], reg: string): string {
+  // Alerts SPEAK the codename ("Black Bird is airborne.") — a raw registration
+  // or hex is unreadable when read aloud on a call. The technical identifiers
+  // still travel with the event (registration/icao24) for the dashboard.
+  const name = announceNameFor(reg)
   switch (type) {
-    case 'takeoff': return `${reg} appears to have departed (telemetry shows airborne).`
-    case 'landing': return `${reg} appears to be on the ground (telemetry shows landed).`
-    case 'telemetry_not_seen': return `Tracking telemetry for ${reg} has not been observed recently. This only means no signal was received — it does not indicate any incident.`
-    case 'reappeared': return `${reg} is being tracked again.`
-    case 'proximity_enter': return `${reg} is now within range of your location.`
+    case 'takeoff': return `${name} is airborne.`
+    case 'landing': return `${name} has landed.`
+    case 'telemetry_not_seen': return `${name} is not being tracked right now. This only means no signal was received — it does not indicate any incident.`
+    case 'reappeared': return `${name} is being tracked again.`
+    case 'proximity_enter': return `${name} is now within range of your location.`
   }
 }
 
