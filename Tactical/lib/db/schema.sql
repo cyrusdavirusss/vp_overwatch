@@ -116,7 +116,10 @@ CREATE TABLE IF NOT EXISTS user_alert_settings (
   push_token     TEXT,
   sms_enabled    BOOLEAN NOT NULL DEFAULT FALSE,
   sms_consent    BOOLEAN NOT NULL DEFAULT FALSE,
-  sms_number_ref TEXT,
+  sms_number_ref TEXT,                           -- encrypted, never plaintext
+  call_enabled   BOOLEAN NOT NULL DEFAULT FALSE,
+  call_consent   BOOLEAN NOT NULL DEFAULT FALSE,
+  call_number_ref TEXT,                          -- encrypted, never plaintext
   enter_metres   INTEGER NOT NULL DEFAULT 30000,
   exit_metres    INTEGER NOT NULL DEFAULT 33000,
   -- Opt-in: TRUE = store the user's EXACT device position (required for a tight
@@ -142,7 +145,7 @@ CREATE TABLE IF NOT EXISTS notification_deliveries (
   dedup_key       TEXT PRIMARY KEY,
   user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   event_dedup_key TEXT NOT NULL,
-  channel         TEXT NOT NULL CHECK (channel IN ('push','sms','inapp')),
+  channel         TEXT NOT NULL CHECK (channel IN ('push','sms','call','inapp')),
   status          TEXT NOT NULL DEFAULT 'recorded'
                     CHECK (status IN ('recorded','sent','failed','disabled')),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -154,3 +157,14 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_user ON notification_deliveries(user_i
 -- Kept at the end so fresh installs get the column from CREATE TABLE above and
 -- existing installs pick it up here. Never DROP: safe to run repeatedly.
 ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS precise_location BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS call_enabled  BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS call_consent  BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS call_number_ref TEXT;
+
+-- The delivery ledger predates voice calls; widen its CHECK to include 'call'.
+-- Drop-then-add is idempotent in effect and validates the existing rows (all of
+-- which are push/sms/inapp, so it passes). CONSTRAINT name is Postgres's default
+-- for the column-level CHECK on notification_deliveries.channel.
+ALTER TABLE notification_deliveries DROP CONSTRAINT IF EXISTS notification_deliveries_channel_check;
+ALTER TABLE notification_deliveries ADD  CONSTRAINT notification_deliveries_channel_check
+  CHECK (channel IN ('push','sms','call','inapp'));
