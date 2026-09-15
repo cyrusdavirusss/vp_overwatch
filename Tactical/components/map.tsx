@@ -544,10 +544,12 @@ export function VPMap({
     if (layers.trails) {
       for (const a of aircraft) {
         const isSel = a.id === selectedAircraftId
-        // Show a real breadcrumb history, not a 4-min stub that hides under the
-        // aircraft icon while it orbits: the full retained track for the selected
-        // contact (~the whole ~500-pt buffer), a generous tail for the rest.
-        const trail = sampleTrailUntil(a.track, scrubT, (isSel ? 120 : 30) * 60)
+        // The WHOLE retained trail, not a time window. A 30-min tail (2 h when
+        // selected) vanished partway through a long patrol, which is what the
+        // user actually sees as "the breadcrumb doesn't stay up for the flight".
+        // The buffer is bounded per-sortie in the store instead
+        // (appendTrackPoint / TRAIL_MAX_POINTS), so no window is needed here.
+        const trail = sampleTrailUntil(a.track, scrubT, Number.POSITIVE_INFINITY)
         if (trail.length < 2) continue
         trailFeatures.push({
           type: 'Feature',

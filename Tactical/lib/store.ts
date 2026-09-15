@@ -40,7 +40,12 @@ function saveToDisk(): void {
       hex, startTime: ac.startTime, isActive: ac.isActive,
       callsign: ac.callsign, latitude: ac.latitude, longitude: ac.longitude,
       altitude: ac.altitude, heading: ac.heading, speed: ac.speed,
-      lastSeen: ac.lastSeen, track: ac.track.slice(-100),
+      lastSeen: ac.lastSeen,
+      // Trimmed harder than the in-memory buffer ON PURPOSE: the snapshot is
+      // rewritten every 5 s, so persisting a full sortie's track would mean
+      // constant multi-megabyte writes. 300 points keeps ~25 min of trail across
+      // a restart, and the rest rebuilds from live data within a flight.
+      track: ac.track.slice(-300),
       // Persist the fuel timer so a restart/deploy doesn't snap a mid-flight
       // tank back to 100% (which would also reset the silent-expiry window).
       fuelRemainingPercent: ac.fuelRemainingPercent, landed: ac.landed,
@@ -122,7 +127,7 @@ function loadFromDisk(): void {
         if (existing) {
           existing.startTime = ac.startTime || existing.startTime
           existing.callsign = ac.callsign || existing.callsign
-          existing.track = (ac.track || []).slice(-500)
+          existing.track = (ac.track || []).slice(-TRAIL_MAX_POINTS)
           // Continue the fuel timer from where it was rather than the seeded 100%,
           // so a live contact's tank (and its silent-expiry bound) survives a
           // restart. isActive is NOT restored — the next poll re-confirms it.
@@ -332,6 +337,7 @@ import {
   maxRemainingEnduranceSec,
 } from '@/lib/fuel-model'
 import { currentAreaWind, refreshAreaWind } from '@/lib/wind'
+import { appendTrackPoint, TRAIL_MAX_POINTS } from '@/lib/data'
 
 /** Project a full Aircraft record down to the telemetry Hermes briefs on. */
 function aircraftToBrief(ac: Aircraft): AircraftBrief {
@@ -984,11 +990,9 @@ async function pollOpenSky(): Promise<void> {
         ? 100
         : modelFuelPercent(hex, existing, now, alt, speed, heading, Math.round(Number(verticalRate)), timeAirborne, fuelEndurance)
 
-      // Append a breadcrumb only when the position actually changed — kills the
-      // stationary jitter the no-dedup append used to produce.
-      const lastTp = existing?.track[existing.track.length - 1]
-      const moved = !lastTp || lastTp.lat !== latitude || lastTp.lng !== longitude
-      const track = existing ? (moved ? [...existing.track, tp].slice(-500) : existing.track) : [tp]
+      // Append (or slide) the breadcrumb point. The buffer covers a whole sortie
+      // and is sampled on a minimum spacing — see appendTrackPoint().
+      const track = appendTrackPoint(existing?.track, tp)
 
       const aircraftObj: Aircraft = {
         id: hex,
@@ -1263,12 +1267,8 @@ async function pollFastPolice(): Promise<void> {
         : integratePoliceFuelPct(hex, pct(existing?.fuelRemainingPercent, 100), now, alt, speed, heading, Math.round(num(verticalRate)), fuelEndurance, effectiveTimeAirborne)
       const historicalAvg = computeHistoricalAverage(hex, 42 * 60)
 
-      // Avoid duplicating breadcrumb points when nothing moved between ticks.
-      const last = existing?.track[existing.track.length - 1]
-      const moved = !last || last.lat !== latitude || last.lng !== longitude
-      const track = existing
-        ? (moved ? [...existing.track, tp].slice(-500) : existing.track)
-        : [tp]
+      // Append (or slide) the breadcrumb point — see appendTrackPoint().
+      const track = appendTrackPoint(existing?.track, tp)
 
       s.aircraftMap.set(hex, {
         id: hex,
