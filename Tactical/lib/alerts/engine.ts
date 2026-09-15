@@ -9,7 +9,7 @@
  */
 import { stepProximity, initialProximityState } from '../geo/haversine.ts'
 import { insertEventIfNew } from '../adsb/persistence/dashboard-persistence.ts'
-import { typeLabelFor } from '../adsb/config.ts'
+import { announceNameFor } from '../adsb/config.ts'
 import type { AircraftRecord, AircraftEvent } from '../adsb/types.ts'
 import {
   getProximityState, setProximityState, getAlertSettings, recordDelivery,
@@ -98,7 +98,6 @@ async function evaluateLocked(loc: UserLocation, records: AircraftRecord[]): Pro
     if (decision.fired) {
       seq = prev.seq + 1
       const icao = r.icao24 ?? r.registration
-      const label = typeLabelFor(r.registration)
       const ev: AircraftEvent = {
         eventType: 'proximity_enter',
         registration: r.registration,
@@ -107,7 +106,7 @@ async function evaluateLocked(loc: UserLocation, records: AircraftRecord[]): Pro
         previousState: r.state,
         currentState: r.state,
         dedupKey: `${loc.userId}:${icao}:proximity:${seq}`,
-        message: `${r.registration} (${label}) is now within range of your location.`,
+        message: `${announceNameFor(r.registration)} is now within range of your location.`,
       }
       const isNew = await insertEventIfNew(ev, loc.userId)
       if (isNew) {
