@@ -23,7 +23,7 @@ export interface TrackedAircraftDef {
 /** Victoria Police Air Wing — the four tracked aircraft, with their public
  *  Mode-S hex codes (used directly by the OpenSky provider). */
 export const TRACKED_AIRCRAFT: TrackedAircraftDef[] = [
-  { registration: 'VH-PVO', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef2', callsign: 'POL30' },
+  { registration: 'VH-PVO', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef2', callsign: 'POL30', codename: 'Seeker' },
   { registration: 'VH-PVQ', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef4', callsign: 'POL31', codename: 'Raven' },
   { registration: 'VH-PVR', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef5', callsign: 'POL32', codename: 'Black Hawk' },
   { registration: 'VH-PVE', description: 'Beechcraft King Air 350ER', typeLabel: 'King Air 350ER', hex: '7c4ee8', callsign: 'POL35', codename: 'King Air' },
