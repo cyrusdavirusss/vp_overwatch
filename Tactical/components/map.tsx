@@ -511,7 +511,13 @@ export function VPMap({
         if (cs) cs.textContent = a.label || a.callsign || a.registration
         if (cd) cd.textContent = `${pos.alt != null ? pos.alt.toLocaleString() + 'ft' : '—'} · ${Math.round(pos.spd)}kts`
 
-        entry.rot.style.transform = `rotate(${pos.hdg}deg)`
+        // Rotary markers are drawn in PROFILE (a side-on chopper with a blurred
+        // rotor disc), and a profile silhouette rotated to heading reads as a
+        // tumbling object rather than a turning aircraft — so it stays upright.
+        // Heading is still shown: the predictive vector, the trail and the callout
+        // all carry direction. The fixed-wing marker is a top-down silhouette and
+        // still rotates, which is what that shape is for.
+        if (a.role !== 'rotary') entry.rot.style.transform = `rotate(${pos.hdg}deg)`
         const markerEl = entry.marker.getElement() as HTMLDivElement
         markerEl.classList.toggle('selected', isSel)
         // Silent (off-ADS-B) aircraft read as a last-known/maybe-landed ghost,
