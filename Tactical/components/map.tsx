@@ -41,6 +41,14 @@ export interface VPMapProps {
   pickMode?: boolean
   /** Called with the clicked coordinate while pickMode is active. */
   onMapClick?: (lat: number, lng: number) => void
+  /**
+   * Out-of-sight sighting pick: on change, fly to this point at a zoom that
+   * frames `rangeM` metres of radius on screen so the operator can tap the
+   * exact spot they saw the contact from. Callers must keep the object
+   * reference stable (state, not a fresh literal each render) or the camera
+   * will keep re-flying.
+   */
+  pickTarget?: { lat: number; lng: number; rangeM: number } | null
   /** Live-follow: re-center smoothly (pan only, keep zoom) on focus changes. */
   followMode?: boolean
   /** Fired when the user drags the map, so follow mode can be paused. */
@@ -61,6 +69,27 @@ export interface VPMapProps {
 const FOCUS_MS = 400
 const FOCUS_ZOOM = 10
 const AIRCRAFT_TWEEN_MS = 900
+
+// ── Out-of-sight sighting pick ─────────────────────────────────────────────
+// MapLibre lays out the world as 2^zoom tiles of 512 px, so the ground
+// resolution at the equator and zoom 0 is 40075017 / 512 ≈ 78 271 m/px:
+//   metres/px = 78271.5 * cos(lat) / 2^zoom
+// Invert that for the zoom whose shorter viewport axis spans `rangeM` of
+// radius (i.e. the full shorter side covers 2 × rangeM), so no matter the
+// screen the operator gets their radius without the view being uselessly wide.
+const WORLD_M_PER_PX_Z0 = 78271.51696
+const PICK_MIN_ZOOM = 14
+const PICK_MAX_ZOOM = 19
+const PICK_MS = 650
+
+function zoomForRadius(rangeM: number, lat: number, el: HTMLElement | null): number {
+  const w = el?.clientWidth || 360
+  const h = el?.clientHeight || 640
+  const halfAxisPx = Math.max(1, Math.min(w, h) / 2)
+  const mPerPx = rangeM / halfAxisPx
+  const z = Math.log2((WORLD_M_PER_PX_Z0 * Math.cos((lat * Math.PI) / 180)) / mPerPx)
+  return Math.max(PICK_MIN_ZOOM, Math.min(PICK_MAX_ZOOM, z))
+}
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 
@@ -128,6 +157,7 @@ export function VPMap({
   hasSilentAircraft,
   pickMode,
   onMapClick,
+  pickTarget,
   followMode,
   onUserPan,
   fitAllTrigger,
@@ -400,6 +430,25 @@ export function VPMap({
     if (!ready || !map) return
     map.getCanvas().style.cursor = pickMode ? 'crosshair' : ''
   }, [ready, pickMode])
+
+  // ── Out-of-sight pick: frame the observer, then let them tap the contact ─
+  // North-up and flat, so a tap lands where the operator expects: the two
+  // sighting paths differ only in WHERE the pin lands, never in which way the
+  // map happens to be facing while they place it.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map || !pickTarget) return
+    const zoom = zoomForRadius(pickTarget.rangeM, pickTarget.lat, map.getContainer())
+    map.flyTo({
+      center: [pickTarget.lng, pickTarget.lat],
+      zoom,
+      bearing: 0,
+      pitch: 0,
+      duration: PICK_MS,
+      easing: springEase,
+      essential: true,
+    })
+  }, [ready, pickTarget])
 
   // ── User marker + accuracy disc ────────────────────────────────────────
   useEffect(() => {
