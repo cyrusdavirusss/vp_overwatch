@@ -511,10 +511,15 @@ export function VPMap({
         if (cs) cs.textContent = a.label || a.callsign || a.registration
         if (cd) cd.textContent = `${pos.alt != null ? pos.alt.toLocaleString() + 'ft' : '—'} · ${Math.round(pos.spd)}kts`
 
-        // Both marker shapes are top-down silhouettes, so both rotate to heading;
-        // the rotary icon's blade group spins independently inside that rotation
-        // (see .vp-rotor in globals.css).
-        entry.rot.style.transform = `rotate(${pos.hdg}deg)`
+        // The rotary marker does NOT rotate with heading — too much movement on
+        // top of the spinning blades, and a near-symmetric rotor star encodes
+        // little direction anyway, so the whole icon just wheeled around for no
+        // information gained. Heading is still readable from the predictive
+        // vector, the trail and the alt/spd callout. The fixed wing keeps its
+        // heading rotation: its silhouette is asymmetric, so rotation there is
+        // informative.
+        if (a.role === 'rotary') entry.rot.style.transform = ''
+        else entry.rot.style.transform = `rotate(${pos.hdg}deg)`
         const markerEl = entry.marker.getElement() as HTMLDivElement
         markerEl.classList.toggle('selected', isSel)
         // Silent (off-ADS-B) aircraft read as a last-known/maybe-landed ghost,
