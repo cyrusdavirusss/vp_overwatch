@@ -356,29 +356,11 @@ function wazeLabel(kind: Report['kind'], subtype: string | null, street: string)
 
 // ── Global state (shared across hot-reloads) ─────────────────────────────
 
-export interface GroundUnit {
-  id: string
-  type: 'POLICE' | 'SUPPORT' | 'COMMAND'
-  subtype?: string
-  callsign?: string
-  unitNumber?: string
-  location: {
-    lat: number
-    lon: number
-    street?: string
-    suburb?: string
-  }
-  status: 'ACTIVE' | 'PATROL' | 'INCIDENT' | 'STANDBY'
-  lastUpdate: number
-  metadata?: Record<string, unknown>
-}
-
 interface StoreState {
   aircraftMap: Map<string, Aircraft>
   /** Transient civil aircraft in range (AR sky view only — not the 2D map/safety bar) */
   civilMap: Map<string, Aircraft>
   reportsMap: Map<string, Report>
-  groundUnitsMap: Map<string, GroundUnit>
   userGPS: User
   userLocation: UserLocation | null
   relay: Relay
@@ -398,7 +380,6 @@ function getState(): StoreState {
       aircraftMap: new Map<string, Aircraft>(),
       civilMap: new Map<string, Aircraft>(),
       reportsMap: new Map<string, Report>(),
-      groundUnitsMap: new Map<string, GroundUnit>(),
       userGPS: { lat: -37.8136, lng: 144.9631, hdg: 0, accuracy: 25 },
       userLocation: null,
       relay: {
@@ -1633,73 +1614,5 @@ export function getStore() {
       resetHexNotifications(s.notifState, hex)
     },
 
-    // ── Ground Units (Police Locations) ───────────────────────────────────
-
-    /** Get all ground units (police locations) */
-    getGroundUnits(): GroundUnit[] {
-      const now = Date.now()
-      const ttlMs = 45 * 60_000 // 45 minutes TTL
-      // Prune stale units
-      for (const [id, unit] of s.groundUnitsMap) {
-        if (now - unit.lastUpdate > ttlMs) {
-          s.groundUnitsMap.delete(id)
-        }
-      }
-      return [...s.groundUnitsMap.values()]
-    },
-
-    /** Add a new ground unit (police location) */
-    addGroundUnit(unit: GroundUnit): GroundUnit {
-      s.groundUnitsMap.set(unit.id, unit)
-      saveToDisk()
-      return unit
-    },
-
-    /** Update an existing ground unit */
-    updateGroundUnit(id: string, updates: Partial<GroundUnit>): GroundUnit | null {
-      const existing = s.groundUnitsMap.get(id)
-      if (!existing) return null
-      const updated: GroundUnit = {
-        ...existing,
-        ...updates,
-        id,
-        lastUpdate: Date.now(),
-      }
-      s.groundUnitsMap.set(id, updated)
-      saveToDisk()
-      return updated
-    },
-
-    /** Remove a ground unit */
-    removeGroundUnit(id: string): boolean {
-      const deleted = s.groundUnitsMap.delete(id)
-      if (deleted) saveToDisk()
-      return deleted
-    },
-
-    /** Bulk ingest ground units from Waze relay */
-    bulkIngestGroundUnits(units: GroundUnit[]): { ingested: number; total: number } {
-      let ingested = 0
-      for (const unit of units) {
-        if (!s.groundUnitsMap.has(unit.id)) {
-          s.groundUnitsMap.set(unit.id, unit)
-          ingested++
-        } else {
-          // Refresh existing unit
-          const existing = s.groundUnitsMap.get(unit.id)!
-          s.groundUnitsMap.set(unit.id, {
-            ...existing,
-            location: unit.location,
-            status: unit.status,
-            lastUpdate: Date.now(),
-          })
-        }
-      }
-      if (ingested > 0 || units.length > 0) {
-        saveToDisk()
-        touchWatchdog()
-      }
-      return { ingested, total: units.length }
-    },
   }
 }

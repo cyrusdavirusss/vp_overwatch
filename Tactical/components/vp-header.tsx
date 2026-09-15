@@ -10,7 +10,7 @@
  *   import { VPHeader } from "@/components/vp-header";
  *   <VPHeader
  *     airCount={activeAircraft.length}
- *     gndCount={groundUnits.length}
+ *     gndCount={allGroundContacts.length}
  *     silentCount={silentAircraft.length}
  *     isLostSignal={lostSignalActive}
  *     isConnected={isConnected}
