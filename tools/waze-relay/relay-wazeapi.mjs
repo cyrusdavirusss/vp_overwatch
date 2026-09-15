@@ -135,7 +135,7 @@ const quotaSummary = () =>
 class QuotaError extends Error { constructor(m){ super(m); this.quota = true; } }
 let quotaPausedUntil = 0;          // skip network work entirely while paused
 let quotaNoted = false;            // only shout about it once per outage
-let quotaPauseAnnounced = false;   // don't repeat the "paused" summary every tick
+let quotaPauseAnnouncedAt = 0;     // heartbeat while paused, but not every tick
 
 async function fetchTile([name, bl, tr], attempt = 1, withFilter = filterInPlay) {
   if (Date.now() < quotaPausedUntil) throw new QuotaError(`${name}: skipped (quota paused)`);
@@ -243,15 +243,20 @@ async function tick() {
 
   const when = new Date().toISOString();
   if (quotaFails && quotaFails === TILES.length) {
-    if (!quotaPauseAnnounced) {
-      quotaPauseAnnounced = true;
-      console.error(`[${when}] paused: WazeAPI quota exhausted — nothing fetched. Top up or upgrade (https://wazeapi.com/pricing); the relay resumes automatically and keeps retrying every 30 min until then.`);
+    // Heartbeat while blocked. Silence here would be indistinguishable from a dead
+    // relay to anything watching the log (the VP-Overwatch watchdog alerts on
+    // journal silence), so announce at most every 15 min — which on a 20-minute
+    // poll means roughly every tick, keeping a wide margin under that watchdog's
+    // 45-minute silence threshold.
+    if (!quotaPauseAnnouncedAt || Date.now() - quotaPauseAnnouncedAt > 15 * 60 * 1000) {
+      quotaPauseAnnouncedAt = Date.now();
+      console.error(`[${when}] paused: WazeAPI quota exhausted — nothing fetched. Top up or add credits (https://wazeapi.com/pricing); the relay resumes automatically and re-checks every 30 min until then.`);
     }
     if (ONCE) process.exitCode = 1;
     return;
   }
   if (!ok) { console.error(`[${when}] all ${TILES.length} tiles failed`); if (ONCE) process.exitCode = 1; return; }
-  if (sawAny) { quotaNoted = false; quotaPauseAnnounced = false; }
+  if (sawAny) { quotaNoted = false; quotaPauseAnnouncedAt = 0; }
 
   const police = [...merged.values()];
   // The type breakdown is how we PROVE whether the server-side filter is real.
