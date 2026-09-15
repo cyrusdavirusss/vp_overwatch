@@ -550,7 +550,11 @@ samp,
 .vp-rotor {
   transform-box: fill-box;
   transform-origin: center;
-  animation: vp-rotor-spin 0.38s linear infinite;
+  /* 0.19s/rev — twice the original 0.38s. The blade spin is the only motion on
+     the marker now that the body no longer rotates, so it can afford to be
+     fast; the ghost blade positions keep it reading as rotation rather than a
+     strobe. */
+  animation: vp-rotor-spin 0.19s linear infinite;
 }
 @keyframes vp-rotor-spin {
   to { transform: rotate(360deg); }
