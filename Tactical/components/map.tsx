@@ -138,6 +138,12 @@ export function VPMap({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const [ready, setReady] = useState(false)
+  // Set when the map cannot be created at all — no WebGL context, or a context
+  // lost mid-session. Without this the throw escapes to the page-level error
+  // boundary and the entire app becomes "This page couldn't load", so a client
+  // with WebGL blocked loses the header, alerts and aircraft too.
+  const [initError, setInitError] = useState<string | null>(null)
+  const [retryKey, setRetryKey] = useState(0)
   const onMapClickRef = useRef(onMapClick)
   useEffect(() => { onMapClickRef.current = onMapClick }, [onMapClick])
   const onUserPanRef = useRef(onUserPan)
@@ -169,18 +175,46 @@ export function VPMap({
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
 
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: buildMapStyle(viewType),
-      center: [user.lng, user.lat],
-      zoom: 9,
-      pitch: 0, // pitch/bearing enabled but default flat, north up
-      bearing: 0,
-      attributionControl: false,
-      dragRotate: true,
-      pitchWithRotate: true,
-    })
+    // MapLibre needs a WebGL context, and it THROWS from its constructor when it
+    // cannot get one: hardware acceleration disabled, an anti-detect/spoofing
+    // browser, iOS Low Power Mode, or an in-app WebView. Probe first so the
+    // message names the real cause, and catch regardless — an uncaught throw in
+    // this effect escapes to Next's error boundary and takes the whole page
+    // down, not just the map.
+    let map: maplibregl.Map
+    try {
+      if (!webglAvailable()) throw new Error('WebGL is unavailable in this browser')
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: buildMapStyle(viewType),
+        center: [user.lng, user.lat],
+        zoom: 9,
+        pitch: 0, // pitch/bearing enabled but default flat, north up
+        bearing: 0,
+        attributionControl: false,
+        dragRotate: true,
+        pitchWithRotate: true,
+      })
+    } catch (err) {
+      console.error('[VP-MAP INIT FAILED]', err)
+      setInitError(err instanceof Error ? err.message : String(err))
+      return
+    }
     mapRef.current = map
+    setInitError(null)
+
+    // iOS reclaims GPU memory under pressure and the context can be lost later,
+    // leaving a frozen or blank canvas. Treat it as a map failure so RETRY can
+    // rebuild the map instead of showing a dead rectangle.
+    const canvas = map.getCanvas()
+    const onContextLost = (e: Event) => {
+      e.preventDefault()
+      console.error('[VP-MAP] WebGL context lost')
+      mapRef.current = null
+      try { map.remove() } catch { /* already torn down */ }
+      setInitError('The map lost its graphics context')
+    }
+    canvas.addEventListener('webglcontextlost', onContextLost)
 
     // Surface basemap/source/tile errors instead of failing silently to a black
     // screen. Logs to console always; in dev (or with ?mapdebug) also paints a
@@ -256,6 +290,7 @@ export function VPMap({
     ro.observe(containerRef.current)
 
     return () => {
+      canvas.removeEventListener('webglcontextlost', onContextLost)
       ro.disconnect()
       aircraftMarkers.current.forEach((e) => {
         if (e.raf) cancelAnimationFrame(e.raf)
@@ -273,7 +308,7 @@ export function VPMap({
       setReady(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   // ── Map view switcher: swap the basemap, then re-add overlay layers ─────
   // Swap the basemap and keep the imperatively-managed overlays on top of it.
@@ -634,6 +669,28 @@ export function VPMap({
     }
   }, [ready, aircraft, onSelectAircraft])
 
+  // Degraded map area, not a dead page: say why the map is missing and let the
+  // user retry, while the header, alerts and aircraft list keep working.
+  if (initError) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[var(--map-bg)] px-8 text-center">
+        <div className="text-red text-sm font-mono tracking-[0.1em]">MAP UNAVAILABLE</div>
+        <div className="text-fg-3 text-xs font-mono max-w-sm leading-relaxed">{initError}</div>
+        <div className="text-fg-4 text-xs font-mono max-w-sm leading-relaxed">
+          The map needs WebGL. That is normally off because hardware acceleration is
+          disabled, or because this page is open in a stripped-down browser. Alerts
+          and aircraft are unaffected.
+        </div>
+        <button
+          onClick={() => { setInitError(null); setRetryKey((k) => k + 1) }}
+          className="px-4 py-2 rounded bg-ink-1 border border-border text-fg-2 text-xs font-mono hover:bg-ink-2 transition-colors cursor-pointer"
+        >
+          RETRY
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="relative w-full h-full">
       <div ref={containerRef} className="w-full h-full" />
@@ -651,6 +708,20 @@ export function VPMap({
       )}
     </div>
   )
+}
+
+/**
+ * Can this client create a WebGL context? MapLibre throws without one, and on
+ * browsers where it is blocked (hardware acceleration off, anti-detect browsers,
+ * iOS Low Power Mode, in-app WebViews) that throw used to take down the page.
+ */
+function webglAvailable(): boolean {
+  try {
+    const c = document.createElement('canvas')
+    return !!(c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl'))
+  } catch {
+    return false
+  }
 }
 
 // Update a GeoJSON source's features.
