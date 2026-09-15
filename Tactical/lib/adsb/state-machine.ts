@@ -16,7 +16,7 @@
  *   • Event dedup keys are built from monotonic episode sequences, never a
  *     timestamp → replay/restart/duplicate-safe and idempotent.
  */
-import { announceNameFor } from './config.ts'
+import { announceLabelFor } from './config.ts'
 import type { ADSBAircraft } from './exchange-adapter.ts'
 import type {
   AircraftEvent,
@@ -127,10 +127,11 @@ export interface ApplyContext {
 }
 
 function messageFor(type: AircraftEvent['eventType'], reg: string): string {
-  // Alerts SPEAK the codename ("Black Bird is airborne.") — a raw registration
-  // or hex is unreadable when read aloud on a call. The technical identifiers
-  // still travel with the event (registration/icao24) for the dashboard.
-  const name = announceNameFor(reg)
+  // Alerts SPEAK the codename plus callsign ("Black Bird POL31 is airborne.") —
+  // a raw registration or hex is unreadable on a call, and the callsign gives
+  // anyone who does not know the codename something to match. The technical
+  // identifiers still travel with the event (registration/icao24) for the map.
+  const name = announceLabelFor(reg)
   switch (type) {
     case 'takeoff': return `${name} is airborne.`
     case 'landing': return `${name} has landed.`

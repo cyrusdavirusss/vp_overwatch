@@ -6,6 +6,9 @@ export interface Aircraft {
   hex: string
   registration: string
   callsign: string
+  /** Server-resolved name for display ("Black Bird POL31"), codename + callsign,
+   *  falling back to whichever exists. Absent on older cached payloads. */
+  label?: string
   type: string
   typeLabel: string
   role: 'rotary' | 'fixedwing'
