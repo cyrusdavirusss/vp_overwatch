@@ -125,6 +125,66 @@ export function sampleTrack(
   return closest
 }
 
+/**
+ * Minimum gap between stored breadcrumb points. The fast police loop polls every
+ * 3 s, so without a gate a long sortie burns the buffer in minutes.
+ */
+export const TRAIL_MIN_SPACING_MS = 5_000
+
+/**
+ * Cap on stored breadcrumb points per aircraft — a 12 h sortie at 5 s spacing.
+ * Sized for the King Air, the longest-endurance airframe in the fleet.
+ */
+export const TRAIL_MAX_POINTS = 6_000
+
+/**
+ * Append a breadcrumb point, keeping the buffer bounded without truncating a
+ * sortie.
+ *
+ * The track must cover a whole flight: the old rule kept 500 raw samples, which
+ * at a 3 s poll is ~25 minutes, so a trail disappeared partway through a patrol.
+ * Sampling on a minimum spacing instead means a 4 h flight needs ~2,900 points
+ * rather than ~4,800, and the cap above then covers even a 12 h sortie.
+ *
+ * The newest point is always at the true live position: when the next sample is
+ * not due yet, the last point SLIDES forward instead of a new one being added,
+ * so the trail never lags behind the marker by a whole spacing interval.
+ *
+ * Returns the SAME array when nothing moved, so callers can keep identity checks
+ * cheap and the store does not churn garbage on a stationary aircraft.
+ */
+export function appendTrackPoint(
+  existing: TrackPoint[] | undefined,
+  tp: TrackPoint
+): TrackPoint[] {
+  if (!existing || existing.length === 0) return [tp]
+
+  const last = existing[existing.length - 1]
+  if (last.lat === tp.lat && last.lng === tp.lng) return existing // nothing moved
+
+  // Legacy points without `ts` fall back to the movement test alone, so an old
+  // track can never wedge the buffer shut.
+  const due = last.ts == null || tp.ts == null || tp.ts - last.ts >= TRAIL_MIN_SPACING_MS
+
+  if (!due) {
+    // Not due yet: move the newest vertex to the current position so the trail
+    // still meets the marker, but KEEP that vertex's timestamps. Refreshing `ts`
+    // here would reset the spacing clock on every tick, and since the poll (3 s)
+    // runs faster than the spacing, the buffer would then never grow at all —
+    // one point, forever. The invariant: only a DUE sample advances the clock.
+    const out = existing.slice()
+    out[out.length - 1] = {
+      ...last, lat: tp.lat, lng: tp.lng, alt: tp.alt, hdg: tp.hdg, spd: tp.spd, vs: tp.vs,
+    }
+    return out
+  }
+
+  if (existing.length >= TRAIL_MAX_POINTS) {
+    return [...existing.slice(existing.length - TRAIL_MAX_POINTS + 1), tp]
+  }
+  return [...existing, tp]
+}
+
 export function sampleTrailUntil(
   track: TrackPoint[],
   scrubT: number,
