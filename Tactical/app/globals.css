@@ -541,23 +541,23 @@ samp,
 }
 
 /* ── Helicopter rotor ───────────────────────────────────────────────────── */
-/* The translucent disc drawn in lib/markers.ts is what reads as "spinning
-   rotor" in any frozen frame; this sweep adds the visible movement, like the
-   rotor of the little pictogram chopper. It is faint and never leaves the disc,
-   so a stopped frame still looks like a rotor and never like a stray line
-   across the icon. The cross's bounding-box centre IS the rotor hub, so
-   `center` is the correct origin — no magic pixel values to drift. */
-.vp-rotor-sweep {
+/* Spins the blade group inside the rotary marker. The blades are drawn as part
+   of the icon (they are the signifier of a rotorcraft), so this only rotates
+   them about the hub — the marker's own heading rotation happens on the parent
+   `.vp-ac-rot`, and the two compose without interfering. The blades' bounding
+   box is centred on the hub, so `center` is the correct origin: no magic pixel
+   values to drift when the art changes. */
+.vp-rotor {
   transform-box: fill-box;
   transform-origin: center;
-  animation: vp-rotor-spin 0.55s linear infinite;
+  animation: vp-rotor-spin 0.38s linear infinite;
 }
 @keyframes vp-rotor-spin {
   to { transform: rotate(360deg); }
 }
-/* Reduced motion: the static disc still says "rotor", so nothing is lost. */
+/* Reduced motion: the blades still read as a rotor when static, so nothing is lost. */
 @media (prefers-reduced-motion: reduce) {
-  .vp-rotor-sweep { animation: none; }
+  .vp-rotor { animation: none; }
 }
 
 /* ── Floating callouts above map markers ────────────────────────────── */
