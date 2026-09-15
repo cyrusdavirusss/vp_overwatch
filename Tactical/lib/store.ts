@@ -70,6 +70,33 @@ function pushSortie(s: StoreState, entry: SortieEntry): void {
 }
 
 /**
+ * Close EVERY open sortie for one airframe, not just the first.
+ *
+ * Both close paths used `findIndex(...)`, which closes only the first match — so
+ * whenever a second sortie had been opened for the same hex, the earlier one
+ * stayed open forever. Those orphans accumulated badly: the King Air had five
+ * open at once and records spanning up to 698 hours. Because
+ * computeHistoricalAverage averaged them, "est. return" read 306 hours, and a
+ * restarted sortie reset the fuel clock mid-flight (the tank is integrated from
+ * sortie start).
+ *
+ * Returns how many were closed, so callers can skip landing notifications when
+ * there was nothing open.
+ */
+function closeOpenSorties(s: StoreState, hex: string, now: number, maxAlt?: number): number {
+  let closed = 0
+  for (const entry of s.sortieHistory) {
+    if (entry.hex !== hex || entry.status !== 'active') continue
+    entry.endTime = now
+    entry.durationSeconds = Math.round((now - entry.startTime) / 1000)
+    if (maxAlt !== undefined) entry.maxAltitude = maxAlt
+    entry.status = 'landed'
+    closed++
+  }
+  return closed
+}
+
+/**
  * Load disk snapshot into a fresh store. Called once on module init.
  * Restores sortie history, aircraft continuity, and unexpired reports.
  */
@@ -572,11 +599,9 @@ function markLandedPolice(ac: Aircraft, now: number): void {
   const idx = s.sortieHistory.findIndex((e) => e.hex === ac.hex && e.status === 'active')
   if (idx !== -1) {
     const entry = s.sortieHistory[idx]
-    entry.endTime = now
-    entry.durationSeconds = Math.round((now - entry.startTime) / 1000)
-    entry.maxAltitude = s.sortieMaxAlt.get(ac.hex) ?? ac.altitude
-    entry.status = 'landed'
-    notifyLand(s.notifState, ac.hex, ac.callsign || POLICE_CALLSIGNS[ac.hex] || '', entry.durationSeconds, aircraftToBrief(ac)).catch((e) =>
+    const durationSeconds = Math.round((now - entry.startTime) / 1000)
+    closeOpenSorties(s, ac.hex, now, s.sortieMaxAlt.get(ac.hex) ?? ac.altitude)
+    notifyLand(s.notifState, ac.hex, ac.callsign || POLICE_CALLSIGNS[ac.hex] || '', durationSeconds, aircraftToBrief(ac)).catch((e) =>
       console.warn('[notif] land error:', e?.message)
     )
   }
@@ -687,10 +712,17 @@ function pruneSilentKnown(now: number): void {
  * Uses the last 10 landed sorties for this hex. Falls back to the
  * hardcoded role default if no sortie history exists yet.
  */
+// A sortie longer than this is a missed-landing artefact, not a flight — the
+// longest real mission in this fleet is a King Air 350ER patrol (~12 h).
+// Records of up to 698 h accumulated before closeOpenSorties() existed, and
+// averaging them made "est. return" report 306 hours.
+const MAX_PLAUSIBLE_SORTIE_SECONDS = 20 * 3600
+
 function computeHistoricalAverage(hex: string, roleDefault: number): number {
   const s = getState()
   const completed = s.sortieHistory
-    .filter((e) => e.hex === hex && e.status === 'landed' && e.durationSeconds > 60)
+    .filter((e) => e.hex === hex && e.status === 'landed'
+      && e.durationSeconds > 60 && e.durationSeconds <= MAX_PLAUSIBLE_SORTIE_SECONDS)
     .slice(-10)
   if (completed.length === 0) return roleDefault
   return Math.round(
@@ -897,15 +929,8 @@ async function pollOpenSky(): Promise<void> {
       if (alt <= LANDED_ALT_FT && speed <= LANDED_SPD_KT) {
         if (existing && existing.isActive) {
           existing.isActive = false
-          const activeIdx = s.sortieHistory.findIndex((e) => e.hex === hex && e.status === 'active')
-          if (activeIdx !== -1) {
-            const entry = s.sortieHistory[activeIdx]
-            entry.endTime = now
-            entry.durationSeconds = Math.round((now - entry.startTime) / 1000)
-            entry.maxAltitude = s.sortieMaxAlt.get(hex) ?? existing.altitude
-            entry.status = 'landed'
-            saveToDisk()
-          }
+          closeOpenSorties(s, hex, now, s.sortieMaxAlt.get(hex) ?? existing.altitude)
+          saveToDisk()
         }
         if (existing && !existing.landed) resetToDormant(existing)
         continue
@@ -991,6 +1016,8 @@ async function pollOpenSky(): Promise<void> {
           maxAltitude: alt,
           status: 'active',
         }
+        // Close anything still open for this airframe before opening a new one.
+        closeOpenSorties(s, hex, now, alt)
         pushSortie(s, entry)
         s.sortieMaxAlt.set(hex, alt)
         saveToDisk()
@@ -1177,6 +1204,8 @@ async function pollFastPolice(): Promise<void> {
           maxAltitude: alt,
           status: 'active',
         }
+        // One open sortie per airframe: close the previous before starting this one.
+        closeOpenSorties(s, hex, sortieStartTime, alt)
         pushSortie(s, entry)
         s.sortieMaxAlt.set(hex, alt)
         if (existing) existing.startTime = sortieStartTime
