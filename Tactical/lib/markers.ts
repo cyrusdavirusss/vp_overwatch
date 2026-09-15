@@ -4,11 +4,13 @@
 // dark map, which is the size that actually matters. Two different conventions,
 // chosen because they were tested at that size rather than guessed:
 //
-//   rotary     PROFILE chopper (side-on) with a blurred rotor disc on the mast.
-//              A top-down helicopter was tried first and reads as a crosshair or
-//              a drone at 36 px — a profile silhouette is what people recognise.
-//              Being a profile, it does NOT rotate to heading (see map.tsx); the
-//              predictive vector, trail and callout carry direction instead.
+//   rotary     TOP-VIEW helicopter with a spinning four-blade rotor, long tail
+//              boom and an offset tail rotor. A top-down view was tried, then
+//              abandoned for a profile view, then returned to once a real
+//              reference was available: the earlier top-down attempt failed only
+//              because it was drawn as a bare cross of blades (a crosshair at
+//              36 px), not because top-down is wrong. The boom supplies the
+//              asymmetry that fixes it. Rotates to heading; blades spin.
 //   fixed wing TOP-DOWN silhouette, which stays unambiguous at 36 px and is
 //              rotated to heading by the marker element.
 //
@@ -29,33 +31,50 @@ export const INK0 = '#0A0B0D' // marker base fill
 // ── Aircraft silhouettes ────────────────────────────────────────────────────
 
 /**
- * Side-on helicopter, nose pointing right, with a motion-blurred rotor disc.
+ * Top-view helicopter, nose up: spun four-blade rotor, stout tail boom, offset
+ * two-blade tail rotor.
  *
- * The rotor is a DISC, not a bar: a bar frozen mid-rotation reads as a stray
- * diagonal line across the icon ("a beam glued to the roof drawn at a bizarre
- * angle"), whereas a translucent disc reads as rotation in every frame. The
- * faint sweep inside it (`.vp-rotor-sweep`, animated in globals.css) adds the
- * movement without ever escaping the disc outline.
+ * Modelled on a real top-down helicopter render (blunt cabin forward, long boom
+ * aft, radial blade star over the hub). Every iteration was checked at 36 px —
+ * the size it is actually drawn — and three plausible-looking ideas failed
+ * there, which is the whole reason this comment exists:
+ *
+ *   - a translucent "motion-blur disc" instead of blades: a flat blob, and the
+ *     blades are the actual signifier of a rotorcraft;
+ *   - a circular rotor-disc ring around the blades: reads as a RETICLE (worst
+ *     score of the set) and competes with the body;
+ *   - thick solid blades rooted at the hub: the white mass swallows the cabin
+ *     and the result reads as a shuriken/quadcopter.
+ *
+ * What works: SLENDER tapered blades, faint GHOST blade positions at +30 and
+ * +60 degrees so any frozen frame shows rotation instead of a static cross, and
+ * a boom stout enough to anchor the silhouette at small size. The two-blade tail
+ * rotor replaces an earlier circle-with-a-cross, which read as a target node.
+ *
+ * Because the shape is top-down the marker still rotates to heading (map.tsx);
+ * the spinning blade group inside it turns independently of that.
  */
 function rotarySVG(size: number): string {
+  const PALE = '#e6f9ff' // blades + hub: near-white, legible over body AND map
+  const BODY2 = '#0086ab' // boom / sponsons: darker cyan for depth
+  const BLADE = 'M11.5 1.6 l1.0 0 l0 4.2 l1.35 0 l0 11.4 l-1.35 0 l0 4.2 l-1.0 0 z'
+  const bladeAt = (a: number, op: number) =>
+    `<path transform="rotate(${a} 12 12)" d="${BLADE}" fill="${PALE}" opacity="${op}"></path>`
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
-  <path d="M9.8 12.5 l-5.9 0.7 v1.4 l5.9 -0.55 z" fill="${AMBER}"></path>
-  <path d="M3.9 12.6 l0 -2.3 l1.4 0.5 l0 2.4 z" fill="${AMBER}"></path>
-  <ellipse cx="3.5" cy="11.5" rx="0.6" ry="1.55" fill="${AMBER}" opacity="0.55"></ellipse>
-  <path d="M9.4 10.1 c2.0 -0.45 4.1 -0.35 5.9 0.5 c1.5 0.7 2.4 1.7 2.5 2.6 c0.05 0.9 -0.75 1.65 -2.2 2.05 c-1.6 0.45 -3.5 0.45 -5.9 0.05 z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.35"></path>
-  <path d="M14 10.5 l3.6 2.2 l-3.6 1.5 z" fill="${INK0}" opacity="0.85"></path>
-  <path d="M12.6 10.1 v-1.1" stroke="${AMBER}" stroke-width="0.85"></path>
-  <ellipse cx="12.4" cy="8.4" rx="10.3" ry="1.75" fill="${AMBER}" opacity="0.16"></ellipse>
-  <ellipse cx="12.4" cy="8.4" rx="9.6" ry="1.4" fill="${AMBER}" opacity="0.28"></ellipse>
-  <g class="vp-rotor-sweep">
-    <path d="M4.4 8.0 h16 a0.4 0.4 0 0 1 0 0.8 h-16 a0.4 0.4 0 0 1 0 -0.8 z" fill="${AMBER}" opacity="0.9"></path>
-    <path d="M12.0 5.6 v5.6 a0.4 0.4 0 0 1 -0.8 0 v-5.6 a0.4 0.4 0 0 1 0.8 0 z" fill="${AMBER}" opacity="0.5"></path>
+  <path d="M12 3.2 c2.25 0 3.45 1.7 3.65 3.5 l0.4 4.6 c0.05 0.95 -0.8 1.65 -1.75 1.75 l-4.6 0 c-0.95 -0.1 -1.8 -0.8 -1.75 -1.75 l0.4 -4.6 c0.2 -1.8 1.4 -3.5 3.65 -3.5 z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.45"></path>
+  <path d="M12 3.9 c1.65 0 2.6 1.5 2.75 3.1 l0.1 1.4 l-5.7 0 l0.1 -1.4 c0.15 -1.6 1.1 -3.1 2.75 -3.1 z" fill="${INK0}" opacity="0.72"></path>
+  <path d="M10.35 13.1 l3.3 0 l-0.35 7.5 l-2.6 0 z" fill="${BODY2}" stroke="${INK0}" stroke-width="0.32"></path>
+  <path d="M8.3 11.2 l-2.8 0.7 l0 1.35 l2.8 0.45 z" fill="${BODY2}" opacity="0.95"></path>
+  <path d="M15.7 11.2 l2.8 0.7 l0 1.35 l-2.8 0.45 z" fill="${BODY2}" opacity="0.95"></path>
+  <circle cx="12" cy="21.5" r="0.55" fill="${PALE}"></circle>
+  <path d="M12 19.6 l0 3.8 M10.1 21.5 l3.8 0" stroke="${PALE}" stroke-width="0.75" stroke-linecap="round" opacity="0.9"></path>
+  ${bladeAt(30, 0.22)}${bladeAt(120, 0.22)}${bladeAt(210, 0.22)}${bladeAt(300, 0.22)}
+  ${bladeAt(60, 0.13)}${bladeAt(150, 0.13)}${bladeAt(240, 0.13)}${bladeAt(330, 0.13)}
+  <g class="vp-rotor">
+    ${bladeAt(0, 1)}${bladeAt(90, 1)}${bladeAt(180, 1)}${bladeAt(270, 1)}
   </g>
-  <ellipse cx="12.4" cy="8.4" rx="9.6" ry="0.42" fill="${AMBER}" opacity="0.5"></ellipse>
-  <circle cx="12.4" cy="8.4" r="0.8" fill="${AMBER}"></circle>
-  <circle cx="12.4" cy="8.4" r="0.3" fill="${INK0}"></circle>
-  <path d="M8.4 17.5 h8.2" stroke="${AMBER}" stroke-width="1.15" stroke-linecap="round"></path>
-  <path d="M10.3 16.1 v1.4 M14.8 16.1 v1.4" stroke="${AMBER}" stroke-width="0.75"></path>
+  <circle cx="12" cy="12" r="2.1" fill="${INK0}" opacity="0.65"></circle>
+  <circle cx="12" cy="12" r="1.45" fill="${PALE}"></circle>
 </svg>`
 }
 
