@@ -37,37 +37,41 @@ export function trackedDescriptions(): Map<string, string> {
   return new Map(TRACKED_AIRCRAFT.map((a) => [a.registration, a.description]))
 }
 
-/**
- * The name an alert SPEAKS or WRITES for a registration: codename first
- * ("Black Bird"), then callsign (POL32), then the registration, then a neutral
- * phrase. Callers must use this rather than the bare registration or hex.
- */
-export function announceNameFor(registration: string | null | undefined): string {
-  if (!registration) return 'A tracked aircraft'
-  const reg = registration.trim().toUpperCase()
-  const a = TRACKED_AIRCRAFT.find((x) => x.registration === reg)
-  return a?.codename || a?.callsign || reg
-}
-
-/** Same, keyed by the public Mode-S hex — for call sites that only carry a hex. */
-export function announceNameForHex(hex: string | null | undefined): string {
-  if (!hex) return 'A tracked aircraft'
-  const h = hex.trim().toLowerCase()
-  const a = TRACKED_AIRCRAFT.find((x) => (x.hex ?? '').toLowerCase() === h)
-  return a?.codename || a?.callsign || a?.registration || h.toUpperCase()
-}
-
-/** The codename alone, or null when this aircraft has not been named yet. */
-export function codenameFor(registration: string | null | undefined): string | null {
+/** Codename alone ("Black Bird"), or null when this aircraft is not named yet. */
+function codenameFor(registration: string | null | undefined): string | null {
   if (!registration) return null
   return TRACKED_AIRCRAFT.find((a) => a.registration === registration.trim().toUpperCase())?.codename ?? null
 }
 
-/** The codename alone, keyed by hex; null when unnamed. */
-export function codenameForHex(hex: string | null | undefined): string | null {
-  if (!hex) return null
+/** Public callsign ("POL31"), or null when unknown. */
+function callsignFor(registration: string | null | undefined): string | null {
+  if (!registration) return null
+  return TRACKED_AIRCRAFT.find((a) => a.registration === registration.trim().toUpperCase())?.callsign ?? null
+}
+
+/**
+ * The full label an alert speaks or writes: codename AND callsign together when
+ * both are known — "Black Bird POL31 is airborne." — so a listener who does not
+ * recognise the codename can still match it to the callsign they do know.
+ *
+ * Never duplicates a value when only one exists: POL30 has no codename yet, so
+ * it reads "POL30 is airborne.", not "POL30 POL30 is airborne."
+ */
+export function announceLabelFor(registration: string | null | undefined): string {
+  const name = codenameFor(registration)
+  const callsign = callsignFor(registration)
+  if (name && callsign) return `${name} ${callsign}`
+  return name || callsign || (registration ? registration.trim().toUpperCase() : 'A tracked aircraft')
+}
+
+/** announceLabelFor keyed by hex, for call sites that only carry a hex. */
+export function announceLabelForHex(hex: string | null | undefined): string {
+  if (!hex) return 'A tracked aircraft'
   const h = hex.trim().toLowerCase()
-  return TRACKED_AIRCRAFT.find((x) => (x.hex ?? '').toLowerCase() === h)?.codename ?? null
+  const a = TRACKED_AIRCRAFT.find((x) => (x.hex ?? '').toLowerCase() === h)
+  if (!a) return h.toUpperCase()
+  if (a.codename && a.callsign) return `${a.codename} ${a.callsign}`
+  return a.codename || a.callsign || a.registration
 }
 
 export function typeLabelFor(registration: string): string {

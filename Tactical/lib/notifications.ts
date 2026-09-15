@@ -9,7 +9,7 @@
  * All notification events are recorded for audit regardless of delivery method.
  */
 
-import { codenameForHex } from '@/lib/adsb/config'
+import { announceLabelForHex } from '@/lib/adsb/config'
 
 import {
   hermesEnabled,
@@ -79,16 +79,16 @@ export interface NotificationEvent {
 // ── Message Templates ─────────────────────────────────────────────────────
 
 function buildTakeoffMessage(hex: string, callsign: string, alt: number): string {
-  return `Attention. ${codenameForHex(hex) || callsign || hex} is airborne. Altitude ${alt} feet. Monitoring active.`
+  return `Attention. ${announceLabelForHex(hex) || callsign || hex} is airborne. Altitude ${alt} feet. Monitoring active.`
 }
 
 function buildStealthMessage(hex: string, callsign: string): string {
-  return `Attention. ${codenameForHex(hex) || callsign || hex} has gone silent. Last position no longer broadcasting. Remain vigilant.`
+  return `Attention. ${announceLabelForHex(hex) || callsign || hex} has gone silent. Last position no longer broadcasting. Remain vigilant.`
 }
 
 function buildLandMessage(hex: string, callsign: string, durationMin: number): string {
   const mins = Math.round(durationMin)
-  return `Attention. ${codenameForHex(hex) || callsign || hex} has landed after ${mins} minutes airborne. All clear.`
+  return `Attention. ${announceLabelForHex(hex) || callsign || hex} has landed after ${mins} minutes airborne. All clear.`
 }
 
 // ── Twilio Integration ────────────────────────────────────────────────────
