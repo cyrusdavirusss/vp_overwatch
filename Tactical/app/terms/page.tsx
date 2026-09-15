@@ -54,22 +54,25 @@ export default function TermsPage() {
         <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderLeft: '3px solid #3b82f6', borderRadius: 6, padding: '14px 18px', background: 'rgba(59,130,246,0.06)', margin: '18px 0 6px' }}>
           <p style={{ ...P, margin: 0, color: 'rgba(255,255,255,0.85)' }}>
             <strong>In short:</strong> this is an independent community site that republishes publicly broadcast
-            aircraft and traffic data so people in Victoria can see what police aircraft are doing above them.
-            It is <strong>not affiliated with Victoria Police or any government agency</strong>, its data
-            <strong> can be wrong or delayed</strong>, and it <strong>must not be used for any unlawful purpose</strong> —
-            including harassing anyone, or obstructing or evading police operations.
+            aircraft and traffic data, so the Victorian community can see where police are operating — in the air
+            and on the ground — and stay well clear of it. It is <strong>not affiliated with Victoria Police or any
+            government agency</strong>, its data <strong>can be wrong or delayed</strong>, and it
+            <strong>must not be used for any unlawful purpose</strong> — including harassing anyone, or obstructing or
+            evading police operations.
           </p>
         </div>
 
         <Section title="1. What this site is — and is not">
           <p style={P}>
             VP-Overwatch is an independent, non-commercial community project. It displays information that is already
-            publicly available — aircraft positions broadcast on the open ADS-B network, and publicly reported road and
-            traffic events — so that residents of Victoria can follow police aviation activity in plain terms.
+            publicly available — aircraft positions broadcast on the open ADS-B network, and publicly reported road,
+            traffic and ground activity — so that the wider Victorian community can see where police are operating,
+            whether from the air or on the ground.
           </p>
           <p style={P}>
-            Its purpose is <strong>public awareness and community information</strong>. It is not an operational,
-            investigative, or enforcement tool, and it must not be used as one.
+            Its purpose is <strong>public awareness and public safety</strong>. Knowing that an operation is underway
+            nearby helps people stay clear of it, avoid finding themselves in the middle of it, and avoid interfering
+            with it. It is not an operational, investigative, or enforcement tool, and it must not be used as one.
           </p>
         </Section>
 
@@ -115,6 +118,11 @@ export default function TermsPage() {
             <li style={LI}>to scrape, bulk-download, resell, or redistribute the service or its data without permission</li>
             <li style={LI}>to probe, overload, or attempt to bypass the security, authentication, or rate limits of this site</li>
           </ul>
+          <p style={P}>
+            The purpose of this site is to help people <strong>stay clear of</strong> police operations — which is the
+            opposite of helping anyone avoid, obstruct, or evade them. Using it that way breaches these terms and may
+            itself be an offence.
+          </p>
           <p style={P}>
             Access is rate-limited and may be limited, suspended, or blocked at any time and without notice, at the
             operator&apos;s discretion.
