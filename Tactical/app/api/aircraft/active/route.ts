@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   const store = getStore()
   const aircraft = await store.getAircraft()
-  // Resolve the display name server-side ("Black Bird POL31") so the map shows
+  // Resolve the display name server-side ("King Air POL35") so the map shows
   // the same name the alerts speak, and the client needs no copy of the roster.
   const labelled = aircraft.map((a: { registration?: string }) => ({
     ...a,

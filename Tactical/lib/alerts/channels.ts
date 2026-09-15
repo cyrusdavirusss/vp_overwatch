@@ -115,7 +115,7 @@ function escapeXml(s: string): string {
 }
 
 /**
- * Voice announcements repeat the line once ("Black Bird is airborne. Black Bird
+ * Voice announcements repeat the line once ("King Air is airborne. King Air
  * is airborne."). A spoken call is easy to half-hear, so announcing twice is how
  * these are normally delivered — but push and text stay single, because a
  * doubled sentence reads like a bug on a screen.

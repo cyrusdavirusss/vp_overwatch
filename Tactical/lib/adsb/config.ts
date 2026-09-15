@@ -14,7 +14,7 @@ export interface TrackedAircraftDef {
    *  ADSB_HEX_<REG>. These are public broadcast identifiers, not secrets. */
   hex?: string
   callsign?: string
-  /** Internal codename used in alert wording ("Black Bird is airborne.").
+  /** Internal codename used in alert wording ("King Air is airborne.").
    *  When absent, alerts fall back to the callsign, then the registration —
    *  never the raw hex, which is unreadable when spoken aloud. */
   codename?: string
@@ -24,7 +24,7 @@ export interface TrackedAircraftDef {
  *  Mode-S hex codes (used directly by the OpenSky provider). */
 export const TRACKED_AIRCRAFT: TrackedAircraftDef[] = [
   { registration: 'VH-PVO', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef2', callsign: 'POL30' },
-  { registration: 'VH-PVQ', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef4', callsign: 'POL31', codename: 'Black Bird' },
+  { registration: 'VH-PVQ', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef4', callsign: 'POL31' },
   { registration: 'VH-PVR', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef5', callsign: 'POL32' },
   { registration: 'VH-PVE', description: 'Beechcraft King Air 350ER', typeLabel: 'King Air 350ER', hex: '7c4ee8', callsign: 'POL35', codename: 'King Air' },
 ]
@@ -37,7 +37,7 @@ export function trackedDescriptions(): Map<string, string> {
   return new Map(TRACKED_AIRCRAFT.map((a) => [a.registration, a.description]))
 }
 
-/** Codename alone ("Black Bird"), or null when this aircraft is not named yet. */
+/** Codename alone ("King Air"), or null when this aircraft is not named yet. */
 function codenameFor(registration: string | null | undefined): string | null {
   if (!registration) return null
   return TRACKED_AIRCRAFT.find((a) => a.registration === registration.trim().toUpperCase())?.codename ?? null
@@ -51,7 +51,7 @@ function callsignFor(registration: string | null | undefined): string | null {
 
 /**
  * The full label an alert speaks or writes: codename AND callsign together when
- * both are known — "Black Bird POL31 is airborne." — so a listener who does not
+ * both are known — "King Air POL35 is airborne." — so a listener who does not
  * recognise the codename can still match it to the callsign they do know.
  *
  * Never duplicates a value when only one exists: POL30 has no codename yet, so
