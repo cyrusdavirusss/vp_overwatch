@@ -14,13 +14,17 @@ export interface TrackedAircraftDef {
    *  ADSB_HEX_<REG>. These are public broadcast identifiers, not secrets. */
   hex?: string
   callsign?: string
+  /** Internal codename used in alert wording ("Black Bird is airborne.").
+   *  When absent, alerts fall back to the callsign, then the registration —
+   *  never the raw hex, which is unreadable when spoken aloud. */
+  codename?: string
 }
 
 /** Victoria Police Air Wing — the four tracked aircraft, with their public
  *  Mode-S hex codes (used directly by the OpenSky provider). */
 export const TRACKED_AIRCRAFT: TrackedAircraftDef[] = [
   { registration: 'VH-PVO', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef2', callsign: 'POL30' },
-  { registration: 'VH-PVQ', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef4', callsign: 'POL31' },
+  { registration: 'VH-PVQ', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef4', callsign: 'POL31', codename: 'Black Bird' },
   { registration: 'VH-PVR', description: 'Leonardo AW139 helicopter', typeLabel: 'AW139 helicopter', hex: '7c4ef5', callsign: 'POL32' },
   { registration: 'VH-PVE', description: 'Beechcraft King Air 350ER', typeLabel: 'King Air 350ER', hex: '7c4ee8', callsign: 'POL35' },
 ]
@@ -31,6 +35,39 @@ export function trackedRegistrations(): string[] {
 
 export function trackedDescriptions(): Map<string, string> {
   return new Map(TRACKED_AIRCRAFT.map((a) => [a.registration, a.description]))
+}
+
+/**
+ * The name an alert SPEAKS or WRITES for a registration: codename first
+ * ("Black Bird"), then callsign (POL32), then the registration, then a neutral
+ * phrase. Callers must use this rather than the bare registration or hex.
+ */
+export function announceNameFor(registration: string | null | undefined): string {
+  if (!registration) return 'A tracked aircraft'
+  const reg = registration.trim().toUpperCase()
+  const a = TRACKED_AIRCRAFT.find((x) => x.registration === reg)
+  return a?.codename || a?.callsign || reg
+}
+
+/** Same, keyed by the public Mode-S hex — for call sites that only carry a hex. */
+export function announceNameForHex(hex: string | null | undefined): string {
+  if (!hex) return 'A tracked aircraft'
+  const h = hex.trim().toLowerCase()
+  const a = TRACKED_AIRCRAFT.find((x) => (x.hex ?? '').toLowerCase() === h)
+  return a?.codename || a?.callsign || a?.registration || h.toUpperCase()
+}
+
+/** The codename alone, or null when this aircraft has not been named yet. */
+export function codenameFor(registration: string | null | undefined): string | null {
+  if (!registration) return null
+  return TRACKED_AIRCRAFT.find((a) => a.registration === registration.trim().toUpperCase())?.codename ?? null
+}
+
+/** The codename alone, keyed by hex; null when unnamed. */
+export function codenameForHex(hex: string | null | undefined): string | null {
+  if (!hex) return null
+  const h = hex.trim().toLowerCase()
+  return TRACKED_AIRCRAFT.find((x) => (x.hex ?? '').toLowerCase() === h)?.codename ?? null
 }
 
 export function typeLabelFor(registration: string): string {

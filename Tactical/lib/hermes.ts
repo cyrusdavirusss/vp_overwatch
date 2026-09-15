@@ -1,3 +1,5 @@
+import { codenameFor } from './adsb/config.ts'
+
 /**
  * Hermes — Bland AI voice-alert transport for VP-Overwatch
  *
@@ -53,9 +55,11 @@ function fuelMinutesRemaining(b: AircraftBrief): number {
   return Math.max(0, Math.round((b.fuelRemainingPercent / 100) * b.fuelEnduranceMinutes))
 }
 
-/** Human-readable aircraft id: prefer callsign, fall back to registration. */
+/** Human-readable aircraft id: codename first ("Black Bird"), then callsign,
+ *  then registration. A hex or registration read aloud means nothing to a
+ *  listener. */
 function aircraftLabel(b: AircraftBrief): string {
-  return b.callsign?.trim() || b.registration || 'an unidentified registry aircraft'
+  return codenameFor(b.registration) || b.callsign?.trim() || b.registration || 'an unidentified registry aircraft'
 }
 
 /**

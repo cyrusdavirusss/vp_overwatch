@@ -114,11 +114,23 @@ function escapeXml(s: string): string {
   return s.replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c] as string))
 }
 
+/**
+ * Voice announcements repeat the line once ("Black Bird is airborne. Black Bird
+ * is airborne."). A spoken call is easy to half-hear, so announcing twice is how
+ * these are normally delivered — but push and text stay single, because a
+ * doubled sentence reads like a bug on a screen.
+ */
+export function spokenMessage(message: string): string {
+  const clean = message.trim()
+  if (!clean) return clean
+  return `${clean} ${clean}`
+}
+
 /** Place a call that reads the message aloud in an Australian voice. */
 export async function sendCall(to: string | null, message: string): Promise<DeliveryStatus> {
   if (!twilioConfigured()) return 'disabled'
   if (!to) return 'failed'
-  const twiml = `<Response><Say voice="alice" language="en-AU">${escapeXml(message)}</Say></Response>`
+  const twiml = `<Response><Say voice="alice" language="en-AU">${escapeXml(spokenMessage(message))}</Say></Response>`
   return twilioPost('Calls.json', { To: to, From: process.env.TWILIO_PHONE_NUMBER as string, Twiml: twiml })
 }
 
