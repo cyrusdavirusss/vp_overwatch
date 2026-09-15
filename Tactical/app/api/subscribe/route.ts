@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/store'
+import { rateLimit, rateLimitIp, clientIp } from '@/lib/auth/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +13,13 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(req: NextRequest) {
   try {
+    // Anonymous form post — the most obvious spam target on a public site.
+    const ipRl = rateLimitIp(clientIp(req.headers), 'subscribe', 5, 600)
+    const globalRl = rateLimit('subscribe:global', 200, 3600)
+    if (!ipRl.allowed || !globalRl.allowed) {
+      return NextResponse.json({ error: 'rate_limited' },
+        { status: 429, headers: { 'Retry-After': String(Math.max(ipRl.retryAfterSec, globalRl.retryAfterSec)) } })
+    }
     const body = await req.json()
     const phone = String(body.phone || '').trim()
     if (!phone) {
