@@ -3,11 +3,40 @@
  * VP-Overwatch — Waze POLICE relay via WazeAPI.com (managed API).
  *
  * WazeAPI handles Cloudflare/bot-detection server-side, so this is a plain,
- * reliable HTTP client — no browser, no scraping, no babysitting. Pay-as-you-go
- * is billed per QUERY (per tile), credits never expire, so cost is predictable.
+ * reliable HTTP client — no browser, no scraping, no babysitting. Billing is
+ * per QUERY (per tile).
+ *
+ * BILLING / QUOTA (from their docs, verified against live error headers):
+ *   - Every request that passes auth + quota is metered, INCLUDING validation
+ *     errors and upstream 5xx. 429s and unknown-endpoint 404s are never billed.
+ *   - Responses carry X-Quota-Limit / X-Quota-Remaining / X-Quota-Reset and
+ *     X-RateLimit-* — this relay logs them every tick so you see the burn-down
+ *     instead of discovering exhaustion hours later.
+ *   - A 429 with code=quota_exceeded does NOT clear on retry. Retrying is
+ *     pointless noise, so this relay stops polling for a while and says so once.
+ *
+ * POLICE FILTERING — read this before trusting it:
+ *   Their endpoint docs (wazeapi.com/docs/area-alerts) advertise an optional
+ *   `filter` query param, e.g. filter=["POLICE"]. Reports from real use say the
+ *   live API ignores or rejects it, so we do BOTH:
+ *     1. send `filter` (configurable), and
+ *     2. log the type breakdown of every response, which is the only honest way
+ *        to tell whether the filter is actually honoured.
+ *   If the API answers 400 to a filtered request, the filter is switched off
+ *   (once, loudly) and we fall back to fetching all types and filtering locally
+ *   — which is what has always happened, so nothing regresses.
+ *   If it accepts the filter but the breakdown still shows ACCIDENT/HAZARD/JAM,
+ *   then the param was ignored: the docs are wrong, and the log proves it.
+ *
+ * RESULT CAP: `limit` defaults to 500 (docs). Truncation matters because the cap
+ * counts ALL alert types — in a dense box, police alerts can be squeezed out
+ * entirely. This relay compares the response's `count` against what came back
+ * and warns when a tile looks truncated.
  *
  * Env (.env): WAZEAPI_KEY, API_URL (the app), RELAY_SECRET (== WAZE_RELAY_SECRET),
- *             POLL_SECONDS (default 1800 = 30 min, cost-safe), optional WAZEAPI_TILES.
+ *   POLL_SECONDS (default 1800), optional WAZEAPI_TILES, WAZEAPI_FILTER
+ *   (JSON array, default ["POLICE"], set to empty to send no filter),
+ *   WAZEAPI_LIMIT (default 500), WAZEAPI_BASE, WAZEAPI_COUNTRY.
  *   Run:  node relay-wazeapi.mjs        (loop)   |   --once
  */
 import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
@@ -26,16 +55,28 @@ const WAZEAPI_KEY = process.env.WAZEAPI_KEY || '';
 const WAZEAPI_BASE = (process.env.WAZEAPI_BASE || 'https://api.wazeapi.com/v1').replace(/\/+$/,'');
 const WAZEAPI_COUNTRY = process.env.WAZEAPI_COUNTRY || 'aus';
 const POLL_SECONDS = Math.max(60, Number(process.env.POLL_SECONDS)||1800);
+const WAZEAPI_LIMIT = Math.max(1, Number(process.env.WAZEAPI_LIMIT) || 500);
 if (!API_URL)     { console.error('Missing API_URL (e.g. http://127.0.0.1:3100)'); process.exit(1); }
 if (!RELAY_SECRET){ console.error('Missing RELAY_SECRET (must match WAZE_RELAY_SECRET on the app)'); process.exit(1); }
 if (!WAZEAPI_KEY) { console.error('Missing WAZEAPI_KEY — get one free at https://wazeapi.com'); process.exit(1); }
+
+/* WAZEAPI_FILTER: JSON array of alert types to request, or empty for none.
+   Default ["POLICE"] — the server-side filter their docs promise. */
+let FILTER = ['POLICE'];
+if (process.env.WAZEAPI_FILTER !== undefined) {
+  const raw = process.env.WAZEAPI_FILTER.trim();
+  if (!raw) FILTER = [];
+  else { try { const p = JSON.parse(raw); FILTER = Array.isArray(p) ? p : [String(p)]; }
+         catch { console.warn(`[wazeapi] bad WAZEAPI_FILTER JSON (${raw}) — using ["POLICE"]`); } }
+}
+let filterInPlay = FILTER.length > 0;   // flipped off permanently if the API 400s on it
 
 /* Victoria tiles as [name, bottom-left "lat,lng", top-right "lat,lng"].
    Per-query billing → fewer tiles = cheaper. Override with WAZEAPI_TILES
    (JSON: [["name","blat,blng","tlat,tlng"],...]). */
 const DEFAULT_TILES = [
-  // Inner Melbourne + south-east corridor. Tiles kept small so none hit
-  // WazeAPI's 200-alert/query cap (which would silently truncate police).
+  // Inner Melbourne + south-east corridor. Kept small: the result cap counts ALL
+  // alert types, so a dense box can push POLICE out of the response entirely.
   ['Inner City', '-37.85,144.88', '-37.75,145.05'],
   ['Inner SE',   '-37.95,144.98', '-37.82,145.15'],
   ['SE Mid',     '-38.00,145.10', '-37.87,145.30'],
@@ -47,23 +88,82 @@ try { if (process.env.WAZEAPI_TILES) TILES = JSON.parse(process.env.WAZEAPI_TILE
 const sleep = (ms) => new Promise(r=>setTimeout(r,ms));
 const isPolice = (t) => String(t||'').toUpperCase().startsWith('POLICE');
 
-async function fetchTile([name, bl, tr], attempt=1) {
-  const url = `${WAZEAPI_BASE}/alerts?bottom-left=${encodeURIComponent(bl)}&top-right=${encodeURIComponent(tr)}`;
+// ── quota bookkeeping, surfaced in the logs ────────────────────────────────
+const quota = { limit: null, remaining: null, reset: null, rateLimit: null, rateRemaining: null };
+function readQuotaHeaders(h) {
+  const num = (v) => (v == null || v === '' ? null : Number(v));
+  const q = num(h.get('x-quota-limit'));            if (q !== null) quota.limit = q;
+  const r = num(h.get('x-quota-remaining'));        if (r !== null) quota.remaining = r;
+  const rr = num(h.get('x-ratelimit-remaining'));   if (rr !== null) quota.rateRemaining = rr;
+  const rl = num(h.get('x-ratelimit-limit'));       if (rl !== null) quota.rateLimit = rl;
+  const rs = h.get('x-quota-reset');                if (rs) quota.reset = rs;
+}
+const quotaSummary = () =>
+  quota.limit === null && quota.remaining === null
+    ? 'quota: unknown (no X-Quota-* headers seen)'
+    : `quota: ${quota.remaining ?? '?'}/${quota.limit ?? '?'} left${quota.reset ? ` (resets ${quota.reset})` : ''}`;
+
+/** A quota error is NOT transient — it will not clear by retrying. */
+class QuotaError extends Error { constructor(m){ super(m); this.quota = true; } }
+let quotaPausedUntil = 0;          // skip network work entirely while paused
+let quotaNoted = false;            // only shout about it once per outage
+let quotaPauseAnnounced = false;   // don't repeat the "paused" summary every tick
+
+async function fetchTile([name, bl, tr], attempt = 1, withFilter = filterInPlay) {
+  if (Date.now() < quotaPausedUntil) throw new QuotaError(`${name}: skipped (quota paused)`);
+
+  const params = new URLSearchParams({
+    'bottom-left': bl,
+    'top-right': tr,
+    limit: String(WAZEAPI_LIMIT),
+  });
+  if (withFilter && FILTER.length) params.set('filter', JSON.stringify(FILTER));
+  const url = `${WAZEAPI_BASE}/alerts?${params}`;
+
   let r;
-  try { r = await fetch(url, { headers: { 'X-API-Key': WAZEAPI_KEY, 'X-Country': WAZEAPI_COUNTRY, 'Accept':'application/json' }, signal: AbortSignal.timeout(30000) }); }
-  catch (e) { if (attempt < 3) { await sleep(1500*attempt); return fetchTile([name,bl,tr], attempt+1); } throw new Error(`${name}: network ${e.message}`); }
-  if (r.status === 429 || r.status >= 500) { // transient — back off + retry
-    if (attempt < 3) { await sleep(2000*attempt); return fetchTile([name,bl,tr], attempt+1); }
-    throw new Error(`${name}: HTTP ${r.status} (rate/quota or server) after retries`);
+  try {
+    r = await fetch(url, { headers: { 'X-API-Key': WAZEAPI_KEY, 'X-Country': WAZEAPI_COUNTRY, 'Accept':'application/json' }, signal: AbortSignal.timeout(30000) });
+  } catch (e) {
+    if (attempt < 3) { await sleep(1500*attempt); return fetchTile([name,bl,tr], attempt+1, withFilter); }
+    throw new Error(`${name}: network ${e.message}`);
   }
-  if (r.status === 401 || r.status === 403) throw new Error(`${name}: HTTP ${r.status} — check WAZEAPI_KEY`);
-  if (r.status === 402) throw new Error(`${name}: HTTP 402 — WazeAPI credits/quota exhausted (top up at wazeapi.com)`);
-  if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
-  const data = await r.json();
-  // WazeAPI returns a bare array (Waze-native fields: locationX/Y, subType, id,
-  // timestamp). Fall back to {alerts:[...]} + location.lat/lng if the shape changes.
+  readQuotaHeaders(r.headers);
+
+  // The advertised filter may simply not exist on the live API. Find out once,
+  // loudly, then carry on without it rather than paying for a 400 every tick.
+  if (r.status === 400 && withFilter) {
+    filterInPlay = false;
+    console.error(`[filter] WazeAPI returned HTTP 400 for filter=${JSON.stringify(FILTER)} — the server-side police filter their docs advertise is not accepted. Falling back to requesting ALL alert types and filtering locally (same cost per request). Set WAZEAPI_FILTER= to silence this.`);
+    return fetchTile([name, bl, tr], attempt, false);
+  }
+
+  if (r.status === 429) {
+    let body = ''; try { body = await r.text(); } catch {}
+    let code = '', message = '', upgrade = '';
+    try { const j = JSON.parse(body); code = j?.error?.code || ''; message = j?.error?.message || ''; upgrade = j?.error?.upgrade_url || ''; } catch {}
+    if (code === 'quota_exceeded' || /quota/i.test(message)) {
+      quotaPausedUntil = Date.now() + 30 * 60 * 1000;   // re-check in 30 min
+      throw new QuotaError(`${name}: ${message || 'quota exhausted'}${upgrade ? ` — ${upgrade}` : ''}`);
+    }
+    // genuine per-second rate limit — it does clear
+    if (attempt < 3) { await sleep(1500*attempt); return fetchTile([name,bl,tr], attempt+1, withFilter); }
+    throw new Error(`${name}: HTTP 429 rate_limited after retries`);
+  }
+  if (r.status === 401 || r.status === 403) throw new Error(`${name}: HTTP ${r.status} — check WAZEAPI_KEY (${(await r.text().catch(()=>'')).slice(0,120)})`);
+  if (!r.ok) throw new Error(`${name}: HTTP ${r.status}${r.status >= 500 ? ' (upstream — billed, retrying)' : ''}`);
+  if (r.status >= 500 && attempt < 3) { await sleep(2000*attempt); return fetchTile([name,bl,tr], attempt+1, withFilter); }
+
+  let data;
+  try { data = await r.json(); } catch (e) { throw new Error(`${name}: bad JSON (${e.message})`); }
   const alerts = Array.isArray(data) ? data : (Array.isArray(data?.alerts) ? data.alerts : []);
-  return alerts.filter(a => isPolice(a.type)).map(a => {
+  // `count` is the total the API says matched. If it exceeds what we received,
+  // the result cap bit and something (possibly POLICE) was dropped.
+  const reportedCount = Array.isArray(data) ? null : (Number(data?.count) ?? null);
+
+  const types = {};
+  for (const a of alerts) { const t = String(a.type || 'UNKNOWN').toUpperCase(); types[t] = (types[t] || 0) + 1; }
+
+  const police = alerts.filter(a => isPolice(a.type)).map(a => {
     const lat = a.locationY ?? a.location?.lat ?? a.latitude;
     const lng = a.locationX ?? a.location?.lng ?? a.longitude;
     return {
@@ -76,6 +176,8 @@ async function fetchTile([name, bl, tr], attempt=1) {
       city: a.city || '', street: a.street || '',
     };
   }).filter(a => Number.isFinite(a.location.x) && Number.isFinite(a.location.y)); // drop bad coords → no NaN map crash
+
+  return { name, police, types, returned: alerts.length, reportedCount };
 }
 
 async function pushAlerts(alerts) {
@@ -88,20 +190,60 @@ async function pushAlerts(alerts) {
 }
 
 async function tick() {
-  const t0 = Date.now(); const merged = new Map(); let ok=0, fail=0;
+  const t0 = Date.now();
+  const merged = new Map();
+  let ok = 0, fail = 0, quotaFails = 0, truncated = 0;
+  const allTypes = {};
+  let sawAny = false;
+
   for (const tile of TILES) {
-    try { for (const a of await fetchTile(tile)) merged.set(a.uuid, a); ok++; }
-    catch (e) { fail++; console.error(`[tile] ${e.message}`); }
+    try {
+      const res = await fetchTile(tile);
+      sawAny = true;
+      for (const [t, n] of Object.entries(res.types)) allTypes[t] = (allTypes[t] || 0) + n;
+      if (res.reportedCount !== null && res.reportedCount > res.returned) {
+        truncated++;
+        console.error(`[cap] ${res.name}: API reported count=${res.reportedCount} but returned ${res.returned} (limit ${WAZEAPI_LIMIT}) — results were truncated, so POLICE alerts may be missing. Shrink this tile.`);
+      }
+      for (const a of res.police) merged.set(a.uuid, a);
+      ok++;
+    } catch (e) {
+      if (e.quota) { quotaFails++; if (!quotaNoted) { quotaNoted = true; console.error(`[quota] ${e.message}`); } }
+      else { fail++; console.error(`[tile] ${e.message}`); }
+    }
   }
-  if (fail === TILES.length) { console.error(`[${new Date().toISOString()}] all ${TILES.length} tiles failed`); if (ONCE) process.exitCode=1; return; }
+
+  const when = new Date().toISOString();
+  if (quotaFails && quotaFails === TILES.length) {
+    if (!quotaPauseAnnounced) {
+      quotaPauseAnnounced = true;
+      console.error(`[${when}] paused: WazeAPI quota exhausted — nothing fetched. Top up or upgrade (https://wazeapi.com/pricing); the relay resumes automatically and keeps retrying every 30 min until then.`);
+    }
+    if (ONCE) process.exitCode = 1;
+    return;
+  }
+  if (!ok) { console.error(`[${when}] all ${TILES.length} tiles failed`); if (ONCE) process.exitCode = 1; return; }
+  if (sawAny) { quotaNoted = false; quotaPauseAnnounced = false; }
+
   const police = [...merged.values()];
-  if (!police.length) { console.log(`[${new Date().toISOString()}] no police alerts (${ok}/${TILES.length} tiles ok)`); return; }
+  // The type breakdown is how we PROVE whether the server-side filter is real.
+  const breakdown = Object.entries(allTypes).sort((a,b)=>b[1]-a[1]).map(([t,n])=>`${t}=${n}`).join(' ') || 'none';
+  const nonPolice = Object.entries(allTypes).filter(([t]) => !isPolice(t)).reduce((s,[,n]) => s+n, 0);
+  const filterNote = filterInPlay
+    ? (nonPolice > 0 ? `filter=${JSON.stringify(FILTER)} IGNORED (received ${nonPolice} non-police alerts — their docs are wrong; filtering locally)` : `filter=${JSON.stringify(FILTER)} honoured`)
+    : 'filter=off (all types fetched, police selected locally)';
+
+  if (!police.length) {
+    console.log(`[${when}] no police alerts (${ok}/${TILES.length} tiles ok) | types: ${breakdown} | ${filterNote} | ${quotaSummary()}${truncated ? ` | ${truncated} tile(s) truncated` : ''}`);
+    return;
+  }
   try {
     const res = await pushAlerts(police);
-    console.log(`[${new Date().toISOString()}] ingested ${res.ingested ?? '?'}/${police.length} police (${ok}/${TILES.length} tiles, ${Date.now()-t0}ms) [WazeAPI]`);
-  } catch (e) { console.error(`[push] ${e.message}`); if (ONCE) process.exitCode=1; }
+    console.log(`[${when}] ingested ${res.ingested ?? '?'}/${police.length} police (${ok}/${TILES.length} tiles, ${Date.now()-t0}ms) | types: ${breakdown} | ${filterNote} | ${quotaSummary()}${truncated ? ` | ${truncated} tile(s) truncated` : ''}`);
+  } catch (e) { console.error(`[push] ${e.message}`); if (ONCE) process.exitCode = 1; }
 }
 
 console.log(`WazeAPI POLICE relay → ${API_URL} | country=${WAZEAPI_COUNTRY} | ${TILES.length} VIC tiles${ONCE?' (--once)':`, every ${POLL_SECONDS}s`}`);
+console.log(`  limit=${WAZEAPI_LIMIT} | filter=${FILTER.length ? JSON.stringify(FILTER) : 'off'} | tiles: ${TILES.map(t=>t[0]).join(', ')}`);
 await tick();
 if (!ONCE) setInterval(tick, POLL_SECONDS*1000);
