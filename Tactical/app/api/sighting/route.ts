@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { computeCommunityDot, DOT_TTL_MS, type VisualSightingRay, type CommunityDot } from '@/lib/visual-sighting'
+import { rateLimit, rateLimitIp, clientIp } from '@/lib/auth/rate-limit'
 import { randomUUID } from 'crypto'
 
 // ── In-memory store (replace with Postgres for persistence) ───────────────
@@ -44,6 +45,14 @@ setInterval(() => {
 
 export async function POST(req: NextRequest) {
   try {
+    // Anonymous write endpoint: a goggle user submits rays repeatedly while
+    // looking at a target, so allow a burst, but bound it per IP and globally.
+    const ipRl = rateLimitIp(clientIp(req.headers), 'sighting', 60, 3600)
+    const globalRl = rateLimit('sighting:global', 600, 3600)
+    if (!ipRl.allowed || !globalRl.allowed) {
+      return NextResponse.json({ error: 'rate_limited' },
+        { status: 429, headers: { 'Retry-After': String(Math.max(ipRl.retryAfterSec, globalRl.retryAfterSec)) } })
+    }
     const body = await req.json()
 
     // Validate required fields
