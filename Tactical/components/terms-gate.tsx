@@ -62,13 +62,17 @@ export function TermsGate() {
 
             <div className="vp-modal-body" style={{ overflowY: 'auto', flex: 1 }}>
               <p style={{ fontSize: 13, lineHeight: 1.6, color: 'rgba(255,255,255,0.8)', margin: '0 0 14px' }}>
-                VP-Overwatch is an <strong>independent community project</strong>. It republishes aircraft and traffic
-                data that is <strong>already publicly broadcast</strong>, so people in Victoria can see what police
-                aircraft are doing above their state. That is its entire purpose.
+                VP-Overwatch is an <strong>independent community project</strong>. It republishes aircraft and ground
+                activity that is <strong>already publicly broadcast</strong>, so the Victorian community can see where
+                police are operating — in the air and on the ground — and safely stay clear of it.
               </p>
 
               <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderLeft: '3px solid #3b82f6', borderRadius: 6, padding: '12px 14px', background: 'rgba(59,130,246,0.06)', marginBottom: 14 }}>
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: 'rgba(255,255,255,0.8)' }}>
+                  <li style={{ marginBottom: 8 }}>
+                    <strong>Its purpose is to keep people clear of operations</strong> — not to help anyone avoid,
+                    obstruct, or evade police. Using it that way is a breach of these terms.
+                  </li>
                   <li style={{ marginBottom: 8 }}>
                     <strong>Not affiliated with Victoria Police</strong> or any government agency, emergency service, or
                     aircraft operator. Nothing here is official information.
