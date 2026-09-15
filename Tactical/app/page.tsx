@@ -181,37 +181,12 @@ export default function VPOverwatch() {
     })
   }, [liveData.reports, filters])
 
-  // ── Police ground units (live locations) → Report shape for map + count ──
-  // Live police locations come from /api/ground-units (fed by the Waze relay /
-  // direct police feed). We project them onto the map as ground contacts using
-  // the existing Report marker pipeline so they render alongside community
-  // reports and count toward GND.
-  const policeReports = useMemo((): Report[] => {
-    const units = liveData.groundUnits || []
-    return units.map((u) => ({
-      id: `gu-${u.id}`,
-      wazeUuid: u.id,
-      type: 'POLICE',
-      subtype: u.subtype ?? null,
-      kind: 'marked' as const,
-      lat: u.location.lat,
-      lng: u.location.lon,
-      street: u.location.street ?? '',
-      city: u.location.suburb ?? '',
-      reliability: u.metadata?.reliability ?? 0.9,
-      confidence: u.metadata?.confidence ?? 0.9,
-      nThumbsUp: 0,
-      reportedAgo: Math.max(0, Math.round((Date.now() - u.lastUpdate) / 1000)),
-      lastConfirmedAgo: Math.max(0, Math.round((Date.now() - u.lastUpdate) / 1000)),
-      descr: `${u.callsign ?? 'POLICE'}${u.status ? ' · ' + u.status : ''}`,
-    }))
-  }, [liveData.groundUnits])
-
-  // Combined ground contacts: live police locations + community reports.
-  const allGroundContacts = useMemo(
-    () => [...policeReports, ...filteredReports],
-    [policeReports, filteredReports]
-  )
+  // Ground contacts on the map: Waze police alerts plus community reports.
+  // Police locations arrive via /api/waze/alerts — the relay POSTs them to
+  // /api/waze/ingest, which writes the store's reports. (There was also a
+  // separate /api/ground-units layer here; nothing ever fed it, so it has been
+  // removed rather than left looking like a working source.)
+  const allGroundContacts = useMemo(() => filteredReports, [filteredReports])
 
   const silentCount = useMemo(() => {
     return liveData.aircraft.filter((a) => a.isActive === false && a.lastSeen !== null && !a.landed).length
