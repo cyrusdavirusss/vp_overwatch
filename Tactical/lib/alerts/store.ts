@@ -35,33 +35,35 @@ export async function getActiveUserLocations(): Promise<UserLocation[]> {
     updatedAt: new Date(r.updated_at).getTime(), expiresAt: new Date(r.expires_at).getTime() }))
 }
 
-export interface AlertSettings { userId: number; pushEnabled: boolean; smsEnabled: boolean; smsConsent: boolean; enterMetres: number; exitMetres: number; pushToken: string | null }
+export interface AlertSettings { userId: number; pushEnabled: boolean; smsEnabled: boolean; smsConsent: boolean; preciseLocation: boolean; enterMetres: number; exitMetres: number; pushToken: string | null }
 
 export async function getAlertSettings(userId: number): Promise<AlertSettings> {
   const { rows } = await query<any>(
-    `SELECT user_id, push_enabled, push_token, sms_enabled, sms_consent, enter_metres, exit_metres
+    `SELECT user_id, push_enabled, push_token, sms_enabled, sms_consent, precise_location, enter_metres, exit_metres
        FROM user_alert_settings WHERE user_id=$1`, [userId])
   const cfg = proximityConfig()
-  if (rows.length === 0) return { userId, pushEnabled: false, smsEnabled: false, smsConsent: false, enterMetres: cfg.enterMetres, exitMetres: cfg.exitMetres, pushToken: null }
+  if (rows.length === 0) return { userId, pushEnabled: false, smsEnabled: false, smsConsent: false, preciseLocation: false, enterMetres: cfg.enterMetres, exitMetres: cfg.exitMetres, pushToken: null }
   const r = rows[0]
   return { userId, pushEnabled: r.push_enabled, smsEnabled: r.sms_enabled, smsConsent: r.sms_consent,
+    preciseLocation: r.precise_location === true,
     enterMetres: r.enter_metres, exitMetres: r.exit_metres, pushToken: r.push_token }
 }
 
-export async function updateAlertSettings(userId: number, patch: Partial<Pick<AlertSettings,'pushEnabled'|'smsEnabled'|'smsConsent'|'pushToken'|'enterMetres'|'exitMetres'>>): Promise<void> {
+export async function updateAlertSettings(userId: number, patch: Partial<Pick<AlertSettings,'pushEnabled'|'smsEnabled'|'smsConsent'|'pushToken'|'preciseLocation'|'enterMetres'|'exitMetres'>>): Promise<void> {
   await query(
-    `INSERT INTO user_alert_settings (user_id, push_enabled, sms_enabled, sms_consent, push_token, enter_metres, exit_metres)
-     VALUES ($1, COALESCE($2,FALSE), COALESCE($3,FALSE), COALESCE($4,FALSE), $5, COALESCE($6,30000), COALESCE($7,33000))
+    `INSERT INTO user_alert_settings (user_id, push_enabled, sms_enabled, sms_consent, push_token, precise_location, enter_metres, exit_metres)
+     VALUES ($1, COALESCE($2,FALSE), COALESCE($3,FALSE), COALESCE($4,FALSE), $5, COALESCE($6,FALSE), COALESCE($7,30000), COALESCE($8,33000))
      ON CONFLICT (user_id) DO UPDATE SET
        push_enabled=COALESCE($2, user_alert_settings.push_enabled),
        sms_enabled=COALESCE($3, user_alert_settings.sms_enabled),
        sms_consent=COALESCE($4, user_alert_settings.sms_consent),
        push_token=COALESCE($5, user_alert_settings.push_token),
-       enter_metres=COALESCE($6, user_alert_settings.enter_metres),
-       exit_metres=COALESCE($7, user_alert_settings.exit_metres),
+       precise_location=COALESCE($6, user_alert_settings.precise_location),
+       enter_metres=COALESCE($7, user_alert_settings.enter_metres),
+       exit_metres=COALESCE($8, user_alert_settings.exit_metres),
        updated_at=NOW()`,
     [userId, patch.pushEnabled ?? null, patch.smsEnabled ?? null, patch.smsConsent ?? null, patch.pushToken ?? null,
-     patch.enterMetres ?? null, patch.exitMetres ?? null],
+     patch.preciseLocation ?? null, patch.enterMetres ?? null, patch.exitMetres ?? null],
   )
 }
 

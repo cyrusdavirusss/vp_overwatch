@@ -119,6 +119,10 @@ CREATE TABLE IF NOT EXISTS user_alert_settings (
   sms_number_ref TEXT,
   enter_metres   INTEGER NOT NULL DEFAULT 30000,
   exit_metres    INTEGER NOT NULL DEFAULT 33000,
+  -- Opt-in: TRUE = store the user's EXACT device position (required for a tight
+  -- radius alert, and for turn-by-turn guidance later). FALSE (default) = the
+  -- client sends a ~110 m grid-snapped point, as it always has.
+  precise_location BOOLEAN NOT NULL DEFAULT FALSE,
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -145,3 +149,8 @@ CREATE TABLE IF NOT EXISTS notification_deliveries (
   delivered_at    TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_deliveries_user ON notification_deliveries(user_id, created_at DESC);
+
+-- ── Idempotent column adds (databases created before the column existed) ─────
+-- Kept at the end so fresh installs get the column from CREATE TABLE above and
+-- existing installs pick it up here. Never DROP: safe to run repeatedly.
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS precise_location BOOLEAN NOT NULL DEFAULT FALSE;
