@@ -75,15 +75,43 @@ let filterInPlay = FILTER.length > 0;   // flipped off permanently if the API 40
    Per-query billing → fewer tiles = cheaper. Override with WAZEAPI_TILES
    (JSON: [["name","blat,blng","tlat,tlng"],...]). */
 const DEFAULT_TILES = [
-  // Inner Melbourne + south-east corridor. Kept small: the result cap counts ALL
-  // alert types, so a dense box can push POLICE out of the response entirely.
-  ['Inner City', '-37.85,144.88', '-37.75,145.05'],
-  ['Inner SE',   '-37.95,144.98', '-37.82,145.15'],
-  ['SE Mid',     '-38.00,145.10', '-37.87,145.30'],
-  ['SE Outer',   '-38.15,145.15', '-37.98,145.45'],
+  // 8-box mosaic over central, inner-east, east and the south-east corridor.
+  // Each box ~14 x 11 km. Kept tight because the result cap counts ALL alert
+  // types, so a sprawling box can push POLICE out of the response entirely.
+  ['CBD',           '-37.875,144.895', '-37.745,145.025'],
+  ['Inner SE',      '-37.965,144.985', '-37.835,145.115'],
+  ['Box Hill East', '-37.885,145.055', '-37.755,145.185'],
+  ['Glen Waverley', '-37.965,145.135', '-37.835,145.265'],
+  ['Dandenong',     '-38.065,145.145', '-37.935,145.275'],
+  ['Ringwood',      '-37.895,145.185', '-37.765,145.315'],
+  ['Casey',         '-38.125,145.255', '-37.995,145.385'],
+  ['Pakenham',      '-38.155,145.395', '-38.025,145.525'],
 ];
 let TILES = DEFAULT_TILES;
 try { if (process.env.WAZEAPI_TILES) TILES = JSON.parse(process.env.WAZEAPI_TILES); } catch { console.warn('[wazeapi] bad WAZEAPI_TILES JSON, using defaults'); }
+
+/* A swapped or malformed corner returns an empty result set, which looks exactly
+   like "no police about" — so refuse to run with a broken box rather than lie. */
+function validateTiles(tiles) {
+  const bad = [];
+  for (const t of tiles) {
+    if (!Array.isArray(t) || t.length !== 3) { bad.push(`${JSON.stringify(t)}: not [name, bottom-left, top-right]`); continue; }
+    const [name, bl, tr] = t;
+    const p = (s) => String(s).split(',').map(Number);
+    const [blat, blng] = p(bl); const [tlat, tlng] = p(tr);
+    if (![blat, blng, tlat, tlng].every(Number.isFinite)) { bad.push(`${name}: unparseable coords "${bl}" / "${tr}"`); continue; }
+    if (blat >= tlat) bad.push(`${name}: bottom-left lat ${blat} must be SOUTH of top-right ${tlat}`);
+    if (blng >= tlng) bad.push(`${name}: bottom-left lng ${blng} must be WEST of top-right ${tlng}`);
+    if (blng < -180 || tlng > 180 || blat < -90 || tlat > 90) bad.push(`${name}: coords out of range`);
+  }
+  return bad;
+}
+const tileProblems = validateTiles(TILES);
+if (tileProblems.length) {
+  console.error('[tiles] refusing to start — malformed bounding box(es):');
+  for (const p of tileProblems) console.error(`  - ${p}`);
+  process.exit(1);
+}
 
 const sleep = (ms) => new Promise(r=>setTimeout(r,ms));
 const isPolice = (t) => String(t||'').toUpperCase().startsWith('POLICE');
