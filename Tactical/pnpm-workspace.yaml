@@ -1,2 +1,8 @@
 allowBuilds:
   sharp: true
+  # Declared so pnpm stops failing the install with ERR_PNPM_IGNORED_BUILDS.
+  # @swc/core is only a devDependency of @swc-node/register; its postinstall
+  # just links a prebuilt platform binary and nothing in the build needs it
+  # (Next 16 renders with @next/swc, not this). Explicitly deny it rather than
+  # leave it unlisted, which pnpm treats as a hard error.
+  '@swc/core': false
