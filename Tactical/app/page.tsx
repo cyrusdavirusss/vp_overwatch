@@ -13,7 +13,7 @@ import { MlatBanner } from '@/components/mlat-banner'
 import { AROverlay } from '@/components/ar-overlay'
 import { SubscribeModal } from '@/components/subscribe-modal'
 import { TermsGate } from '@/components/terms-gate'
-import { VPSButton } from '@/components/vps-button'
+import { VPSButton, SIGHTING_PICK_RANGE_M, type VPSKind } from '@/components/vps-button'
 import { RouteAlertPanel } from '@/components/route-alert-panel'
 import { useRealtimeData, sampleTrack } from '@/hooks/useRealtimeData'
 import { useClientLocation } from '@/hooks/useClientLocation'
@@ -76,8 +76,9 @@ export default function VPOverwatch() {
 
   const routeAlerts = useRouteAlerts(liveData.aircraft, liveData.reports, userPosition.lat, userPosition.lng)
 
-  // VPS — submit a community ground report at the user's current position.
-  const onReportHazard = useCallback(async (kind: 'marked' | 'unmarked' | 'hidden') => {
+  // VPS — submit a community ground report. IN SIGHT pins the observer's own
+  // position; OUT OF SIGHT passes the coordinate tapped on the zoomed map.
+  const onReportHazard = useCallback(async (kind: VPSKind, coords?: { lat: number; lng: number }) => {
     let sessionId = ''
     try {
       sessionId = localStorage.getItem('vp-session') || ''
@@ -86,11 +87,13 @@ export default function VPOverwatch() {
         localStorage.setItem('vp-session', sessionId)
       }
     } catch { /* private mode — anon */ }
+    const lat = coords?.lat ?? userPosition.lat
+    const lng = coords?.lng ?? userPosition.lng
     try {
       await fetch('/api/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, lat: userPosition.lat, lng: userPosition.lng, sessionId }),
+        body: JSON.stringify({ kind, lat, lng, sessionId }),
       })
     } catch { /* best-effort */ }
   }, [userPosition])
@@ -103,6 +106,10 @@ export default function VPOverwatch() {
   const [followUser, setFollowUser] = useState(true)
   const [showLocationSetter, setShowLocationSetter] = useState(false)
   const [picking, setPicking] = useState(false)
+  // Out-of-sight sighting: `sightingPick` arms the zoomed tap-to-place, and
+  // `sightingPoint` holds what the operator tapped until VPSButton submits it.
+  const [sightingPick, setSightingPick] = useState<{ lat: number; lng: number; rangeM: number } | null>(null)
+  const [sightingPoint, setSightingPoint] = useState<{ lat: number; lng: number } | null>(null)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lng: number } | null>(null)
   const [fitAllCounter, setFitAllCounter] = useState(0)
   const [recenterCounter, setRecenterCounter] = useState(0)
@@ -287,6 +294,30 @@ export default function VPOverwatch() {
     setFocusTarget({ lat, lng })
   }, [clientLocation])
 
+  // ── OUT OF SIGHT — zoom onto the observer and arm tap-to-place ──────────
+  // The operator is here; the unit they saw is not. Open the map on their own
+  // position at a range they can point at accurately, and keep following off so
+  // the camera doesn't get dragged back while they aim.
+  const onPickSighting = useCallback(() => {
+    setSelectedAircraftId(null)
+    setSelectedReportId(null)
+    setFollowUser(false)
+    setSightingPoint(null)
+    setSightingPick({ lat: userPosition.lat, lng: userPosition.lng, rangeM: SIGHTING_PICK_RANGE_M })
+  }, [userPosition.lat, userPosition.lng])
+
+  // A tap while armed records where the contact was seen. The pick stays armed
+  // so a mis-tap is corrected by tapping again rather than starting over.
+  const onMapClickSighting = useCallback((lat: number, lng: number) => {
+    setSightingPoint({ lat, lng })
+  }, [])
+
+  // Disarm. Called by VPSButton on cancel and after a successful submit.
+  const onCancelSightingPick = useCallback(() => {
+    setSightingPick(null)
+    setSightingPoint(null)
+  }, [])
+
   const selectedAircraft = filteredAircraft.find((a) => a.id === selectedAircraftId)
   const selectedReport = filteredReports.find((r) => r.id === selectedReportId)
 
@@ -384,8 +415,14 @@ export default function VPOverwatch() {
               }}
               focusTarget={focusTarget}
               hasSilentAircraft={hasSilentAircraft}
-              pickMode={picking || pickingDest}
-              onMapClick={picking ? onMapClickSetLocation : pickingDest ? onMapClickSetDest : undefined}
+              pickMode={picking || pickingDest || sightingPick !== null}
+              onMapClick={
+                picking ? onMapClickSetLocation
+                  : pickingDest ? onMapClickSetDest
+                    : sightingPick ? onMapClickSighting
+                      : undefined
+              }
+              pickTarget={sightingPick}
               followMode={followUser}
               onUserPan={() => setFollowUser(false)}
               fitAllTrigger={fitAllCounter}
@@ -413,7 +450,12 @@ export default function VPOverwatch() {
 
             {/* VPS — community report button (left side) */}
             <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
-              <VPSButton onReport={onReportHazard} />
+              <VPSButton
+                onReport={onReportHazard}
+                onPickSighting={onPickSighting}
+                pickedPoint={sightingPoint}
+                onCancelPick={onCancelSightingPick}
+              />
             </div>
 
             <FabCluster
@@ -465,6 +507,26 @@ export default function VPOverwatch() {
                 <span className="font-mono text-[10px] font-semibold tracking-[0.1em] uppercase text-[var(--blue)]">Tap your location</span>
                 <button
                   onClick={() => setPicking(false)}
+                  className="font-mono text-[10px] tracking-[0.08em] uppercase text-fg-3 hover:text-fg-1"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {/* OUT OF SIGHT — tapped-point confirmation while the pick is armed */}
+            {sightingPick && (
+              <div
+                className="absolute top-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-3 py-1.5 rounded-md border border-[var(--amber)]"
+                style={{ background: 'color-mix(in srgb, var(--ink-1) 95%, transparent)', backdropFilter: 'blur(8px)', boxShadow: 'var(--shadow-fab)' }}
+              >
+                <span className="font-mono text-[10px] font-semibold tracking-[0.1em] uppercase text-[var(--amber)]">
+                  {sightingPoint
+                    ? `Seen at ${sightingPoint.lat.toFixed(5)}, ${sightingPoint.lng.toFixed(5)} — tap to adjust`
+                    : `Contact out of sight — tap where you saw it`}
+                </span>
+                <button
+                  onClick={onCancelSightingPick}
                   className="font-mono text-[10px] tracking-[0.08em] uppercase text-fg-3 hover:text-fg-1"
                 >
                   Cancel
@@ -575,6 +637,14 @@ export default function VPOverwatch() {
             }}
             focusTarget={focusTarget}
             hasSilentAircraft={hasSilentAircraft}
+            pickMode={picking || pickingDest || sightingPick !== null}
+            onMapClick={
+              picking ? onMapClickSetLocation
+                : pickingDest ? onMapClickSetDest
+                  : sightingPick ? onMapClickSighting
+                    : undefined
+            }
+            pickTarget={sightingPick}
             fitAllTrigger={fitAllCounter}
             recenterTrigger={recenterCounter}
             communityDots={communityDots}
@@ -596,8 +666,31 @@ export default function VPOverwatch() {
 
           {/* VPS — community report button (left side) */}
           <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
-            <VPSButton onReport={onReportHazard} />
+            <VPSButton
+              onReport={onReportHazard}
+              onPickSighting={onPickSighting}
+              pickedPoint={sightingPoint}
+              onCancelPick={onCancelSightingPick}
+            />
           </div>
+
+          {/* OUT OF SIGHT — tapped-point confirmation while the pick is armed */}
+          {sightingPick && (
+            <div
+              className="absolute top-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-2 py-1 rounded-md border border-[var(--amber)]"
+              style={{ background: 'color-mix(in srgb, var(--ink-1) 95%, transparent)', backdropFilter: 'blur(8px)' }}
+            >
+              <span className="font-mono text-[9px] font-semibold tracking-[0.08em] uppercase text-[var(--amber)] whitespace-nowrap">
+                {sightingPoint ? 'Tap to adjust' : 'Tap where you saw it'}
+              </span>
+              <button
+                onClick={onCancelSightingPick}
+                className="font-mono text-[9px] tracking-[0.08em] uppercase text-fg-3 hover:text-fg-1"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
 
           <FabCluster
             onLayers={cycleMapView}
