@@ -55,7 +55,7 @@ function fuelMinutesRemaining(b: AircraftBrief): number {
   return Math.max(0, Math.round((b.fuelRemainingPercent / 100) * b.fuelEnduranceMinutes))
 }
 
-/** Human-readable aircraft id: codename plus callsign ("Black Bird POL31"),
+/** Human-readable aircraft id: codename plus callsign ("King Air POL35"),
  *  then whichever of the two exists. A hex or registration read aloud means
  *  nothing to a listener. */
 function aircraftLabel(b: AircraftBrief): string {

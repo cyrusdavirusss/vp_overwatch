@@ -127,7 +127,7 @@ export interface ApplyContext {
 }
 
 function messageFor(type: AircraftEvent['eventType'], reg: string): string {
-  // Alerts SPEAK the codename plus callsign ("Black Bird POL31 is airborne.") —
+  // Alerts SPEAK the codename plus callsign ("King Air POL35 is airborne.") —
   // a raw registration or hex is unreadable on a call, and the callsign gives
   // anyone who does not know the codename something to match. The technical
   // identifiers still travel with the event (registration/icao24) for the map.

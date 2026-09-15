@@ -385,7 +385,7 @@ export function VPMap({
         // Callout content refreshes every data pass.
         const cs = entry.callout.querySelector('.vp-co-callsign') as HTMLDivElement
         const cd = entry.callout.querySelector('.vp-co-data') as HTMLDivElement
-        // Codename-led label from the API ("Black Bird POL31"), falling back to
+        // Codename-led label from the API ("King Air POL35"), falling back to
         // callsign then registration for older payloads.
         if (cs) cs.textContent = a.label || a.callsign || a.registration
         if (cd) cd.textContent = `${pos.alt.toLocaleString()}ft · ${Math.round(pos.spd)}kts`
