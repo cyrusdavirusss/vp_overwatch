@@ -14,24 +14,31 @@
   --font-sans: var(--font-ui);
   
   /* Colors */
-  --color-ink-0: #0a0b0d;
-  --color-ink-1: #14161a;
-  --color-ink-2: #1c1f24;
-  --color-ink-3: #262a31;
-  --color-ink-4: #2f343d;
+  --color-ink-0: #070b10;
+  --color-ink-1: #0b121a;
+  --color-ink-2: #101a24;
+  --color-ink-3: #152230;
+  --color-ink-4: #1d2d3c;
   
-  --color-fg-1: #f2f4f8;
-  --color-fg-2: #a6adbb;
-  --color-fg-3: #6b7280;
-  --color-fg-4: #444b57;
+  --color-fg-1: #f1f5f8;
+  --color-fg-2: #9aa9b5;
+  --color-fg-3: #667582;
+  --color-fg-4: #4a5763;
+  --color-fg-5: #3d4a55;
   
-  --color-border: #2a2f37;
-  --color-border-strong: #3a4049;
-  --color-border-subtle: #1e2229;
+  --color-border: #263746;
+  --color-border-strong: #33495e;
+  --color-border-subtle: #1b2836;
   
-  --color-blue: #4d7cff;
-  --color-blue-hi: #6b92ff;
-  --color-blue-lo: #3a66e0;
+  --color-blue: #1677d2;
+  --color-blue-hi: #2d8cff;
+  --color-blue-lo: #0d4f8c;
+
+  /* Chrome / steel — neutral metallic accents. NON-semantic: amber keeps
+     warnings, MLAT and fuel-overrun; these carry generic UI weight. */
+  --color-chrome: #b8c5cf;
+  --color-chrome-dim: #8b9aa8;
+  --color-steel: #607384;
   
   --color-amber: #ffb020;
   --color-amber-hi: #ffc44d;
@@ -106,43 +113,52 @@
 /* ---------- BASE TOKENS (DARK) ---------- */
 :root {
   /* SURFACES — cool near-black, layered */
-  --ink-0: #0a0b0d;
-  --ink-1: #14161a;
-  --ink-2: #1c1f24;
-  --ink-3: #262a31;
-  --ink-4: #2f343d;
+  --ink-0: #070b10;
+  --ink-1: #0b121a;
+  --ink-2: #101a24;
+  --ink-3: #152230;
+  --ink-4: #1d2d3c;
 
   /* FOREGROUND */
-  --fg-1: #f2f4f8;
-  --fg-2: #a6adbb;
-  --fg-3: #6b7280;
-  --fg-4: #444b57;
+  --fg-1: #f1f5f8;
+  --fg-2: #9aa9b5;
+  --fg-3: #667582;
+  --fg-4: #4a5763;
+
+  --fg-5: #3d4a55;
 
   /* BORDERS & DIVIDERS */
-  --border: #2a2f37;
-  --border-strong: #3a4049;
-  --border-subtle: #1e2229;
+  --border: #263746;
+  --border-strong: #33495e;
+  --border-subtle: #1b2836;
 
   /* SIGNAL — UI chrome, interactive, live indicators */
-  --blue: #4d7cff;
-  --blue-hi: #6b92ff;
-  --blue-lo: #3a66e0;
-  --blue-glow: rgba(77, 124, 255, 0.18);
-  --blue-wash: rgba(77, 124, 255, 0.08);
+  --blue: #1677d2;
+  --blue-hi: #2d8cff;
+  --blue-lo: #0d4f8c;
+  --blue-glow: rgba(45, 140, 255, 0.18);
+  --blue-wash: rgba(45, 140, 255, 0.08);
+
+  /* CHROME / STEEL — neutral metallic accents, NON-semantic by design.
+     --chrome exists so a metallic UI element never has to borrow --amber. */
+  --chrome: #b8c5cf;
+  --chrome-dim: #8b9aa8;
+  --steel: #607384;
+  --steel-wash: rgba(96, 115, 132, 0.12);
 
   /* AVIATION AMBER — reserved for ACTIVE AIRCRAFT ONLY */
   --amber: #ffb020;
   --amber-hi: #ffc44d;
   --amber-lo: #e89400;
-  --amber-glow: rgba(255, 176, 32, 0.22);
-  --amber-wash: rgba(255, 176, 32, 0.1);
+  --amber-glow: rgba(255,170,0, 0.22);
+  --amber-wash: rgba(255,170,0, 0.1);
 
   /* THREAT RED — confirmed ground threats only */
   --red: #ff4757;
   --red-hi: #ff6b78;
   --red-lo: #e02e3f;
-  --red-glow: rgba(255, 71, 87, 0.22);
-  --red-wash: rgba(255, 71, 87, 0.1);
+  --red-glow: rgba(255,45,45, 0.22);
+  --red-wash: rgba(255,45,45, 0.1);
 
   /* GROUND REPORT GREEN — Waze-equivalent, reported but unconfirmed */
   --green: #5bd68a;
@@ -550,7 +566,11 @@ samp,
 .vp-rotor {
   transform-box: fill-box;
   transform-origin: center;
-  animation: vp-rotor-spin 0.38s linear infinite;
+  /* 0.19s/rev — twice the original 0.38s. The blade spin is the only motion on
+     the marker now that the body no longer rotates, so it can afford to be
+     fast; the ghost blade positions keep it reading as rotation rather than a
+     strobe. */
+  animation: vp-rotor-spin 0.19s linear infinite;
 }
 @keyframes vp-rotor-spin {
   to { transform: rotate(360deg); }
@@ -715,10 +735,10 @@ samp,
 
 /* Desktop data grid styling */
 .vp-grid-row:nth-child(even) {
-  background: rgba(20, 22, 26, 0.5);
+  background: rgba(11, 18, 26, 0.5);
 }
 .vp-grid-row:hover {
-  background: rgba(77, 124, 255, 0.04);
+  background: rgba(45, 140, 255, 0.04);
 }
 
 /* Military-grade number rendering */
