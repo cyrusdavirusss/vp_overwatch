@@ -42,6 +42,8 @@
 import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envFile = path.join(__dirname, '.env');
+/** Pay-as-you-go ledger, written when the vendor reports a balance. */
+const CREDIT_FILE = path.join(__dirname, 'waze-credit.json');
 if (fs.existsSync(envFile)) for (const raw of fs.readFileSync(envFile,'utf8').split(/\r?\n/)) {
   const l = raw.trim(); if (!l || l.startsWith('#')) continue; const i = l.indexOf('='); if (i<0) continue;
   const k = l.slice(0,i).trim(); let v = l.slice(i+1).trim();
@@ -118,6 +120,12 @@ const isPolice = (t) => String(t||'').toUpperCase().startsWith('POLICE');
 
 // ── quota bookkeeping, surfaced in the logs ────────────────────────────────
 const quota = { limit: null, remaining: null, reset: null, rateLimit: null, rateRemaining: null };
+// Pay-as-you-go burn-down. Confirmed by the vendor (2026-09-16): once the trial
+// allowance is gone and a request is paid from the balance, every response also
+// carries these two. X-Quota-* keeps describing the PLAN allowance only, so in
+// that state it reads "0 left (resets never)" while the balance is what is
+// actually being spent — hence reading both, and reporting them separately.
+const credit = { costUsd: null, balanceUsd: null, firstBalanceUsd: null, prevBalanceUsd: null, at: null };
 function readQuotaHeaders(h) {
   const num = (v) => (v == null || v === '' ? null : Number(v));
   const q = num(h.get('x-quota-limit'));            if (q !== null) quota.limit = q;
@@ -125,11 +133,46 @@ function readQuotaHeaders(h) {
   const rr = num(h.get('x-ratelimit-remaining'));   if (rr !== null) quota.rateRemaining = rr;
   const rl = num(h.get('x-ratelimit-limit'));       if (rl !== null) quota.rateLimit = rl;
   const rs = h.get('x-quota-reset');                if (rs) quota.reset = rs;
+  const cc = num(h.get('x-credit-cost-usd'));       if (cc !== null) credit.costUsd = cc;
+  const cb = num(h.get('x-credit-balance-usd'));
+  if (cb !== null && cb !== credit.balanceUsd) {
+    credit.prevBalanceUsd = credit.balanceUsd;
+    credit.balanceUsd = cb;
+    credit.at = new Date().toISOString();
+    if (credit.firstBalanceUsd === null) credit.firstBalanceUsd = cb;
+    writeCreditState();
+  }
 }
 const quotaSummary = () =>
   quota.limit === null && quota.remaining === null
     ? 'quota: unknown (no X-Quota-* headers seen)'
     : `quota: ${quota.remaining ?? '?'}/${quota.limit ?? '?'} left${quota.reset ? ` (resets ${quota.reset})` : ''}`;
+/** "credit: $9.9980 left (-$0.0020/req)" — blank until a balance has been seen. */
+const creditSummary = () => {
+  if (credit.balanceUsd === null) return '';
+  const cost = credit.costUsd === null ? '' : ` (-$${credit.costUsd.toFixed(4)}/req)`;
+  let burn = '';
+  if (credit.firstBalanceUsd !== null && credit.balanceUsd < credit.firstBalanceUsd) {
+    const spent = credit.firstBalanceUsd - credit.balanceUsd;
+    const days = (Date.now() - Date.parse(credit.atStart ?? credit.at)) / 86400000;
+    if (days > 0.01) burn = ` | burn $${(spent / days).toFixed(2)}/day`;
+  }
+  return ` | credit: $${credit.balanceUsd.toFixed(4)} left${cost}${burn}`;
+};
+function writeCreditState() {
+  try {
+    const p = CREDIT_FILE;
+    const prev = (() => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return {}; } })();
+    const first = prev.firstBalanceUsd ?? credit.balanceUsd;
+    const firstAt = prev.firstAt ?? credit.at;
+    credit.atStart = firstAt;
+    fs.writeFileSync(p, JSON.stringify({
+      firstBalanceUsd: first, firstAt, lastBalanceUsd: credit.balanceUsd,
+      lastCostUsd: credit.costUsd, lastAt: credit.at,
+      spentUsd: Number((first - credit.balanceUsd).toFixed(4)),
+    }, null, 2));
+  } catch { /* the ledger is a convenience; never let it break a tick */ }
+}
 
 /** A quota error is NOT transient — it will not clear by retrying. */
 class QuotaError extends Error { constructor(m){ super(m); this.quota = true; } }
@@ -267,12 +310,12 @@ async function tick() {
     : 'filter=off (all types fetched, police selected locally)';
 
   if (!police.length) {
-    console.log(`[${when}] no police alerts (${ok}/${TILES.length} tiles ok) | types: ${breakdown} | ${filterNote} | ${quotaSummary()}${truncated ? ` | ${truncated} tile(s) truncated` : ''}`);
+    console.log(`[${when}] no police alerts (${ok}/${TILES.length} tiles ok) | types: ${breakdown} | ${filterNote} | ${quotaSummary()}${creditSummary()}${truncated ? ` | ${truncated} tile(s) truncated` : ''}`);
     return;
   }
   try {
     const res = await pushAlerts(police);
-    console.log(`[${when}] ingested ${res.ingested ?? '?'}/${police.length} police (${ok}/${TILES.length} tiles, ${Date.now()-t0}ms) | types: ${breakdown} | ${filterNote} | ${quotaSummary()}${truncated ? ` | ${truncated} tile(s) truncated` : ''}`);
+    console.log(`[${when}] ingested ${res.ingested ?? '?'}/${police.length} police (${ok}/${TILES.length} tiles, ${Date.now()-t0}ms) | types: ${breakdown} | ${filterNote} | ${quotaSummary()}${creditSummary()}${truncated ? ` | ${truncated} tile(s) truncated` : ''}`);
   } catch (e) { console.error(`[push] ${e.message}`); if (ONCE) process.exitCode = 1; }
 }
 
