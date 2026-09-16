@@ -23,7 +23,7 @@ export function OnAirBar({ aircraft, selectedId, onSelect }: OnAirBarProps) {
       <span className="vp-onair-label">ON AIR</span>
 
       {aircraft.length === 0 && (
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "rgba(255,255,255,0.15)", letterSpacing: "0.1em" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-3)", letterSpacing: "0.1em" }}>
           NO AIRCRAFT TRACKED
         </span>
       )}

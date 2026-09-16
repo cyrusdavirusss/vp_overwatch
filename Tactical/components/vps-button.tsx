@@ -47,7 +47,7 @@ interface VPSButtonProps {
 
 const KINDS: { kind: VPSKind; label: string; color: string }[] = [
   { kind: 'marked', label: 'Marked Unit', color: 'var(--vp-red)' },
-  { kind: 'unmarked', label: 'Unmarked Unit', color: 'var(--vp-amber)' },
+  { kind: 'unmarked', label: 'Unmarked Unit', color: 'var(--vp-red)' },
   { kind: 'hidden', label: 'Hidden Cam / Unit', color: 'var(--vp-purple)' },
 ]
 
