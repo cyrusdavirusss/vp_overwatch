@@ -337,7 +337,7 @@ import {
   maxRemainingEnduranceSec,
 } from '@/lib/fuel-model'
 import { currentAreaWind, refreshAreaWind } from '@/lib/wind'
-import { appendTrackPoint, TRAIL_MAX_POINTS } from '@/lib/data'
+import { appendTrackPoint, TRAIL_MAX_POINTS, isSilentContact } from '@/lib/data'
 
 /** Project a full Aircraft record down to the telemetry Hermes briefs on. */
 function aircraftToBrief(ac: Aircraft): AircraftBrief {
@@ -1405,7 +1405,7 @@ function pruneSilentOnStartup(): void {
       resetToDormant(ac)
     }
   }
-  const silentCount = [...s.aircraftMap.values()].filter(a => !a.isActive && a.lastSeen != null && !a.landed).length
+  const silentCount = [...s.aircraftMap.values()].filter(isSilentContact).length
   console.log(`[store] startup prune complete — ${silentCount} silent contact(s) remain`)
 }
 

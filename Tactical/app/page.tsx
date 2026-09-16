@@ -21,6 +21,7 @@ import { useCommunityDots } from '@/hooks/useCommunityDots'
 import { useRouteAlerts } from '@/hooks/useRouteAlerts'
 import type { MapViewType } from '@/lib/map-style'
 import type { User, Report } from '@/lib/data'
+import { isSilentContact } from '@/lib/data'
 
 const STRIP_H = 36
 const SCRUB_H = 64
@@ -205,7 +206,7 @@ export default function VPOverwatch() {
   const allGroundContacts = useMemo(() => filteredReports, [filteredReports])
 
   const silentCount = useMemo(() => {
-    return liveData.aircraft.filter((a) => a.isActive === false && a.lastSeen !== null && !a.landed).length
+    return liveData.aircraft.filter((a) => isSilentContact(a)).length
   }, [liveData.aircraft])
   const hasSilentAircraft = silentCount > 0
   const isLostSignal = hasSilentAircraft

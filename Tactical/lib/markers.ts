@@ -92,6 +92,21 @@ export function aircraftMarkerSVG(role: Aircraft['role'], size: number): string 
   return role === 'rotary' ? rotarySVG(size) : fixedwingSVG(size)
 }
 
+// ── Which ground kinds blink ────────────────────────────────────────────────
+/**
+ * Ground kinds that carry the blue/red police overglow (see `.vp-police` in
+ * globals.css). Kept here, next to the glyphs, so the answer to "what blinks?"
+ * lives with the artwork rather than being buried in the map component.
+ *
+ * The glow is not decoration: the badge artwork cannot read at 30px, so the
+ * blinking light is what identifies the unit at that size.
+ */
+export const GLOWING_KINDS: Report['kind'][] = ['unmarked']
+
+export function isGlowingKind(kind: Report['kind']): boolean {
+  return GLOWING_KINDS.includes(kind)
+}
+
 // ── Ground-report glyphs, {C} = status colour ───────────────────────────────
 
 const RING = (extra = '') =>
@@ -112,9 +127,17 @@ const REPORT_TEMPLATES: Record<Report['kind'], string> = {
   <rect x="9.6" y="7.5" width="4.8" height="1.2" rx="0.4" fill="{C}" stroke="${INK0}" stroke-width="0.3"></rect>
   <path d="M6.6 13.9 h10.8" stroke="${INK0}" stroke-width="0.75" opacity="0.75"></path>`,
 
-  // unmarked: the same car with no lightbar and no livery, inside a dashed ring
-  unmarked: RING('stroke-dasharray="2 1.6"') + CAR + `
-  <circle cx="12" cy="12" r="10.9" stroke="{C}" stroke-width="0.5" opacity="0.5"></circle>`,
+  // unmarked: the pixel-art police badge supplied by the operator, replacing the
+  // drawn car glyph. Served as a FILE (one request, browser-cached) rather than
+  // base64-inlined into every marker — there are ~24 of these on the map at once
+  // and this box runs on 7.4GB of RAM, so 24 inline copies of a 1MB image would
+  // be reckless.
+  //
+  // NOTE: the `{C}` status colour is deliberately unused here. The badge carries
+  // its own palette (sky blue / navy / tartan), so a status tint would fight the
+  // artwork. That means `unmarked` no longer changes colour with its state — the
+  // other kinds still do.
+  unmarked: `<image href="/markers/unmarked-badge.png" x="0.5" y="0.5" width="23" height="23" preserveAspectRatio="xMidYMid meet"></image>`,
 
   // hidden: visibility-OFF. An open eye means "visible", which is backwards for
   // a unit that is hiding; the slash is what makes it read as concealed.
