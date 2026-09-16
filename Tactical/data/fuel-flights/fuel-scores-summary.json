@@ -1,14 +1,14 @@
 {
-  "7c4ef5": {
-    "callsign": "POL32",
+  "7c4ef4": {
+    "callsign": "POL31",
     "type": "AW139",
-    "flights_scored": 18,
+    "flights_scored": 9,
     "new_this_run": 1,
-    "mean_duration_min": 29.92,
-    "total_fuel_kg": 3143.6,
-    "mean_fuel_flow_kgh": 341.14,
-    "mean_fuel_per_km_kg": 2.45,
-    "mean_burn_ratio_vs_cruise": 0.83,
-    "mean_burn_ratio_vs_loiter": 1.02
+    "mean_duration_min": 51.74,
+    "total_fuel_kg": 2787.5,
+    "mean_fuel_flow_kgh": 352.29,
+    "mean_fuel_per_km_kg": 2.87,
+    "mean_burn_ratio_vs_cruise": 0.86,
+    "mean_burn_ratio_vs_loiter": 1.05
   }
 }

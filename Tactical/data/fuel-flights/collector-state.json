@@ -11,17 +11,26 @@
   "7c4ef4": {
     "phase": "ground",
     "air_streak": 0,
-    "gnd_streak": 6,
-    "completed": 5,
+    "gnd_streak": 2,
+    "completed": 9,
     "open": false,
     "start_ms": null,
     "last_ms": null
   },
   "7c4ef5": {
+    "phase": "airborne",
+    "air_streak": 107,
+    "gnd_streak": 0,
+    "completed": 20,
+    "open": false,
+    "start_ms": null,
+    "last_ms": 1789521333534
+  },
+  "7c4ee8": {
     "phase": "ground",
     "air_streak": 0,
-    "gnd_streak": 8,
-    "completed": 18,
+    "gnd_streak": 10,
+    "completed": 0,
     "open": false,
     "start_ms": null,
     "last_ms": null
