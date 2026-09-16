@@ -688,6 +688,35 @@ samp,
   cursor: pointer;
   transition: transform var(--dur-hover) var(--ease-spring);
 }
+
+/* ── Police units: alternating blue/red overglow ─────────────────────────── */
+/* The badge artwork cannot carry its own identity at 30px — a figure, uniform
+   detail and lettering all sit below the legibility floor there. So the marker's
+   identity is carried by LIGHT instead: a blinking blue/red halo, which is what
+   a police vehicle reads as at a glance and which survives small sizes because
+   it is colour and motion, not detail.
+   The brief bans gratuitous pulsing; this is explicitly requested and carries
+   meaning (it identifies the unit), and it is motion-gated below. */
+@keyframes vp-police-blink {
+  0%, 49.99% {
+    filter: drop-shadow(0 0 3px rgba(45, 140, 255, 0.95))
+            drop-shadow(0 0 9px rgba(45, 140, 255, 0.55));
+  }
+  50%, 100% {
+    filter: drop-shadow(0 0 3px rgba(255, 45, 45, 0.95))
+            drop-shadow(0 0 9px rgba(255, 45, 45, 0.55));
+  }
+}
+/* steps(), not a fade: a light bar swaps colour, it does not cross-fade. */
+.vp-rp-marker.vp-police {
+  animation: vp-police-blink 1.1s steps(1, end) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp-rp-marker.vp-police {
+    animation: none;
+    filter: drop-shadow(0 0 4px rgba(45, 140, 255, 0.85));
+  }
+}
 .vp-rp-marker.selected {
   transform: scale(1.22);
   border-radius: 50%;

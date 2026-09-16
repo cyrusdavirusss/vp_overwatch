@@ -54,6 +54,28 @@ export interface TrackPoint {
   vs: number
 }
 
+/**
+ * A tracked contact that stopped reporting while still expected to be up: not
+ * active, previously seen, and NOT confirmed landed.
+ *
+ * This single rule drives every amber "lost / silent" signal in the UI — the
+ * header's LOST SIGNAL, the map's lost-signal tint, the SILENT counter, the ON
+ * AIR chip and the detail panel's lost state. It used to be copy-pasted into
+ * each of those sites, and the ON AIR bar's copy omitted the `landed` clause, so
+ * a landed airframe kept its amber chip after every other amber signal had
+ * cleared. That is the "amber signals are not going off simultaneously" report:
+ * they are all supposed to be the SAME condition, so they all call this.
+ *
+ * (Distinct from the detail panel's MLAT sense of "silent", which means an
+ * aircraft reporting position without full ADS-B. Different concept, different
+ * colour meaning — do not merge the two.)
+ */
+export function isSilentContact(
+  a: Pick<Aircraft, 'isActive' | 'lastSeen' | 'landed'>
+): boolean {
+  return a.isActive === false && a.lastSeen != null && a.landed !== true
+}
+
 export interface Report {
   id: string
   wazeUuid: string
