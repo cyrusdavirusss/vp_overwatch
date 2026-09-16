@@ -724,6 +724,10 @@ export default function VPOverwatch() {
               ? new Date(liveData.lastUpdate).toLocaleTimeString('en-AU', { hour12: false })
               : '—'}
           </span>
+          {/* Vendor-required credit (WazeAPI terms): a visible line, and never
+              presented as Waze or Google data — WazeAPI is an independent
+              collection/delivery service with no affiliation to either. */}
+          <span>Road events via WazeAPI (wazeapi.com)</span>
         </footer>
         {/* The floating AR launcher is mobile-only: on desktop the right rail
             carries an AR Sky panel, so rendering both would be two controls for
