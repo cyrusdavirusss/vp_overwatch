@@ -18,13 +18,13 @@
     "last_ms": null
   },
   "7c4ef5": {
-    "phase": "airborne",
-    "air_streak": 107,
+    "phase": "ground",
+    "air_streak": 0,
     "gnd_streak": 0,
     "completed": 20,
     "open": false,
     "start_ms": null,
-    "last_ms": 1789521333534
+    "last_ms": 1789525460358
   },
   "7c4ee8": {
     "phase": "ground",
