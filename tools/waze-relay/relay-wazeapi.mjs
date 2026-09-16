@@ -125,7 +125,14 @@ const quota = { limit: null, remaining: null, reset: null, rateLimit: null, rate
 // carries these two. X-Quota-* keeps describing the PLAN allowance only, so in
 // that state it reads "0 left (resets never)" while the balance is what is
 // actually being spent — hence reading both, and reporting them separately.
-const credit = { costUsd: null, balanceUsd: null, firstBalanceUsd: null, prevBalanceUsd: null, at: null };
+const credit = { costUsd: null, balanceUsd: null, prevBalanceUsd: null, at: null };
+// Load the ledger at boot so the burn rate uses ONE window for both numerator
+// and denominator. The first attempt mixed this tick's drop with the whole
+// ledger's elapsed time and under-reported the rate by roughly half — caught by
+// checking the logged figure against the ledger it came from.
+const ledger = (() => { try { return JSON.parse(fs.readFileSync(CREDIT_FILE, 'utf8')); } catch { return {}; } })();
+let firstBalanceUsd = typeof ledger.firstBalanceUsd === 'number' ? ledger.firstBalanceUsd : null;
+let firstAt = ledger.firstAt ?? null;
 function readQuotaHeaders(h) {
   const num = (v) => (v == null || v === '' ? null : Number(v));
   const q = num(h.get('x-quota-limit'));            if (q !== null) quota.limit = q;
@@ -139,7 +146,7 @@ function readQuotaHeaders(h) {
     credit.prevBalanceUsd = credit.balanceUsd;
     credit.balanceUsd = cb;
     credit.at = new Date().toISOString();
-    if (credit.firstBalanceUsd === null) credit.firstBalanceUsd = cb;
+    if (firstBalanceUsd === null) { firstBalanceUsd = cb; firstAt = credit.at; }
     writeCreditState();
   }
 }
@@ -147,15 +154,17 @@ const quotaSummary = () =>
   quota.limit === null && quota.remaining === null
     ? 'quota: unknown (no X-Quota-* headers seen)'
     : `quota: ${quota.remaining ?? '?'}/${quota.limit ?? '?'} left${quota.reset ? ` (resets ${quota.reset})` : ''}`;
-/** "credit: $9.9980 left (-$0.0020/req)" — blank until a balance has been seen. */
+/** "credit: $8.5500 left (-$0.0020/req | burn $1.06/day)" — blank until a balance is seen. */
 const creditSummary = () => {
   if (credit.balanceUsd === null) return '';
   const cost = credit.costUsd === null ? '' : ` (-$${credit.costUsd.toFixed(4)}/req)`;
   let burn = '';
-  if (credit.firstBalanceUsd !== null && credit.balanceUsd < credit.firstBalanceUsd) {
-    const spent = credit.firstBalanceUsd - credit.balanceUsd;
-    const days = (Date.now() - Date.parse(credit.atStart ?? credit.at)) / 86400000;
-    if (days > 0.01) burn = ` | burn $${(spent / days).toFixed(2)}/day`;
+  if (firstBalanceUsd !== null && firstAt && credit.balanceUsd < firstBalanceUsd) {
+    const spent = firstBalanceUsd - credit.balanceUsd;
+    const days = (Date.now() - Date.parse(firstAt)) / 86400000;
+    // Needs a couple of hours before the average means anything: a 30-minute
+    // poll moves the balance by ~$0.02, so a short window is all rounding noise.
+    if (days > 0.08) burn = ` | burn $${(spent / days).toFixed(2)}/day`;
   }
   return ` | credit: $${credit.balanceUsd.toFixed(4)} left${cost}${burn}`;
 };
@@ -163,11 +172,10 @@ function writeCreditState() {
   try {
     const p = CREDIT_FILE;
     const prev = (() => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return {}; } })();
-    const first = prev.firstBalanceUsd ?? credit.balanceUsd;
-    const firstAt = prev.firstAt ?? credit.at;
-    credit.atStart = firstAt;
+    const first = prev.firstBalanceUsd ?? firstBalanceUsd ?? credit.balanceUsd;
+    const at = prev.firstAt ?? firstAt ?? credit.at;
     fs.writeFileSync(p, JSON.stringify({
-      firstBalanceUsd: first, firstAt, lastBalanceUsd: credit.balanceUsd,
+      firstBalanceUsd: first, firstAt: at, lastBalanceUsd: credit.balanceUsd,
       lastCostUsd: credit.costUsd, lastAt: credit.at,
       spentUsd: Number((first - credit.balanceUsd).toFixed(4)),
     }, null, 2));
