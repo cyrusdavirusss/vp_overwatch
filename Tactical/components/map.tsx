@@ -653,8 +653,10 @@ export function VPMap({
       const isSel = r.id === selectedReportId
       // CONFIRMED ground threat → threat red; single-source Reported → softer green.
       const confirmed = r.nThumbsUp >= 5 && r.lastConfirmedAgo < 120
-      // Police kind colour: marked = red; unmarked / hidden / speed camera = blue.
-      const color = r.kind === 'marked' ? RED : BLUE
+      // Unit kind colour: police units are red whether liveried or not, so
+      // marked and unmarked share the threat colour. Cameras and concealed
+      // contacts stay informational blue.
+      const color = r.kind === 'marked' || r.kind === 'unmarked' ? RED : BLUE
 
       let marker = reportMarkers.current.get(r.id)
       if (!marker) {

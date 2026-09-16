@@ -105,7 +105,7 @@
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .vp-header {
   position: relative;
-  height: 56px;
+  height: 60px;
   flex-shrink: 0;
   z-index: 50;
   background: var(--ink-1);
@@ -119,8 +119,8 @@
   left: 0; right: 0; bottom: -1px;
   height: 1px;
   background: linear-gradient(90deg,
-    transparent 0%, rgba(45,140,255,0.35) 18%,
-    rgba(184,197,207,0.18) 60%, transparent 100%);
+    transparent 0%, rgba(184,197,207,0.20) 22%,
+    rgba(45,140,255,0.20) 64%, transparent 100%);
   pointer-events: none;
 }
 .vp-header-inner {
@@ -129,8 +129,8 @@
   display: flex;
   align-items: center;
   height: 100%;
-  padding: 0 16px;
-  gap: 14px;
+  padding: 0 18px;
+  gap: 16px;
 }
 .vp-header.vp-lost {
   background: linear-gradient(180deg, rgba(255,45,45,0.10), transparent 70%), var(--ink-1);
@@ -148,7 +148,7 @@
 }
 .vp-wordmark {
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.13em;
   color: var(--fg-1);
@@ -157,9 +157,9 @@
 }
 .vp-subtitle {
   font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.2em;
-  color: var(--steel);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  color: var(--fg-3);
   text-transform: uppercase;
   line-height: 1;
 }
@@ -167,7 +167,8 @@
 /* Structural divider between header groups --------------------------- */
 .vp-header-div {
   width: 1px;
-  height: 22px;
+  height: 26px;
+  margin: 0 2px;
   background: var(--border);
   flex-shrink: 0;
 }
@@ -185,12 +186,15 @@
   gap: 3px;
   min-width: 0;
 }
-.vp-stat-label {
+/* Scoped to .vp-header: the left rail declares its own .vp-stat-label for the
+   stat cards, and both are single-class selectors — unscoped, whichever comes
+   last in the file wins for both places. */
+.vp-header .vp-stat-label {
   font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.14em;
+  font-size: 10px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--fg-3);
+  color: var(--fg-2);
   line-height: 1;
   white-space: nowrap;
 }
@@ -201,7 +205,7 @@
 }
 .vp-stat-value {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--fg-1);
@@ -212,16 +216,16 @@
 .vp-stat-value--air    { color: var(--blue-hi); }
 .vp-stat-value--gnd    { color: var(--amber); }
 .vp-stat-value--silent { color: var(--amber); animation: vp-pulse-amber 2.4s ease-in-out infinite; }
-.vp-stat-value--mono   { font-size: 11px; font-weight: 500; color: var(--fg-2); letter-spacing: 0.02em; }
+.vp-stat-value--mono   { font-size: 11.5px; font-weight: 500; color: var(--fg-2); letter-spacing: 0.02em; }
 .vp-stat-value.online  { color: var(--green); }
 .vp-stat-value.standby { color: var(--amber); }
 .vp-stat-value.lost    { color: var(--red); animation: vp-pulse-red 1.5s ease-in-out infinite; }
 .vp-stat-sub {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 9.5px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--fg-4);
+  color: var(--fg-3);
   line-height: 1;
 }
 .vp-stat-icon {
@@ -231,6 +235,7 @@
 .vp-stat--silent { padding-left: 2px; }
 .vp-stat--live .vp-stat-body { gap: 3px; }
 .vp-stat--update .vp-stat-body { gap: 3px; }
+.vp-stat--clock .vp-stat-body { gap: 3px; }
 
 /* Live status dot — one meaningful animation */
 .vp-live-dot {
@@ -253,7 +258,7 @@
 }
 .vp-clock {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--fg-2);
   letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
@@ -331,7 +336,7 @@
 .vp-onair-label {
   font-family: var(--font-mono);
   font-size: 9px;
-  color: var(--fg-4);
+  color: var(--fg-3);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   flex-shrink: 0;
@@ -446,6 +451,17 @@
 }
 .vp-rail-left  { width: 252px; flex: none; border-right: 1px solid var(--border); }
 .vp-rail-right { width: 292px; flex: none; border-left: 1px solid var(--border); }
+
+/* The rails are 544px together. On a laptop or tablet that out-weighs the map,
+   which the brief forbids ("the MAP MUST remain the central visual surface"), so
+   narrow them before the left rail auto-collapses at 1180px. */
+@media (max-width: 1400px) {
+  .vp-rail-left  { width: 224px; }
+  .vp-rail-right { width: 264px; }
+}
+@media (max-width: 1240px) {
+  .vp-rail-right { width: 244px; }
+}
 .vp-rail-section { padding: 11px 12px; border-bottom: 1px solid var(--border-subtle); }
 .vp-rail-section:last-child { border-bottom: none; }
 .vp-rail-grow { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 14px; }
@@ -1156,8 +1172,8 @@
   .vp-wordmark { font-size: 13px; }
   /* Drop the least-urgent groups first so the map keeps the screen. */
   .vp-stat--update,
+  .vp-stat--clock,
   .vp-header-div--wide,
-  .vp-clock,
   .vp-header-actions > .vp-header-div,
   .vp-subtitle { display: none; }
   .vp-stat--silent { display: none; }
