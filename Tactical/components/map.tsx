@@ -13,7 +13,7 @@ import {
 } from '@/lib/data'
 import { buildMapStyle, registerPmtilesProtocol, outsideCoverage, type MapViewType } from '@/lib/map-style'
 import type { CommunityDot } from '@/lib/visual-sighting'
-import { aircraftMarkerSVG, reportMarkerSVG, RED, BLUE } from '@/lib/markers'
+import { aircraftMarkerSVG, reportMarkerSVG, isGlowingKind, RED, BLUE } from '@/lib/markers'
 
 // Register the pmtiles:// protocol once, at the map module root. This module
 // is only ever loaded client-side (via the lazy map loader), so it is safe to
@@ -677,6 +677,9 @@ export function VPMap({
         `<span class="vp-co-age">${ageStr}</span>` +
         `<div class="vp-co-stem"></div></div>`
       el.classList.toggle('selected', isSel)
+      // Police units get the blinking blue/red overglow — re-evaluated on every
+      // data pass so the class cannot go stale if a kind's config changes.
+      el.classList.toggle('vp-police', isGlowingKind(r.kind))
       el.onclick = () => onSelectReport(r.id)
       marker.setLngLat([r.lng, r.lat])
     }

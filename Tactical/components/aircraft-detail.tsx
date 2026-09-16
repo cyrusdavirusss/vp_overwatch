@@ -3,16 +3,18 @@
 /**
  * VP·OVERWATCH — AircraftDetail panel (v3)
  * ─────────────────────────────────────────────────────────────────────────
- * Absolute right-side panel (desktop) / bottom 60% (mobile, via vp-theme.css).
+ * Absolute right-side panel (desktop) / draggable bottom sheet (mobile — opens
+ * at the smallest of MOBILE_SNAPS and resizes on a swipe of the grip or header;
+ * its top edge is published as --vp-panel-h so the FAB cluster clears it).
  * Adds: a real photo of the selected tail (planespotters.net, via
  * /api/aircraft/photo, with mandatory attribution), a per-type airframe spec
  * block, and richer live telemetry (range/bearing from the user, vertical
  * state, position, estimated return).
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Aircraft, User } from "@/lib/data";
-import { computeDistance } from "@/lib/data";
+import { computeDistance, isSilentContact } from "@/lib/data";
 
 interface AircraftDetailProps {
   aircraft: Aircraft;
@@ -207,9 +209,18 @@ function Row({ k, v, cls, dim }: { k: string; v: React.ReactNode; cls?: string; 
   );
 }
 
+/**
+ * Mobile snap points, as a fraction of the sheet's container height, smallest
+ * first. The sheet opens at [0]: the panel used to be a fixed 60% of the map
+ * area, which covered the aircraft you just tapped to look at.
+ */
+const MOBILE_SNAPS = [0.32, 0.55, 0.88];
+const DRAG_MIN_F = 0.2;
+const DRAG_MAX_F = 0.92;
+
 export function AircraftDetail({ aircraft: ac, onClose, user }: AircraftDetailProps) {
   const isLanded = ac.landed === true;
-  const isLost = ac.isActive === false && ac.lastSeen !== null && !isLanded;
+  const isLost = isSilentContact(ac);
   const isSilent = ac.isActive === true && (ac.isModeS === true || ac.isMlat === true);
 
   const spec = specFor(ac);
@@ -223,6 +234,95 @@ export function AircraftDetail({ aircraft: ac, onClose, user }: AircraftDetailPr
   const vState = vs == null ? null : vs > 100 ? "CLIMB" : vs < -100 ? "DESCEND" : "LEVEL";
   const etaMin = ac.estimatedReturnSeconds ? Math.round(ac.estimatedReturnSeconds / 60) : 0;
 
+  // ── Mobile bottom-sheet behaviour ────────────────────────────────────────
+  // On the mobile layout this panel is a bottom sheet: it opens at the smallest
+  // snap and resizes when the operator swipes its grip or header up/down.
+  // Desktop is untouched — there it stays a fixed right-hand column.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const [snapIdx, setSnapIdx] = useState(0);
+  const [sheetH, setSheetH] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  // Mirrors sheetH so the pointer handlers never read a stale render value.
+  const heightRef = useRef(0);
+
+  const containerH = () =>
+    panelRef.current?.parentElement?.clientHeight || window.innerHeight;
+
+  // page.tsx switches layouts at window.innerWidth >= 900 — match it exactly so
+  // the sheet never applies to the desktop column.
+  useEffect(() => {
+    const apply = () => setIsMobile(window.innerWidth < 900);
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, []);
+
+  // Size the sheet, and publish its top edge as --vp-panel-h so the FAB cluster
+  // (which sits above the sheet on mobile) keeps clearing it at every snap.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!isMobile) {
+      setSheetH(null);
+      root.style.removeProperty("--vp-panel-h");
+      return;
+    }
+    const apply = () => {
+      const h = Math.round(containerH() * MOBILE_SNAPS[snapIdx]);
+      heightRef.current = h;
+      setSheetH(h);
+      root.style.setProperty("--vp-panel-h", `${h}px`);
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => {
+      window.removeEventListener("resize", apply);
+      root.style.removeProperty("--vp-panel-h");
+    };
+  }, [isMobile, snapIdx]);
+
+  const onDragStart = (e: ReactPointerEvent<HTMLElement>) => {
+    if (!isMobile) return;
+    const el = e.currentTarget;
+    try { el.setPointerCapture(e.pointerId); } catch { /* capture is a nicety */ }
+    dragRef.current = {
+      startY: e.clientY,
+      startH: heightRef.current || containerH() * MOBILE_SNAPS[snapIdx],
+    };
+    setDragging(true);
+  };
+
+  const onDragMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const ch = containerH();
+    // Dragging up (smaller clientY) grows the sheet.
+    const next = Math.min(
+      Math.max(d.startH + (d.startY - e.clientY), ch * DRAG_MIN_F),
+      ch * DRAG_MAX_F,
+    );
+    heightRef.current = next;
+    setSheetH(next);
+  };
+
+  const onDragEnd = () => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    setDragging(false);
+    const ch = containerH();
+    let best = 0;
+    let bestDist = Infinity;
+    MOBILE_SNAPS.forEach((f, i) => {
+      const dist = Math.abs(ch * f - heightRef.current);
+      if (dist < bestDist) { bestDist = dist; best = i; }
+    });
+    const h = Math.round(ch * MOBILE_SNAPS[best]);
+    heightRef.current = h;
+    setSheetH(h);
+    setSnapIdx(best);
+  };
+
   // Range / bearing from the viewer, if we have both fixes.
   let range: string | null = null;
   let brg: string | null = null;
@@ -234,10 +334,41 @@ export function AircraftDetail({ aircraft: ac, onClose, user }: AircraftDetailPr
   }
 
   return (
-    <div className={`vp-detail-panel ${isLost ? "vp-lost" : ""}`}>
+    <div
+      ref={panelRef}
+      className={`vp-detail-panel ${isLost ? "vp-lost" : ""} ${dragging ? "is-dragging" : ""}`}
+      style={
+        isMobile && sheetH != null
+          ? {
+              height: `${sheetH}px`,
+              // No transition while the finger is down, or the sheet lags it.
+              transition: dragging ? "none" : "height 220ms cubic-bezier(0.32,0.72,0,1)",
+            }
+          : undefined
+      }
+    >
+      {/* Mobile grab handle — the affordance for the swipe */}
+      {isMobile && (
+        <div
+          className="vp-sheet-grip"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Drag to resize panel"
+          onPointerDown={onDragStart}
+          onPointerMove={onDragMove}
+          onPointerUp={onDragEnd}
+          onPointerCancel={onDragEnd}
+        />
+      )}
 
-      {/* Header */}
-      <div className="vp-panel-header">
+      {/* Header (draggable on mobile too, so the whole top strip is a target) */}
+      <div
+        className="vp-panel-header"
+        onPointerDown={isMobile ? onDragStart : undefined}
+        onPointerMove={isMobile ? onDragMove : undefined}
+        onPointerUp={isMobile ? onDragEnd : undefined}
+        onPointerCancel={isMobile ? onDragEnd : undefined}
+      >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
             <div className="vp-panel-callsign">{ac.callsign || ac.registration || ac.hex}</div>
@@ -245,6 +376,7 @@ export function AircraftDetail({ aircraft: ac, onClose, user }: AircraftDetailPr
           </div>
           <button
             onClick={onClose}
+            onPointerDown={(e) => e.stopPropagation()}
             style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 4, marginTop: -2 }}
             aria-label="Close panel"
           >

@@ -10,6 +10,7 @@
  */
 
 import type { Aircraft } from "@/lib/data";
+import { isSilentContact } from "@/lib/data";
 
 interface OnAirBarProps {
   aircraft: Aircraft[];
@@ -29,8 +30,11 @@ export function OnAirBar({ aircraft, selectedId, onSelect }: OnAirBarProps) {
       )}
 
       {aircraft.map((ac) => {
-        // Live model: "silent" = was airborne but has dropped off radar.
-        const isSilent = ac.isActive === false && ac.lastSeen !== null;
+        // Live model: "silent" = was airborne but has dropped off radar, and has
+        // NOT been confirmed landed. Shared predicate — the header's LOST SIGNAL,
+        // the map tint, the SILENT counter and this chip must all clear together,
+        // which is what broke when each site carried its own copy of the rule.
+        const isSilent = isSilentContact(ac);
         const isSelected = selectedId === ac.id;
         return (
           <div

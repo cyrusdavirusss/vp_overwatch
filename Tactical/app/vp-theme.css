@@ -689,6 +689,31 @@
 .vp-detail-panel.vp-lost {
   border-left-color: rgba(255,45,45, 0.45);
 }
+
+/* ── Mobile sheet grip ───────────────────────────────────────────────────── */
+/* Rendered only on the mobile layout. touch-action:none is what lets this drag
+   win over the browser's own scroll/pan gesture on Android. */
+.vp-sheet-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  flex: none;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.vp-sheet-grip::after {
+  content: '';
+  width: 44px;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--steel);
+}
+.vp-sheet-grip:active { cursor: grabbing; }
+.vp-sheet-grip:active::after { background: var(--fg-2); }
 .vp-panel-header {
   padding: 14px 16px 12px;
   border-bottom: 1px solid var(--border-subtle);
@@ -1178,20 +1203,35 @@
   .vp-subtitle { display: none; }
   .vp-stat--silent { display: none; }
   .vp-stat-value--mono { font-size: 10px; }
-}
 
-@media (max-width: 640px) {
+  /* The aircraft/report panel is a bottom sheet on the mobile layout — the same
+     <900px breakpoint page.tsx uses. Its height is set by the component through
+     --vp-panel-h so a swipe can resize it, and the FAB cluster reads the same
+     variable so it always clears the sheet; the fallback matches the smallest
+     snap. It was a fixed 60% before, which buried the map and the aircraft on it. */
   .vp-detail-panel {
     width: 100%;
     top: auto;
-    height: 60%;
+    height: var(--vp-panel-h, 42%);
     border-left: none;
     border-top: 1px solid var(--border);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
     box-shadow: var(--shadow-sheet, 0 -8px 24px -4px rgba(0,0,0,0.5));
     animation: none;
+    /* Keep the last row clear of Android's gesture bar / iOS home indicator. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    /* The AR Sky launch button is fixed at z-index 30 in page.tsx and was
+       drawing over the sheet's lower rows, hiding the heading value. The sheet
+       is the foreground surface here, so it stacks above it. */
+    z-index: 35;
   }
-  .vp-fab-cluster { bottom: calc(60% + 16px); }
+  .vp-fab-cluster { bottom: calc(var(--vp-panel-h, 42%) + 16px); }
   .vp-map-pill    { display: none; }
+  /* The header is a drag zone, so it must not scroll the sheet instead. */
+  .vp-detail-panel .vp-panel-header { touch-action: none; }
+}
+
+@media (max-width: 640px) {
   .vp-stat-label  { letter-spacing: 0.1em; }
 }
 
