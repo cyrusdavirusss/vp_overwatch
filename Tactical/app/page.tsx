@@ -30,6 +30,9 @@ export default function VPOverwatch() {
   // Multi-panel layout state. The left rail can be hidden so the map gets
   // everything back — the FAB cluster's filters button is the toggle.
   const [railLeftOpen, setRailLeftOpen] = useState(true)
+  // Set once the user toggles the rail themselves, so responsive auto-collapse
+  // stops overriding their choice.
+  const railTouched = useRef(false)
   // Mobile: the header + ON AIR stack used to eat most of the viewport, so the
   // chrome collapses on demand and the map reclaims the space.
   const [chromeCollapsed, setChromeCollapsed] = useState(false)
@@ -392,6 +395,20 @@ export default function VPOverwatch() {
     return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`
   }
 
+  // The rails are 544px together, so on a laptop or tablet they would out-weigh
+  // the map — which the brief forbids ("the MAP MUST remain the central visual
+  // surface"). Below 1180px the left rail auto-collapses, and it reopens at
+  // >=1280px, unless the user has toggled it by hand.
+  useEffect(() => {
+    const apply = () => {
+      if (railTouched.current) return
+      setRailLeftOpen(window.innerWidth >= 1180)
+    }
+    apply()
+    window.addEventListener('resize', apply)
+    return () => window.removeEventListener('resize', apply)
+  }, [])
+
   if (isDesktop) {
     return (
       <div className="w-screen h-screen bg-ink-0 flex flex-col overflow-hidden" style={{ fontFamily: 'var(--font-ui)' }}>
@@ -530,7 +547,7 @@ export default function VPOverwatch() {
 
             <FabCluster
               onLayers={cycleMapView}
-              onFilters={() => setRailLeftOpen((v) => !v)}
+              onFilters={() => { railTouched.current = true; setRailLeftOpen((v) => !v) }}
               onRecenter={onRecenter}
               onSetLocation={gpsLive ? undefined : () => setShowLocationSetter(true)}
               followUser={followUser}
