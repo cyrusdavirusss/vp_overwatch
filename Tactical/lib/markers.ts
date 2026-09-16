@@ -101,7 +101,7 @@ export function aircraftMarkerSVG(role: Aircraft['role'], size: number): string 
  * The glow is not decoration: the badge artwork cannot read at 30px, so the
  * blinking light is what identifies the unit at that size.
  */
-export const GLOWING_KINDS: Report['kind'][] = ['unmarked']
+export const GLOWING_KINDS: Report['kind'][] = ['marked', 'unmarked']
 
 export function isGlowingKind(kind: Report['kind']): boolean {
   return GLOWING_KINDS.includes(kind)
@@ -112,32 +112,40 @@ export function isGlowingKind(kind: Report['kind']): boolean {
 const RING = (extra = '') =>
   `<circle cx="12" cy="12" r="10" fill="${INK0}" stroke="{C}" stroke-width="1.5" ${extra}></circle>`
 
-// A patrol car in side view — far more legible than the earlier front-on slab,
-// which read as a microbus. Washer/wheel gaps are cut in INK0.
-const CAR = `
-  <path d="M5.6 12.4 L7.1 9.6 c0.3 -0.5 0.7 -0.8 1.3 -0.8 h5.9 c0.6 0 1.1 0.3 1.4 0.8 l1.4 2.8 v2.9 c0 0.5 -0.3 0.8 -0.8 0.8 h-0.4 c-0.5 0 -0.8 -0.3 -0.8 -0.8 v-0.5 h-8.2 v0.5 c0 0.5 -0.3 0.8 -0.8 0.8 h-0.4 c-0.5 0 -0.8 -0.3 -0.8 -0.8 z" fill="{C}"></path>
-  <path d="M8.1 9.7 h3.1 v2.1 h-4 z" fill="${INK0}" opacity="0.85"></path>
-  <path d="M12 9.7 h2.3 l1.1 2.1 h-3.4 z" fill="${INK0}" opacity="0.85"></path>
-  <circle cx="8.3" cy="15.6" r="1.25" fill="${INK0}"></circle>
-  <circle cx="15.7" cy="15.6" r="1.25" fill="${INK0}"></circle>`
+// The drawn patrol-car glyph that used to back `marked` is gone: the operator's own
+// car artwork now fills both car kinds. It was removed as dead code in the same change
+// that introduced the art, so no fallback is hiding here — if an art file goes missing
+// the glyph simply does not draw. Recoverable from the previous commit if ever wanted
+// back as a vector fallback.
+
+// Operator-supplied raster/vector art for the vehicle-ish kinds. The two caps come
+// from the stock sheet he sent (blue hat + black hat), cropped, traced to SVG by
+// /tmp/vectorise_hats.py and assigned as he directed:
+//
+//   marked-hat.svg    -> marked    the BLUE cap, as supplied
+//   unmarked-hat.svg  -> unmarked  the black cap LIFTED TO STEEL GREY, because at 30px
+//                                  the black version collapses into the dark map
+//                                  background (measured: a dark blob with a gold dot)
+//   camera-badge.png  -> camera    the speed camera from his 3-logo sheet (still raster;
+//                                  vectorising it too is a one-command follow-up)
+//
+// Vector, not raster: at 30px a raster marker blurs, an SVG stays crisp at every size.
+// Served as FILES (one request each, browser-cached) rather than base64-inlined per
+// marker: ~24 render at once and this box runs on 7.4GB of RAM.
+//
+// NOTE these kinds no longer take the `{C}` status tint — the art carries its own
+// palette, and identity is carried by the blue/red blink instead (see GLOWING_KINDS).
+const ART = (href: string) =>
+  `<image href="${href}" x="0.5" y="0.5" width="23" height="23" preserveAspectRatio="xMidYMid meet"></image>`
 
 const REPORT_TEMPLATES: Record<Report['kind'], string> = {
-  // marked: roof lightbar + door stripe — the two cues that say "police car"
-  marked: RING() + CAR + `
-  <rect x="9.6" y="7.5" width="4.8" height="1.2" rx="0.4" fill="{C}" stroke="${INK0}" stroke-width="0.3"></rect>
-  <path d="M6.6 13.9 h10.8" stroke="${INK0}" stroke-width="0.75" opacity="0.75"></path>`,
+  // marked: the operator's blue police cap.
+  marked: ART('/markers/marked-hat.svg'),
 
-  // unmarked: the pixel-art police badge supplied by the operator, replacing the
-  // drawn car glyph. Served as a FILE (one request, browser-cached) rather than
-  // base64-inlined into every marker — there are ~24 of these on the map at once
-  // and this box runs on 7.4GB of RAM, so 24 inline copies of a 1MB image would
-  // be reckless.
-  //
-  // NOTE: the `{C}` status colour is deliberately unused here. The badge carries
-  // its own palette (sky blue / navy / tartan), so a status tint would fight the
-  // artwork. That means `unmarked` no longer changes colour with its state — the
-  // other kinds still do.
-  unmarked: `<image href="/markers/unmarked-badge.png" x="0.5" y="0.5" width="23" height="23" preserveAspectRatio="xMidYMid meet"></image>`,
+  // unmarked: the grey police cap. The two car badges from the earlier 3-logo sheet
+  // (marked-police-car.png, unmarked-car.png) are kept in public/markers but are now
+  // unused by any kind, as is the officer badge (unmarked-badge.png).
+  unmarked: ART('/markers/unmarked-hat.svg'),
 
   // hidden: visibility-OFF. An open eye means "visible", which is backwards for
   // a unit that is hiding; the slash is what makes it read as concealed.
@@ -170,14 +178,15 @@ const REPORT_TEMPLATES: Record<Report['kind'], string> = {
   <path d="M6.3 18.3 L17.7 5.7" stroke="${INK0}" stroke-width="3.2" stroke-linecap="round"></path>
   <path d="M6.3 18.3 L17.7 5.7" stroke="{C}" stroke-width="1.6" stroke-linecap="round"></path>`,
 
-  // camera: kept — it already read clearly as a speed camera. Proportions tidied.
-  camera: RING() + `
-  <rect x="6.2" y="9.4" width="10.4" height="6.6" rx="0.9" fill="{C}"></rect>
-  <circle cx="11.2" cy="12.7" r="2.3" fill="${INK0}"></circle>
-  <circle cx="11.2" cy="12.7" r="1.15" fill="{C}"></circle>
-  <rect x="13.9" y="7.9" width="2.1" height="1.6" rx="0.25" fill="{C}"></rect>
-  <rect x="11.4" y="16" width="1.4" height="2.6" fill="{C}"></rect>
-  <path d="M9.4 18.6 h5.4" stroke="{C}" stroke-width="1.4" stroke-linecap="round"></path>`,
+  // camera: the sheet's speed-camera badge, replacing the drawn glyph.
+  //
+  // FLAG: this badge's shield is AMBER, and amber is semantic in this app (warnings,
+  // MLAT, fuel-overrun). A speed camera is not a warning state, so amber vehicle art
+  // risks reading as one. Recolouring just the shield border to the app blue is a
+  // one-line change to the asset if that bothers him.
+  // camera: the speed camera cropped from the operator's 3-logo sheet, now traced to
+  // SVG with the same pipeline as the caps so all three markers are vector.
+  camera: ART('/markers/camera-badge.svg'),
 }
 
 export function reportMarkerSVG(
