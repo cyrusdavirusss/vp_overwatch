@@ -164,7 +164,7 @@ export function SubscribeModal({ onClose }: SubscribeModalProps) {
           </div>
 
           {error && (
-            <div style={{ marginTop: 8, padding: "6px 10px", background: "rgba(255,45,45,0.1)", border: "1px solid rgba(255,45,45,0.3)", borderRadius: 4, fontFamily: "'Space Mono', monospace", fontSize: 10, color: "var(--vp-red)" }}>
+            <div style={{ marginTop: 8, padding: "6px 10px", background: "rgba(255,45,45,0.1)", border: "1px solid rgba(255,45,45,0.3)", borderRadius: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--vp-red)" }}>
               {error}
             </div>
           )}

@@ -27,6 +27,12 @@ const SCRUB_H = 64
 
 export default function VPOverwatch() {
   const [isDesktop, setIsDesktop] = useState(false)
+  // Multi-panel layout state. The left rail can be hidden so the map gets
+  // everything back — the FAB cluster's filters button is the toggle.
+  const [railLeftOpen, setRailLeftOpen] = useState(true)
+  // Mobile: the header + ON AIR stack used to eat most of the viewport, so the
+  // chrome collapses on demand and the map reclaims the space.
+  const [chromeCollapsed, setChromeCollapsed] = useState(false)
   const [screenDims, setScreenDims] = useState({ w: 393, h: 852 })
 
   useEffect(() => {
@@ -362,10 +368,10 @@ export default function VPOverwatch() {
         position: 'fixed', bottom: 20, right: 16, zIndex: 30,
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '11px 17px', borderRadius: 999,
-        background: 'rgba(139,92,246,0.18)', border: '1px solid rgba(139,92,246,0.55)',
-        color: '#c4b5fd', backdropFilter: 'blur(8px)',
+        background: 'rgba(45,140,255,0.18)', border: '1px solid rgba(45,140,255,0.55)',
+        color: 'var(--blue-hi)', backdropFilter: 'blur(8px)',
         fontFamily: 'var(--font-mono, monospace)', fontSize: 12, fontWeight: 700, letterSpacing: '0.14em',
-        boxShadow: '0 4px 18px rgba(0,0,0,0.45), 0 0 14px rgba(139,92,246,0.25)', cursor: 'pointer',
+        boxShadow: '0 4px 18px rgba(0,0,0,0.45), 0 0 14px rgba(45,140,255,0.22)', cursor: 'pointer',
       }}
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -376,6 +382,16 @@ export default function VPOverwatch() {
     </button>
   ) : null
 
+  /** Compact relative age for the VPS report list. `reportedAgo` is in SECONDS. */
+  const formatAgo = (secs?: number | null): string => {
+    if (secs == null) return '—'
+    if (secs < 60) return 'now'
+    const m = Math.floor(secs / 60)
+    if (m < 60) return `${m}m`
+    const h = Math.floor(m / 60)
+    return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`
+  }
+
   if (isDesktop) {
     return (
       <div className="w-screen h-screen bg-ink-0 flex flex-col overflow-hidden" style={{ fontFamily: 'var(--font-ui)' }}>
@@ -385,6 +401,7 @@ export default function VPOverwatch() {
           silentCount={silentCount}
           isLostSignal={isLostSignal}
           isConnected={isOnline}
+          lastUpdate={liveData.lastUpdate}
           onSubscribeClick={() => setShowSubscribe(true)}
         />
 
@@ -395,8 +412,74 @@ export default function VPOverwatch() {
           onSelect={onSelectAircraft}
         />
 
-        {/* Main content area — full-bleed map with overlay panels */}
-        <div className="flex-1 relative">
+        {/* Main content — three columns: left rail, map, right rail. The panels
+            sit AROUND the map instead of on top of it, so the map stops being
+            buried under chips while remaining the largest single surface. */}
+        <div className="flex-1 flex min-h-0">
+          {railLeftOpen && (
+          <aside className="vp-rail vp-rail-left">
+            <div className="vp-rail-section">
+              <div className="vp-rail-title">Map view</div>
+              <div className="vp-view-tabs">
+                {(['radar', 'dark', 'light', 'grayscale', 'satellite'] as const).map((v) => (
+                  <button
+                    key={v}
+                    className={`vp-view-tab ${mapView === v ? 'active' : ''}`}
+                    onClick={() => setMapView(v)}
+                  >
+                    {v === 'radar' ? 'RADAR' : v === 'dark' ? 'DARK' : v === 'light' ? 'LIGHT' : v === 'grayscale' ? 'GRAY' : 'SAT'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="vp-rail-section">
+              <div className="vp-rail-title">Layers &amp; filters</div>
+              <FilterPanel
+                embedded
+                filters={filters}
+                onFilterChange={setFilters}
+                onClose={() => setRailLeftOpen(false)}
+              />
+            </div>
+
+            {/* Report submission lived as a red-bordered chip floating over the
+                map, where it read as an orphaned callout with no geographic
+                anchor. It belongs in the rail with the rest of the reporting UI. */}
+            <div className="vp-rail-section">
+              <div className="vp-rail-title">Report a contact</div>
+              <VPSButton
+                onReport={onReportHazard}
+                onPickSighting={onPickSighting}
+                pickedPoint={sightingPoint}
+                onCancelPick={onCancelSightingPick}
+              />
+            </div>
+
+            <div className="vp-rail-section vp-rail-grow">
+              <div className="vp-rail-title">
+                <span>VPS report</span>
+                <span className="text-fg-5">{allGroundContacts.length}</span>
+              </div>
+              {allGroundContacts.length === 0 ? (
+                <div className="vp-empty">No ground contacts</div>
+              ) : (
+                allGroundContacts.slice(0, 40).map((r) => (
+                  <button
+                    key={r.id}
+                    className={`vp-vps-row ${selectedReportId === r.id ? 'active' : ''}`}
+                    onClick={() => onSelectReport(r.id)}
+                  >
+                    <span className="vp-vps-time">{formatAgo(r.reportedAgo)}</span>
+                    <span className="vp-vps-desc">{r.descr || r.street || r.kind}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </aside>
+          )}
+
+          <main className="flex-1 relative min-w-0">
           {isLostSignal && <div className="vp-map-lost-tint" />}
             <LazyMap
               aircraft={filteredAircraft}
@@ -431,14 +514,8 @@ export default function VPOverwatch() {
               viewType={mapView}
             />
 
-            {/* Map view pill */}
-            <div className="vp-map-pill">
-              {(['radar', 'dark', 'light', 'grayscale', 'satellite'] as const).map((v) => (
-                <button key={v} className={`vp-map-pill-btn ${mapView === v ? 'active' : ''}`} onClick={() => setMapView(v)}>
-                  {v === 'radar' ? 'RADAR' : v === 'dark' ? 'DARK' : v === 'light' ? 'LIGHT' : v === 'grayscale' ? 'GRAY' : 'SAT'}
-                </button>
-              ))}
-            </div>
+            {/* Map-view tabs now live in the left rail — the reference dashboard
+                puts them in the sidebar rather than floating over the map. */}
 
             <div className="absolute top-2 left-2 z-10 flex items-center gap-2 px-2 py-1 rounded bg-ink-0/80 border border-border-subtle" style={{ backdropFilter: 'blur(8px)' }}>
               <span className={`num text-[9px] ${clientLocation.position ? 'text-fg-3' : 'text-[var(--amber)] font-semibold'}`}>
@@ -448,19 +525,12 @@ export default function VPOverwatch() {
               <span className="num text-[9px] text-fg-3">HDG ---°</span>
             </div>
 
-            {/* VPS — community report button (left side) */}
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
-              <VPSButton
-                onReport={onReportHazard}
-                onPickSighting={onPickSighting}
-                pickedPoint={sightingPoint}
-                onCancelPick={onCancelSightingPick}
-              />
-            </div>
+            {/* VPS report submission now lives in the left rail (see "Report a
+                contact"), so nothing floats over the map here. */}
 
             <FabCluster
               onLayers={cycleMapView}
-              onFilters={() => setFilterOpen((v) => !v)}
+              onFilters={() => setRailLeftOpen((v) => !v)}
               onRecenter={onRecenter}
               onSetLocation={gpsLive ? undefined : () => setShowLocationSetter(true)}
               followUser={followUser}
@@ -563,14 +633,83 @@ export default function VPOverwatch() {
             <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} user={userPosition} />
           )}
 
-          {/* Ground report detail — right panel */}
-          {selectedReport && (
-            <div className="absolute top-0 right-0 bottom-0 w-[320px] z-30 overflow-y-auto bg-ink-1 border-l border-border">
-              <ReportDetail report={selectedReport} user={userPosition} onClose={onCloseDetail} />
+          </main>
+
+          {/* ── RIGHT RAIL ── */}
+          <aside className="vp-rail vp-rail-right">
+            <div className="vp-rail-section">
+              <div className="vp-rail-title">Air / Gnd status</div>
+              <div className="vp-stat-grid">
+                <div className="vp-stat-card">
+                  <div className={`vp-stat-num ${filteredAircraft.length ? 'is-live' : ''}`}>
+                    {String(filteredAircraft.length).padStart(2, '0')}
+                  </div>
+                  <div className="vp-stat-label">Aircraft tracked</div>
+                </div>
+                <div className="vp-stat-card">
+                  <div className={`vp-stat-num ${allGroundContacts.length ? 'is-live' : ''}`}>
+                    {String(allGroundContacts.length).padStart(2, '0')}
+                  </div>
+                  <div className="vp-stat-label">Ground active</div>
+                </div>
+                <div className="vp-stat-card">
+                  <div className="vp-stat-num">{String(silentCount).padStart(2, '0')}</div>
+                  <div className="vp-stat-label">Silent</div>
+                </div>
+                <div className="vp-stat-card">
+                  <div className="vp-stat-num">{String(mlatCount + modeSCount).padStart(2, '0')}</div>
+                  <div className="vp-stat-label">MLAT / Mode-S</div>
+                </div>
+              </div>
             </div>
-          )}
+
+            <div className="vp-rail-section vp-rail-grow">
+              <div className="vp-rail-title">VPS report detail</div>
+              {selectedReport ? (
+                <ReportDetail report={selectedReport} user={userPosition} onClose={onCloseDetail} />
+              ) : (
+                <div className="vp-empty">Select a contact from the report list</div>
+              )}
+            </div>
+
+            <div className="vp-rail-section">
+              <div className="vp-rail-title">AR Sky</div>
+              <button
+                className="vp-view-tab"
+                style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
+                onClick={() => setShowAR(true)}
+              >
+                Launch AR
+              </button>
+            </div>
+          </aside>
         </div>
-        {arLaunch}
+
+        {/* Bottom status bar. Only values the app actually holds — relay state,
+            poll interval, coverage, last update. The reference shows a version
+            string; this app has none, so none is shown rather than inventing one. */}
+        <footer className="vp-status-bar">
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className={`vp-status-dot ${isOnline ? 'on' : 'off'}`} />
+            {isOnline ? 'System online' : 'System offline'}
+          </span>
+          <span>Feed {liveData.relay?.connected ? 'connected' : 'offline'}</span>
+          {liveData.relay?.pollIntervalSec ? (
+            <span>Poll {Math.round(liveData.relay.pollIntervalSec / 60)} min</span>
+          ) : null}
+          {liveData.relay?.coverageRegions ? (
+            <span>Coverage {liveData.relay.coverageRegions} regions</span>
+          ) : null}
+          <span>
+            Last update{' '}
+            {liveData.lastUpdate
+              ? new Date(liveData.lastUpdate).toLocaleTimeString('en-AU', { hour12: false })
+              : '—'}
+          </span>
+        </footer>
+        {/* The floating AR launcher is mobile-only: on desktop the right rail
+            carries an AR Sky panel, so rendering both would be two controls for
+            one action. */}
         {arOverlay}
       {showSubscribe && <SubscribeModal onClose={() => setShowSubscribe(false)} />}
       <TermsGate />
@@ -583,6 +722,8 @@ export default function VPOverwatch() {
   const MOBILE_ONAIR_H = 28
   const MOBILE_SCRUB_H = 96
   const MAP_H = screenDims.h - MOBILE_STRIP_H - MOBILE_ONAIR_H - MOBILE_SCRUB_H
+  // Collapsed, the chrome leaves the viewport entirely and the map starts at 0.
+  const chromeH = chromeCollapsed ? 0 : MOBILE_STRIP_H + MOBILE_ONAIR_H
 
   return (
     <div className="min-h-screen bg-ink-0 flex items-center justify-center">
@@ -594,30 +735,54 @@ export default function VPOverwatch() {
           fontFamily: 'var(--font-ui)',
         }}
       >
-        <VPHeader
-          airCount={filteredAircraft.length}
-          gndCount={allGroundContacts.length}
-          silentCount={silentCount}
-          isLostSignal={isLostSignal}
-          isConnected={isOnline}
-          onSubscribeClick={() => setShowSubscribe(true)}
-        />
-
-        {/* ON AIR bar — persistent airframe indicator, never filtered */}
+        {/* Collapsible chrome: header + ON AIR bar together. On a phone this
+            stack consumed the top of the screen, so the handle below slides it
+            away and the map takes the space back — it resizes itself through the
+            ResizeObserver in components/map.tsx. */}
         <div
-          className="absolute left-0 right-0 z-10"
-          style={{ top: MOBILE_STRIP_H, height: MOBILE_ONAIR_H }}
+          className="vp-chrome absolute left-0 right-0 top-0 z-20"
+          style={{
+            transform: chromeCollapsed
+              ? `translateY(-${MOBILE_STRIP_H + MOBILE_ONAIR_H}px)`
+              : 'none',
+          }}
         >
-          <VPOnAirBar
-            aircraft={liveData.aircraft}
-            selectedId={selectedAircraftId}
-            onSelect={onSelectAircraft}
+          <VPHeader
+            airCount={filteredAircraft.length}
+            gndCount={allGroundContacts.length}
+            silentCount={silentCount}
+            isLostSignal={isLostSignal}
+            isConnected={isOnline}
+            lastUpdate={liveData.lastUpdate}
+            onSubscribeClick={() => setShowSubscribe(true)}
           />
+
+          {/* ON AIR bar — persistent airframe indicator, never filtered */}
+          <div style={{ height: MOBILE_ONAIR_H }}>
+            <VPOnAirBar
+              aircraft={liveData.aircraft}
+              selectedId={selectedAircraftId}
+              onSelect={onSelectAircraft}
+            />
+          </div>
         </div>
+
+        {/* Collapse handle — sits on the seam between chrome and map. */}
+        <button
+          className="vp-chrome-collapse"
+          style={{ top: chromeH, transition: 'top 240ms var(--ease-out, ease)' }}
+          onClick={() => setChromeCollapsed((v) => !v)}
+          aria-label={chromeCollapsed ? 'Show header' : 'Hide header'}
+          title={chromeCollapsed ? 'Show header' : 'Hide header'}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            {chromeCollapsed ? <path d="M6 9l6 6 6-6" /> : <path d="M6 15l6-6 6 6" />}
+          </svg>
+        </button>
 
         <div
           className="absolute left-0 right-0"
-          style={{ top: MOBILE_STRIP_H + MOBILE_ONAIR_H, bottom: 0 }}
+          style={{ top: chromeH, bottom: 0, transition: 'top 240ms var(--ease-out, ease)' }}
         >
           {isLostSignal && <div className="vp-map-lost-tint" />}
           <LazyMap

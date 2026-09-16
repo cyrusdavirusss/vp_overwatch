@@ -148,7 +148,7 @@ function AircraftPhoto({ ac, spec }: { ac: Aircraft; spec: Spec }) {
         // Explicit height + no-shrink: an aspect-ratio box collapses to ~0 as a
         // flex item in this column-flex panel, so fix the height instead.
         position: "relative", width: "100%", height: 172, flexShrink: 0,
-        background: "radial-gradient(120% 120% at 50% 30%, rgba(0,212,255,0.06), rgba(0,0,0,0.35))",
+        background: "radial-gradient(120% 120% at 50% 30%, rgba(45,140,255,0.06), rgba(0,0,0,0.35))",
         borderTop: "1px solid rgba(255,255,255,0.08)", overflow: "hidden",
         display: "flex", alignItems: "center", justifyContent: "center",
       }}
@@ -274,7 +274,7 @@ export function AircraftDetail({ aircraft: ac, onClose, user }: AircraftDetailPr
       <Row
         k="VERTICAL"
         v={vs == null ? "—" : (
-          <span style={{ color: vState === "CLIMB" ? "var(--vp-cyan,#00d4ff)" : vState === "DESCEND" ? "var(--vp-amber,#ffb020)" : undefined }}>
+          <span style={{ color: vState === "CLIMB" ? "var(--vp-cyan,#00d4ff)" : vState === "DESCEND" ? "var(--vp-amber,#ffaa00)" : undefined }}>
             {vState === "CLIMB" ? "▲ " : vState === "DESCEND" ? "▼ " : "• "}
             {vs > 0 ? "+" : ""}{vs} fpm
           </span>

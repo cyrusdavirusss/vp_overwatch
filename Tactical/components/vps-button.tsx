@@ -57,7 +57,7 @@ const MODES: { mode: VPSMode; label: string; sub: string; color: string }[] = [
 ]
 
 const base: React.CSSProperties = {
-  fontFamily: "'Space Mono', monospace",
+  fontFamily: "var(--font-mono)",
   letterSpacing: '0.1em',
   cursor: 'pointer',
   userSelect: 'none',
@@ -95,7 +95,7 @@ const dot = (color: string): React.CSSProperties => ({
 })
 
 const sub: React.CSSProperties = {
-  fontFamily: "'Space Mono', monospace",
+  fontFamily: "var(--font-mono)",
   fontSize: 8,
   letterSpacing: '0.12em',
   opacity: 0.66,
@@ -149,7 +149,7 @@ export function VPSButton({ onReport, onPickSighting, pickedPoint, onCancelPick 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
           <span
             style={{
-              fontFamily: "'Space Mono', monospace",
+              fontFamily: "var(--font-mono)",
               fontSize: 8,
               fontWeight: 700,
               letterSpacing: '0.16em',
@@ -245,10 +245,10 @@ export function VPSButton({ onReport, onPickSighting, pickedPoint, onCancelPick 
           borderRadius: 12,
           gap: 1,
           fontWeight: 700,
-          background: confirm ? 'rgba(0,212,255,0.15)' : open ? 'rgba(255,45,45,0.2)' : 'rgba(255,45,45,0.12)',
+          background: confirm ? 'rgba(45,140,255,0.15)' : open ? 'rgba(255,45,45,0.2)' : 'rgba(255,45,45,0.12)',
           border: `1.5px solid ${confirm ? 'var(--vp-cyan)' : 'var(--vp-red)'}`,
           color: confirm ? 'var(--vp-cyan)' : 'var(--vp-red)',
-          boxShadow: `0 0 16px ${confirm ? 'rgba(0,212,255,0.3)' : 'rgba(255,45,45,0.25)'}`,
+          boxShadow: `0 0 16px ${confirm ? 'rgba(45,140,255,0.3)' : 'rgba(255,45,45,0.25)'}`,
         }}
       >
         {confirm ? (
