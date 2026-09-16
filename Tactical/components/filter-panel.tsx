@@ -75,7 +75,7 @@ export function FilterPanel({ filters, onFilterChange, onClose, embedded = false
         />
         <ToggleRow
           label="Ground reports"
-          sub="Waze pipeline"
+          sub="WazeAPI feed"
           checked={filters.reports}
           onChange={toggle('reports')}
         />
