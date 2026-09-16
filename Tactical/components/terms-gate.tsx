@@ -101,7 +101,7 @@ export function TermsGate() {
                 href="/terms"
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ fontFamily: "'Space Mono', monospace", fontSize: 12, color: '#3b82f6' }}
+                style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: '#3b82f6' }}
               >
                 Read the full terms of use →
               </a>
@@ -123,7 +123,7 @@ export function TermsGate() {
         rel="noopener noreferrer"
         style={{
           position: 'fixed', left: 8, bottom: 6, zIndex: 90,
-          fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: '0.12em',
+          fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: '0.12em',
           color: 'rgba(255,255,255,0.35)', textDecoration: 'none',
         }}
       >

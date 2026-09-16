@@ -18,7 +18,7 @@ function readCsrf(): string {
 }
 
 const STATE_STYLE: Record<string, { label: string; color: string }> = {
-  live_airborne: { label: 'AIRBORNE', color: '#00d4ff' },
+  live_airborne: { label: 'AIRBORNE', color: 'var(--blue-hi)' },
   live_ground: { label: 'ON GROUND', color: '#5BD68A' },
   stale: { label: 'STALE', color: '#E8B923' },
   unavailable: { label: 'NO SIGNAL', color: '#8892a0' },
@@ -127,7 +127,7 @@ export default function DashboardPage() {
                 <td style={td}>{fmt(a.altitudeMetres, 0, ' m')}</td>
                 <td style={td}>{fmt(a.groundSpeedKt, 0, ' kt')}</td>
                 <td style={td}>{a.positionAgeSeconds === null ? '—' : `${Math.round(a.positionAgeSeconds)}s`}</td>
-                <td style={{ ...td, fontVariantNumeric: 'tabular-nums', color: a.state === 'live_airborne' ? '#00d4ff' : '#8892a0' }}>
+                <td style={{ ...td, fontVariantNumeric: 'tabular-nums', color: a.state === 'live_airborne' ? 'var(--blue-hi)' : '#8892a0' }}>
                   {p ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : '—'}
                 </td>
               </tr>
@@ -137,7 +137,7 @@ export default function DashboardPage() {
       </table>
 
       <div style={{ marginTop: 20, padding: 12, border: '1px solid #1c2230', borderRadius: 6 }}>
-        <button onClick={shareLocation} style={{ ...btn, borderColor: '#00d4ff', color: '#00d4ff' }}>
+        <button onClick={shareLocation} style={{ ...btn, borderColor: 'var(--blue-hi)', color: 'var(--blue-hi)' }}>
           Share my location for proximity alerts
         </button>
         <p style={{ color: '#8892a0', fontSize: 12, marginTop: 8 }}>{locStatus}</p>
@@ -197,7 +197,7 @@ function AuthForm({ onAuthed }: { onAuthed: () => void }) {
       <input type="email" required placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} style={input} autoComplete="email" />
       <input type="password" required placeholder="password (min 10 chars)" value={password} onChange={(e) => setPassword(e.target.value)} style={input} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
       {err && <p style={{ color: '#FF4757', fontSize: 12 }}>{err}</p>}
-      <button type="submit" disabled={busy} style={{ ...btn, width: '100%', borderColor: '#00d4ff', color: '#00d4ff' }}>
+      <button type="submit" disabled={busy} style={{ ...btn, width: '100%', borderColor: 'var(--blue-hi)', color: 'var(--blue-hi)' }}>
         {busy ? '…' : mode === 'login' ? 'Sign in' : 'Register'}
       </button>
       <button type="button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')} style={{ ...btn, width: '100%', marginTop: 8, border: 'none', color: '#8892a0' }}>

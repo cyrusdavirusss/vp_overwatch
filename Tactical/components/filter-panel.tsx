@@ -26,9 +26,12 @@ interface FilterPanelProps {
   filters: Filters
   onFilterChange: (filters: Filters) => void
   onClose: () => void
+  /** Rendered inside the desktop left rail: drop the floating-card chrome and
+   *  the header/close button, since the rail section owns those there. */
+  embedded?: boolean
 }
 
-export function FilterPanel({ filters, onFilterChange, onClose }: FilterPanelProps) {
+export function FilterPanel({ filters, onFilterChange, onClose, embedded = false }: FilterPanelProps) {
   const toggle = (key: keyof Filters) => () =>
     onFilterChange({ ...filters, [key]: !filters[key] })
 
@@ -37,10 +40,16 @@ export function FilterPanel({ filters, onFilterChange, onClose }: FilterPanelPro
 
   return (
     <div
-      className="bg-ink-1 border border-border rounded-lg p-4 mx-3 max-h-[calc(100%-88px)] overflow-y-auto"
-      style={{ boxShadow: 'var(--shadow-panel)' }}
+      className={
+        embedded
+          ? ''
+          : 'bg-ink-1 border border-border rounded-lg p-4 mx-3 max-h-[calc(100%-88px)] overflow-y-auto'
+      }
+      style={embedded ? undefined : { boxShadow: 'var(--shadow-panel)' }}
     >
-      {/* Header */}
+      {/* Header — only when floating as a dialog. Embedded in the rail, the
+          section supplies the title and there is nothing to close. */}
+      {!embedded && (
       <div className="flex items-center justify-between mb-3.5 pb-3 border-b border-border-subtle">
         <div className="flex items-center gap-2 text-sm font-semibold text-fg-1">
           <Icon name="layers" size={16} />
@@ -54,6 +63,7 @@ export function FilterPanel({ filters, onFilterChange, onClose }: FilterPanelPro
           <Icon name="close" size={18} />
         </button>
       </div>
+      )}
 
       {/* Layers */}
       <Section label="Layers">

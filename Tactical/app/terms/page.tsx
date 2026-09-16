@@ -19,7 +19,7 @@ const CONTACT_EMAIL = 'contact@vpoverwatch.com'
 const EFFECTIVE_DATE = '15 September 2026'
 
 const H2: React.CSSProperties = {
-  fontFamily: "'Space Mono', monospace",
+  fontFamily: "var(--font-mono)",
   fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
   color: '#e8f0ff', margin: '26px 0 10px',
 }
@@ -40,11 +40,11 @@ export default function TermsPage() {
   return (
     <main style={{ minHeight: '100vh', background: '#0b0e13', padding: '40px 20px 80px' }}>
       <article style={{ maxWidth: 760, margin: '0 auto' }}>
-        <a href="/" style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, letterSpacing: '0.1em', color: '#3b82f6', textDecoration: 'none' }}>
+        <a href="/" style={{ fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: '0.1em', color: '#3b82f6', textDecoration: 'none' }}>
           ← BACK TO THE MAP
         </a>
 
-        <h1 style={{ fontFamily: "'Space Mono', monospace", fontSize: 22, color: '#e8f0ff', margin: '22px 0 6px', lineHeight: 1.3 }}>
+        <h1 style={{ fontFamily: "var(--font-mono)", fontSize: 22, color: '#e8f0ff', margin: '22px 0 6px', lineHeight: 1.3 }}>
           Terms of Use, Acceptable Use &amp; Privacy Notice
         </h1>
         <p style={{ ...P, fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 4 }}>

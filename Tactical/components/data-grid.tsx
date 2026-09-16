@@ -129,7 +129,7 @@ export function DataGrid({
                   <tr
                     key={a.id}
                     className={`border-b border-border-subtle cursor-pointer transition-colors ${
-                      sel ? 'bg-[rgba(77,124,255,0.08)]' : 'hover:bg-ink-1'
+                      sel ? 'bg-[var(--blue-wash)]' : 'hover:bg-ink-1'
                     }`}
                     onClick={() => onSelectAircraft(a.id)}
                   >
@@ -194,7 +194,7 @@ export function DataGrid({
                   <tr
                     key={r.id}
                     className={`border-b border-border-subtle cursor-pointer transition-colors ${
-                      sel ? 'bg-[rgba(77,124,255,0.08)]' : 'hover:bg-ink-1'
+                      sel ? 'bg-[var(--blue-wash)]' : 'hover:bg-ink-1'
                     }`}
                     onClick={() => onSelectReport(r.id)}
                   >

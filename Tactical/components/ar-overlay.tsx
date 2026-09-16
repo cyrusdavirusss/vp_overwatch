@@ -632,7 +632,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
       />
       {camError && (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-          <span style={{ color: "rgba(255,255,255,0.25)", fontFamily: "'Space Mono', monospace", fontSize: 11, letterSpacing: "0.2em", textAlign: "center" }}>
+          <span style={{ color: "rgba(255,255,255,0.25)", fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: "0.2em", textAlign: "center" }}>
             {camError.toUpperCase()}
             <br />POINT AT SKY
           </span>
@@ -640,7 +640,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
       )}
 
       {/* Heading tape */}
-      <div style={{ position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", fontFamily: "'Space Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.7)", letterSpacing: "0.15em", pointerEvents: "none" }}>
+      <div style={{ position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", fontFamily: "var(--font-mono)", fontSize: 11, color: "rgba(255,255,255,0.7)", letterSpacing: "0.15em", pointerEvents: "none" }}>
         {view.azimuth != null ? `${Math.round(view.azimuth)}° ${compassDir(view.azimuth)}` : "NO COMPASS"}
         {"  ·  "}
         {projected.filter((p) => p.onScreen).length}/{projected.length} {showCivil ? "AIR" : "LE AIR"}
@@ -658,7 +658,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
         aria-pressed={showCivil}
         style={{
           position: "absolute", top: 34, left: 12, zIndex: 8,
-          fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
+          fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em",
           padding: "5px 10px", borderRadius: 14, cursor: "pointer",
           background: showCivil ? "rgba(34,211,238,0.16)" : "rgba(255,255,255,0.06)",
           border: `1px solid ${showCivil ? CYAN : "rgba(255,255,255,0.3)"}`,
@@ -734,12 +734,12 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
               )}
             </div>
             {!isTarget && (
-              <div style={{ marginTop: 3, fontFamily: "'Space Mono', monospace", fontSize: 9, color, whiteSpace: "nowrap", textShadow: "0 1px 2px #000", letterSpacing: "0.05em" }}>
+              <div style={{ marginTop: 3, fontFamily: "var(--font-mono)", fontSize: 9, color, whiteSpace: "nowrap", textShadow: "0 1px 2px #000", letterSpacing: "0.05em" }}>
                 {p.ac.callsign || p.ac.hex}
               </div>
             )}
             {isLocked && (
-              <div style={{ marginTop: 3, fontFamily: "'Space Mono', monospace", fontSize: 8, color, whiteSpace: "nowrap", textShadow: "0 1px 2px #000", letterSpacing: "0.1em", textAlign: "center" }}>
+              <div style={{ marginTop: 3, fontFamily: "var(--font-mono)", fontSize: 8, color, whiteSpace: "nowrap", textShadow: "0 1px 2px #000", letterSpacing: "0.1em", textAlign: "center" }}>
                 {view.dwellMode === "break" && view.dwellProgress > 0.01 ? "RELEASING…" : "LOCKED"}
               </div>
             )}
@@ -785,7 +785,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
             <div
               style={{
                 marginTop: 4,
-                fontFamily: "'Space Mono', monospace",
+                fontFamily: "var(--font-mono)",
                 fontSize: 9,
                 fontWeight: 700,
                 color: GROUND,
@@ -811,10 +811,10 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
           key={dot.aircraftHex}
           style={{ position: "absolute", left: `${20 + i * 25}%`, top: `${70}%`, transform: "translate(-50%, -50%)", pointerEvents: "none" }}
         >
-          <div style={{ width: 18, height: 18, borderRadius: "50%", border: "2px solid #a78bfa", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ width: 4, height: 4, borderRadius: "50%", background: "#a78bfa" }} />
+          <div style={{ width: 18, height: 18, borderRadius: "50%", border: "2px solid var(--chrome)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--blue-hi)" }} />
           </div>
-          <div style={{ marginTop: 3, fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#a78bfa", whiteSpace: "nowrap", textShadow: "0 1px 2px #000" }}>
+          <div style={{ marginTop: 3, fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--blue-hi)", whiteSpace: "nowrap", textShadow: "0 1px 2px #000" }}>
             {dot.sightingCount} PING{dot.sightingCount !== 1 ? "S" : ""}
           </div>
         </div>
@@ -822,7 +822,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
 
       {/* Aim hint (which way the selected target is, when off-screen) */}
       {view.aimHint && (
-        <div style={{ position: "absolute", top: 40, left: "50%", transform: "translateX(-50%)", fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, letterSpacing: "0.18em", color: view.aimHint === "● IN VIEW" ? "#9effa0" : AMBER, textShadow: "0 1px 4px #000", pointerEvents: "none" }}>
+        <div style={{ position: "absolute", top: 40, left: "50%", transform: "translateX(-50%)", fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700, letterSpacing: "0.18em", color: view.aimHint === "● IN VIEW" ? "#9effa0" : AMBER, textShadow: "0 1px 4px #000", pointerEvents: "none" }}>
           {view.aimHint}
         </div>
       )}
@@ -834,7 +834,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
           onClick={(e) => { e.stopPropagation(); recenterPan(); }}
           style={{
             position: "absolute", bottom: 178, left: "50%", transform: "translateX(-50%)",
-            fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
+            fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
             padding: "6px 12px", borderRadius: 14, cursor: "pointer", whiteSpace: "nowrap",
             background: "rgba(255,176,0,0.16)", border: `1px solid ${AMBER}`, color: AMBER,
             boxShadow: "0 2px 10px rgba(0,0,0,0.4)",
@@ -849,7 +849,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
         onClick={(e) => { e.stopPropagation(); setManual((m) => !m); }}
         style={{
           position: "absolute", bottom: 140, left: "50%", transform: "translateX(-50%)",
-          fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
+          fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
           padding: "6px 12px", borderRadius: 14, cursor: "pointer",
           background: manual ? "rgba(34,211,238,0.15)" : "rgba(255,255,255,0.06)",
           border: `1px solid ${manual ? CYAN : "rgba(255,255,255,0.3)"}`,
@@ -870,7 +870,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
             >
               ◀ PREV
             </button>
-            <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.7)", minWidth: 52, textAlign: "center", letterSpacing: "0.08em" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "rgba(255,255,255,0.7)", minWidth: 52, textAlign: "center", letterSpacing: "0.08em" }}>
               {view.contactCount ? `${view.manualIdx + 1}/${view.contactCount}` : "—"}
             </span>
             <button
@@ -908,12 +908,12 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
         </button>
       ) : (
         <div style={{ position: "absolute", bottom: 40, left: "50%", transform: "translateX(-50%)", textAlign: "center" }}>
-          <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#a78bfa", letterSpacing: "0.15em", marginBottom: 6 }}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--blue-hi)", letterSpacing: "0.15em", marginBottom: 6 }}>
             ✓ SIGHTING SUBMITTED — {pingCount} PING{pingCount !== 1 ? "S" : ""}
           </div>
           <button
             onClick={(e) => { e.stopPropagation(); setPinged(false); }}
-            style={{ marginTop: 4, background: "none", border: "none", color: "rgba(139,92,246,0.6)", fontFamily: "'Space Mono', monospace", fontSize: 9, cursor: "pointer", letterSpacing: "0.1em" }}
+            style={{ marginTop: 4, background: "none", border: "none", color: "rgba(184,197,207,0.75)", fontFamily: "var(--font-mono)", fontSize: 9, cursor: "pointer", letterSpacing: "0.1em" }}
           >
             PING AGAIN
           </button>
@@ -931,7 +931,7 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
 // Shared style for the bottom control buttons.
 function cycleBtnStyle(active: boolean, color: string): CSSProperties {
   return {
-    fontFamily: "'Space Mono', monospace",
+    fontFamily: "var(--font-mono)",
     fontSize: 11,
     fontWeight: 700,
     letterSpacing: "0.1em",
@@ -975,7 +975,7 @@ function InfoBox({ p }: { p: Projected }) {
         borderRadius: 6,
         padding: "8px 10px",
         backdropFilter: "blur(6px)",
-        fontFamily: "'Space Mono', monospace",
+        fontFamily: "var(--font-mono)",
         color: "#e8f0f6",
         zIndex: 6,
         boxShadow: `0 0 18px ${color}40`,
