@@ -1,14 +1,14 @@
 {
-  "7c4ef4": {
-    "callsign": "POL31",
-    "type": "AW139",
-    "flights_scored": 9,
+  "7c4ee8": {
+    "callsign": "POL35",
+    "type": "King Air 350ER",
+    "flights_scored": 5,
     "new_this_run": 1,
-    "mean_duration_min": 51.74,
-    "total_fuel_kg": 2787.5,
-    "mean_fuel_flow_kgh": 352.29,
-    "mean_fuel_per_km_kg": 2.87,
-    "mean_burn_ratio_vs_cruise": 0.86,
-    "mean_burn_ratio_vs_loiter": 1.05
+    "mean_duration_min": 67.66,
+    "total_fuel_kg": 1230.6,
+    "mean_fuel_flow_kgh": 211.2,
+    "mean_fuel_per_km_kg": 0.51,
+    "mean_burn_ratio_vs_cruise": 0.88,
+    "mean_burn_ratio_vs_loiter": 1.06
   }
 }
