@@ -546,6 +546,18 @@ samp,
   transition: transform var(--dur-hover) var(--ease-spring);
   filter: drop-shadow(0 0 6px var(--amber-glow));
 }
+/* Touch target only, same reasoning as .vp-rp-marker: 36px is still short of the
+   44px a finger reliably hits. Transparent, so it adds nothing to the source
+   alpha and the drop-shadow glow above is unaffected. */
+.vp-ac-marker::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  bottom: -6px;
+  left: -6px;
+  border-radius: 50%;
+}
 .vp-ac-marker.selected {
   transform: scale(1.18);
   filter: drop-shadow(0 0 12px var(--amber-glow));
@@ -687,6 +699,20 @@ samp,
   height: 26px;
   cursor: pointer;
   transition: transform var(--dur-hover) var(--ease-spring);
+}
+/* Touch target only — nothing is painted here.
+   The glyph is 26px, roughly half the 44px a finger can reliably hit. Measured on
+   a phone viewport, a tap 18px from the centre did NOTHING at all: no panel, no
+   feedback, which is indistinguishable from the feature being broken. This
+   expands the hit area to ~44px while the visible glyph stays 26px. */
+.vp-rp-marker::before {
+  content: '';
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  bottom: -9px;
+  left: -9px;
+  border-radius: 50%;
 }
 
 /* ── Police units: alternating blue/red overglow ─────────────────────────── */
