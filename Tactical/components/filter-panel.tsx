@@ -81,7 +81,7 @@ export function FilterPanel({ filters, onFilterChange, onClose, embedded = false
         />
         <ToggleRow
           label="Aircraft trails"
-          sub="fading 4m"
+          sub="selected only"
           checked={filters.trails}
           onChange={toggle('trails')}
         />

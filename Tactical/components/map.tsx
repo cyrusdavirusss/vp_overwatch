@@ -547,21 +547,25 @@ export function VPMap({
       }
     }
 
-    // Trails.
+    // Trails — ONLY for the aircraft the operator has actually selected.
+    // This used to draw every aircraft's full retained history, so breadcrumbs
+    // appeared behind aircraft nobody had touched. On a map whose job is the
+    // live picture that is clutter, and it reads as a claim about aircraft the
+    // operator never asked about. The predictive vector below has always been
+    // selection-scoped, so this makes the two behave the same way.
     const trailFeatures: GeoJSON.Feature[] = []
-    if (layers.trails) {
-      for (const a of aircraft) {
-        const isSel = a.id === selectedAircraftId
-        // The WHOLE retained trail, not a time window. A 30-min tail (2 h when
-        // selected) vanished partway through a long patrol, which is what the
-        // user actually sees as "the breadcrumb doesn't stay up for the flight".
-        // The buffer is bounded per-sortie in the store instead
-        // (appendTrackPoint / TRAIL_MAX_POINTS), so no window is needed here.
-        const trail = sampleTrailUntil(a.track, scrubT, Number.POSITIVE_INFINITY)
-        if (trail.length < 2) continue
+    if (layers.trails && selectedAircraftId) {
+      const sel = aircraft.find((a) => a.id === selectedAircraftId)
+      // The WHOLE retained trail, not a time window. A 30-min tail (2 h when
+      // selected) vanished partway through a long patrol, which is what the
+      // user actually sees as "the breadcrumb doesn't stay up for the flight".
+      // The buffer is bounded per-sortie in the store instead
+      // (appendTrackPoint / TRAIL_MAX_POINTS), so no window is needed here.
+      const trail = sel ? sampleTrailUntil(sel.track, scrubT, Number.POSITIVE_INFINITY) : []
+      if (trail.length >= 2) {
         trailFeatures.push({
           type: 'Feature',
-          properties: { w: isSel ? 3 : 2, o: isSel ? 0.8 : 0.5 },
+          properties: { w: 3, o: 0.8 },
           geometry: { type: 'LineString', coordinates: trail.map((p) => [p.lng, p.lat]) },
         })
       }
