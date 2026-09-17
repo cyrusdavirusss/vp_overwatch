@@ -11,11 +11,11 @@
   "7c4ef4": {
     "phase": "ground",
     "air_streak": 0,
-    "gnd_streak": 2,
-    "completed": 9,
+    "gnd_streak": 0,
+    "completed": 20,
     "open": false,
     "start_ms": null,
-    "last_ms": null
+    "last_ms": 1789642209782
   },
   "7c4ef5": {
     "phase": "ground",
@@ -24,15 +24,15 @@
     "completed": 20,
     "open": false,
     "start_ms": null,
-    "last_ms": 1789525460358
+    "last_ms": 1789651341078
   },
   "7c4ee8": {
-    "phase": "ground",
-    "air_streak": 0,
-    "gnd_streak": 10,
-    "completed": 0,
-    "open": false,
-    "start_ms": null,
-    "last_ms": null
+    "phase": "airborne",
+    "air_streak": 159,
+    "gnd_streak": 0,
+    "completed": 5,
+    "open": true,
+    "start_ms": 1789650323077,
+    "last_ms": 1789652884155
   }
 }
