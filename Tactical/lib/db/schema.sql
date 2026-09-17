@@ -168,3 +168,24 @@ ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS call_number_ref TEXT;
 ALTER TABLE notification_deliveries DROP CONSTRAINT IF EXISTS notification_deliveries_channel_check;
 ALTER TABLE notification_deliveries ADD  CONSTRAINT notification_deliveries_channel_check
   CHECK (channel IN ('push','sms','call','inapp'));
+
+-- ── Operator announcements (authored by a human, broadcast to everyone) ─────
+-- Distinct from aircraft_events on purpose: those are derived from telemetry and are
+-- per-user (proximity), whereas an announcement is authored, identical for every
+-- reader, and carries no aircraft. Deliveries still go through
+-- notification_deliveries so that "what did we actually send" has one answer.
+CREATE TABLE IF NOT EXISTS announcements (
+  id           BIGSERIAL PRIMARY KEY,
+  title        TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  level        TEXT NOT NULL DEFAULT 'info'
+                 CHECK (level IN ('info','notice','warning','critical')),
+  pinned       BOOLEAN NOT NULL DEFAULT FALSE,
+  published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),   -- NULL never means "unpublished"
+  expires_at   TIMESTAMPTZ,                          -- NULL = stays until withdrawn
+  withdrawn_at TIMESTAMPTZ,                          -- soft delete: keep the audit trail
+  created_by   TEXT NOT NULL DEFAULT 'operator'
+);
+-- The read path is "live announcements, newest first"; this partial index is that query.
+CREATE INDEX IF NOT EXISTS idx_announcements_live ON announcements(pinned DESC, published_at DESC)
+  WHERE withdrawn_at IS NULL;

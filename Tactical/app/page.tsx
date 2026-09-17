@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { VPHeader } from '@/components/vp-header'
+import { AnnouncementsBanner } from '@/components/announcements-banner'
 import { OnAirBar as VPOnAirBar } from '@/components/on-air-bar'
 import { FabCluster } from '@/components/fab-cluster'
 import { AircraftDetail } from '@/components/aircraft-detail'
@@ -577,6 +578,11 @@ export default function VPOverwatch() {
               </div>
             )}
 
+            {/* Operator announcements — top-centre, dismissed per notice */}
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 w-[min(560px,calc(100%-1.5rem))]">
+              <AnnouncementsBanner />
+            </div>
+
             {/* MLAT / Blind-Sky awareness banner — bottom-left of the map */}
             <div className="absolute left-3 bottom-3 z-10 max-w-[300px]">
               <MlatBanner
@@ -887,6 +893,11 @@ export default function VPOverwatch() {
             followUser={followUser}
             onFitAll={onFitAll}
           />
+
+          {/* Operator announcements — top-centre, dismissed per notice */}
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 w-[min(560px,calc(100%-1.5rem))]">
+            <AnnouncementsBanner />
+          </div>
 
           {/* MLAT / Blind-Sky awareness banner — bottom-left of the map */}
           <div className="absolute left-3 bottom-3 z-10 max-w-[300px]">
