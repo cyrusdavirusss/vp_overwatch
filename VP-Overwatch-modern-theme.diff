@@ -1,0 +1,222 @@
+diff --git a/app/colors_and_type.css b/app/colors_and_type.css
+--- a/app/colors_and_type.css
++++ b/app/colors_and_type.css
+@@ -29,36 +29,36 @@
+ :root,
+ [data-theme="dark"] {
+   /* SURFACES — cool near-black, layered */
+-  --ink-0: #0A0B0D;          /* page base */
+-  --ink-1: #14161A;          /* primary surface (sheets, panels) */
+-  --ink-2: #1C1F24;          /* raised surface */
+-  --ink-3: #262A31;          /* elevated chrome (controls) */
+-  --ink-4: #2F343D;          /* hover state */
++  --ink-0: #070B10;          /* page base */
++  --ink-1: #0B121A;          /* primary surface (sheets, panels) */
++  --ink-2: #101A24;          /* raised surface */
++  --ink-3: #152230;          /* elevated chrome (controls) */
++  --ink-4: #1D2D3C;          /* hover state */
+ 
+   /* FOREGROUND */
+-  --fg-1: #F2F4F8;           /* primary text */
+-  --fg-2: #A6ADBB;           /* secondary text, labels */
+-  --fg-3: #6B7280;           /* tertiary, captions, stale */
+-  --fg-4: #444B57;           /* disabled, scaffolding */
++  --fg-1: #F1F5F8;           /* primary text */
++  --fg-2: #9AA9B5;           /* secondary text, labels */
++  --fg-3: #667582;           /* tertiary, captions, stale */
++  --fg-4: #42515E;           /* disabled, scaffolding */
+ 
+   /* BORDERS & DIVIDERS */
+-  --border:        #2A2F37;
+-  --border-strong: #3A4049;
+-  --border-subtle: #1E2229;
++  --border:        #263746;
++  --border-strong: #3B5060;
++  --border-subtle: #172530;
+ 
+   /* SIGNAL — UI chrome, interactive, live indicators */
+-  --blue:        #4D7CFF;
+-  --blue-hi:     #6B92FF;
+-  --blue-lo:     #3A66E0;
+-  --blue-glow:   rgba(77, 124, 255, 0.18);
+-  --blue-wash:   rgba(77, 124, 255, 0.08);
++  --blue:        #1677D2;
++  --blue-hi:     #2D8CFF;
++  --blue-lo:     #0D4F8C;
++  --blue-glow:   rgba(45, 140, 255, 0.16);
++  --blue-wash:   rgba(45, 140, 255, 0.07);
+ 
+   /* AVIATION AMBER — reserved for ACTIVE AIRCRAFT ONLY */
+-  --amber:       #FFB020;
+-  --amber-hi:    #FFC44D;
+-  --amber-lo:    #E89400;
+-  --amber-glow:  rgba(255, 176, 32, 0.22);
+-  --amber-wash:  rgba(255, 176, 32, 0.10);
++  --amber:       #B8C5CF;
++  --amber-hi:    #E2E9EE;
++  --amber-lo:    #738592;
++  --amber-glow:  rgba(190, 205, 216, 0.16);
++  --amber-wash:  rgba(190, 205, 216, 0.07);
+ 
+   /* THREAT RED — confirmed ground threats only */
+   --red:         #FF4757;
+@@ -77,6 +77,8 @@
+   --stale-wash:  rgba(90, 98, 112, 0.20);
+ 
+   /* MAP STYLING — used by the canvas map renderer */
++  /* Map tokens intentionally unchanged in behaviour; these values only
++     deepen the chrome around the map while keeping the map readable. */
+   --map-bg:      #0E1117;
+   --map-water:   #07090C;
+   --map-land:    #11141A;
+@@ -440,6 +442,101 @@
+   padding: 12px 14px;
+ }
+ 
++/* =========================================================================
++   VP OVERWATCH · Modern tactical chrome
++   The map remains the primary surface. This layer modernises only the UI
++   surrounding it: controls, cards, sheets, buttons, status chrome and
++   interactive surfaces.
++   ========================================================================= */
++
++button,
++input,
++select,
++textarea {
++  font: inherit;
++}
++
++button {
++  -webkit-tap-highlight-color: transparent;
++}
++
++.vp-icon {
++  flex: 0 0 auto;
++}
++
++/* Make existing primitive controls feel quieter and more premium. */
++.btn {
++  min-height: 38px;
++  border-radius: 10px;
++  border-color: var(--border);
++  box-shadow: 0 1px 2px rgba(0,0,0,.22);
++}
++
++.btn-primary {
++  background: linear-gradient(180deg, #1D80DE 0%, #1267B7 100%);
++  box-shadow:
++    0 1px 0 rgba(255,255,255,.08) inset,
++    0 6px 18px rgba(22,119,210,.18);
++}
++
++.btn-primary:hover {
++  background: linear-gradient(180deg, #2D8CFF 0%, #1677D2 100%);
++}
++
++.btn-secondary {
++  background: rgba(16,26,36,.92);
++  border-color: #2A3D4C;
++}
++
++.btn-secondary:hover {
++  background: #182A38;
++  border-color: #3B5060;
++}
++
++.btn-ghost:hover {
++  background: rgba(45,140,255,.07);
++}
++
++.card {
++  background:
++    linear-gradient(180deg, rgba(255,255,255,.018), rgba(255,255,255,0)),
++    rgba(16,26,36,.94);
++  border-color: #263746;
++  box-shadow: 0 10px 28px rgba(0,0,0,.20);
++}
++
++.chip-live {
++  background: rgba(45,140,255,.09);
++  color: #65AAFF;
++}
++
++.chip-aircraft {
++  background: rgba(190,205,216,.08);
++  color: #D5DFE6;
++}
++
++/* Avoid making the whole interface glow. Reserve blue glow for active state. */
++.dot-pulse::after {
++  animation-duration: 2.2s;
++  opacity: .28;
++}
++
++::selection {
++  background: rgba(45,140,255,.28);
++  color: #fff;
++}
++
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: .01ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: .01ms !important;
++    scroll-behavior: auto !important;
++  }
++}
++
+ /* FOCUS RING — keyboard only */
+ :focus-visible {
+   outline: 2px solid var(--blue);
+diff --git a/VP-Overwatch.dc.html b/VP-Overwatch.dc.html
+--- a/VP-Overwatch.dc.html
++++ b/VP-Overwatch.dc.html
+@@ -5,7 +5,7 @@
+ <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+ <meta name="apple-mobile-web-app-capable" content="yes">
+ <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+-<meta name="theme-color" content="#05060A">
++<meta name="theme-color" content="#070B10">
+ <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+ <meta http-equiv="Pragma" content="no-cache">
+ <meta http-equiv="Expires" content="0">
+@@ -21,7 +21,7 @@
+     *, *::before, *::after { box-sizing: border-box; }
+     html, body {
+       margin: 0; padding: 0;
+-      background: #05060A;
++      background: #070B10;
+       overscroll-behavior: none;
+       overflow: hidden;
+     }
+@@ -42,7 +42,7 @@
+       display: flex;
+       align-items: center;
+       justify-content: center;
+-      background: var(--ink-0, #05060A);
++      background: var(--ink-0, #070B10);
+       overflow: hidden;
+     }
+ 
+@@ -126,14 +126,14 @@
+         <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:0 24px max(60px, calc(env(safe-area-inset-bottom, 0px) + 40px));gap:12px;text-align:center;">
+           <div style="display:flex;align-items:center;gap:10px;animation:vpoFadeUp 900ms cubic-bezier(0.16,1,0.3,1) both;animation-delay:300ms;">
+             <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+-              <circle cx="12" cy="12" r="10" stroke="#4D7CFF" stroke-width="1.2" opacity="0.5"/>
+-              <circle cx="12" cy="12" r="6.5" stroke="#4D7CFF" stroke-width="1.2" opacity="0.85"/>
+-              <path d="M12 6 L16.5 14.5 L12 12.5 L7.5 14.5 Z" fill="#FFB020"/>
++              <circle cx="12" cy="12" r="10" stroke="#1677D2" stroke-width="1.2" opacity="0.5"/>
++              <circle cx="12" cy="12" r="6.5" stroke="#2D8CFF" stroke-width="1.2" opacity="0.85"/>
++              <path d="M12 6 L16.5 14.5 L12 12.5 L7.5 14.5 Z" fill="#B8C5CF"/>
+             </svg>
+             <span style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:600;letter-spacing:0.22em;color:#F2F4F8;">VP-OVERWATCH</span>
+           </div>
+           <div style="display:flex;align-items:center;gap:7px;font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:0.16em;color:#8A93A3;text-transform:uppercase;animation:vpoFadeUp 900ms cubic-bezier(0.16,1,0.3,1) both;animation-delay:480ms;">
+-            <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4D7CFF;animation:vpoPulseDot 1.2s ease-in-out infinite;"></span>
++            <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#2D8CFF;animation:vpoPulseDot 1.8s ease-in-out infinite;"></span>
+             Fusing ADS-B + ground reports
+           </div>
+         </div>
