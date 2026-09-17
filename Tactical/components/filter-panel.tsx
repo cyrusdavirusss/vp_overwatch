@@ -8,6 +8,7 @@ export interface Filters {
   reports: boolean
   trails: boolean
   predictive: boolean
+  aerodromes: boolean
   heatmap: boolean
   rotary: boolean
   fixedwing: boolean
@@ -90,6 +91,12 @@ export function FilterPanel({ filters, onFilterChange, onClose, embedded = false
           sub="60-90s forward"
           checked={filters.predictive}
           onChange={toggle('predictive')}
+        />
+        <ToggleRow
+          label="Aerodromes"
+          sub="225 in Victoria"
+          checked={filters.aerodromes}
+          onChange={toggle('aerodromes')}
         />
       </Section>
 

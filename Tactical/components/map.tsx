@@ -34,6 +34,7 @@ export interface VPMapProps {
     reports: boolean
     trails: boolean
     predictive: boolean
+    aerodromes: boolean
   }
   focusTarget?: { lat: number; lng: number } | null
   hasSilentAircraft?: boolean
@@ -356,7 +357,7 @@ export function VPMap({
     if (!ready || !map) return
     if (lastViewType.current === viewType) return
     lastViewType.current = viewType
-    const OVERLAY_IDS = ['vp-hex-fill', 'vp-hex-line', 'vp-conn-line', 'vp-trails-line', 'vp-acc-fill', 'vp-acc-line', 'vp-predict-line']
+    const OVERLAY_IDS = ['vp-aerodrome-dot', 'vp-aerodrome-label', 'vp-aerodrome-label-small', 'vp-hex-fill', 'vp-hex-line', 'vp-conn-line', 'vp-trails-line', 'vp-acc-fill', 'vp-acc-line', 'vp-predict-line']
     const fixOrder = () => {
       try {
         addVpOverlays(map)
@@ -370,6 +371,23 @@ export function VPMap({
     const t = setTimeout(() => map.off('styledata', fixOrder), 4000)
     return () => { clearTimeout(t); map.off('styledata', fixOrder) }
   }, [ready, viewType])
+
+  // The aerodrome overlay is STATIC data, so unlike the imperatively-updated
+  // overlays it cannot be gated by feeding it empty features — and a style swap
+  // re-adds its layers, which would silently ignore the filter toggle. So set
+  // visibility here and re-assert it on every styledata.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    const ids = ['vp-aerodrome-dot', 'vp-aerodrome-label', 'vp-aerodrome-label-small']
+    const apply = () => {
+      const vis = layers.aerodromes ? 'visible' : 'none'
+      for (const id of ids) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis)
+    }
+    apply()
+    map.on('styledata', apply)
+    return () => { map.off('styledata', apply) }
+  }, [ready, layers.aerodromes])
 
   // ── Camera focus (flyTo with momentum + spring ease) ───────────────────
   useEffect(() => {
@@ -807,6 +825,18 @@ function addVpOverlays(map: maplibregl.Map) {
   addSrc('vp-acc')
   addSrc('vp-predict')
 
+  // Aerodromes: a STATIC dataset (public/aerodromes.geojson, built from the
+  // public-domain OurAirports data for Victoria — 225 strips, heliports
+  // included). It cannot come from the basemap: the self-hosted PMTiles archive
+  // stops at zoom 14 while the Protomaps style only labels aerodrome POIs from
+  // zoom 17, so names could never draw, and its POI coverage is sparse anyway.
+  if (!map.getSource('vp-aerodromes'))
+    map.addSource('vp-aerodromes', {
+      type: 'geojson',
+      data: '/aerodromes.geojson',
+      attribution: 'Aerodrome data: OurAirports (public domain)',
+    })
+
   if (!map.getLayer('vp-hex-fill'))
     map.addLayer({ id: 'vp-hex-fill', type: 'fill', source: 'vp-hex', paint: { 'fill-color': RED, 'fill-opacity': ['get', 'o'] } })
   if (!map.getLayer('vp-hex-line'))
@@ -821,6 +851,78 @@ function addVpOverlays(map: maplibregl.Map) {
     map.addLayer({ id: 'vp-acc-line', type: 'line', source: 'vp-acc', paint: { 'line-color': '#4D7CFF', 'line-width': 1, 'line-opacity': 0.4 } })
   if (!map.getLayer('vp-predict-line'))
     map.addLayer({ id: 'vp-predict-line', type: 'line', source: 'vp-predict', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#00d4ff', 'line-width': 2, 'line-opacity': 0.6, 'line-dasharray': [8, 6] } })
+
+  // ── Aerodromes: a dot per field, plus names ────────────────────────────────
+  // Deliberately NOT amber or red: those are semantic here (MLAT/silent, fuel,
+  // threat). An aerodrome is infrastructure, so it takes a cool white that
+  // reads as "place" while staying distinct from the cyan basemap labels.
+  if (!map.getLayer('vp-aerodrome-dot'))
+    map.addLayer({
+      id: 'vp-aerodrome-dot',
+      type: 'circle',
+      source: 'vp-aerodromes',
+      minzoom: 8,
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 1.8, 11, 3, 14, 4],
+        'circle-color': '#CFE4F2',
+        'circle-opacity': 0.8,
+        'circle-stroke-color': '#03070C',
+        'circle-stroke-width': 1,
+      },
+    })
+
+  // Two label layers instead of one filtered by zoom: a rank-based minzoom is
+  // what stops 179 small strips from competing with YMML at low zoom, and
+  // symbol-sort-key makes the significant fields win the collisions that remain.
+  // Large/medium carry the ICAO ident on a second line, which is how an operator
+  // reads a strip out of the aircraft feed.
+  if (!map.getLayer('vp-aerodrome-label'))
+    map.addLayer({
+      id: 'vp-aerodrome-label',
+      type: 'symbol',
+      source: 'vp-aerodromes',
+      minzoom: 8,
+      filter: ['<=', ['get', 'rank'], 2],
+      layout: {
+        'symbol-sort-key': ['get', 'rank'],
+        'text-font': ['Noto Sans Medium'],
+        'text-field': ['concat', ['get', 'name'], '\n', ['get', 'ident']],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10.5, 11, 12, 14, 13.5],
+        'text-anchor': 'top',
+        'text-offset': [0, 0.55],
+        'text-max-width': 10,
+        'text-padding': 3,
+      },
+      paint: {
+        'text-color': '#DCEBF5',
+        'text-halo-color': '#03070C',
+        'text-halo-width': 1.2,
+      },
+    })
+
+  if (!map.getLayer('vp-aerodrome-label-small'))
+    map.addLayer({
+      id: 'vp-aerodrome-label-small',
+      type: 'symbol',
+      source: 'vp-aerodromes',
+      minzoom: 11,
+      filter: ['>=', ['get', 'rank'], 3],
+      layout: {
+        'symbol-sort-key': ['get', 'rank'],
+        'text-font': ['Noto Sans Regular'],
+        'text-field': ['get', 'name'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 11, 10, 14, 12],
+        'text-anchor': 'top',
+        'text-offset': [0, 0.55],
+        'text-max-width': 9,
+        'text-padding': 2,
+      },
+      paint: {
+        'text-color': '#9FBCCD',
+        'text-halo-color': '#03070C',
+        'text-halo-width': 1.1,
+      },
+    })
 }
 
 // Toggle the (dimmed) Esri satellite underlay based on where the map is looking.
