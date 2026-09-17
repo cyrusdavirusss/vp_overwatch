@@ -162,6 +162,7 @@ export default function VPOverwatch() {
     reports: true,
     trails: true,
     predictive: true,
+    aerodromes: true,
     heatmap: false,
     rotary: true,
     fixedwing: true,
@@ -514,6 +515,7 @@ export default function VPOverwatch() {
                 reports: filters.reports,
                 trails: filters.trails,
                 predictive: filters.predictive,
+                aerodromes: filters.aerodromes,
               }}
               focusTarget={focusTarget}
               hasSilentAircraft={hasSilentAircraft}
@@ -827,6 +829,7 @@ export default function VPOverwatch() {
               reports: filters.reports,
               trails: filters.trails,
               predictive: filters.predictive,
+              aerodromes: filters.aerodromes,
             }}
             focusTarget={focusTarget}
             hasSilentAircraft={hasSilentAircraft}
