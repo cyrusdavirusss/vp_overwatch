@@ -1,74 +1,86 @@
 #!/usr/bin/env node
 /**
- * Render the forward-visibility cone at a range of altitudes, as an HTML sheet.
+ * Render the forward-visibility cone by altitude, for BOTH airframes.
  *
  * WHY THIS EXISTS: the cone only appears on the map for a LIVE aircraft, so on a day the
- * fleet is on the ground there is nothing on screen to look at and nothing to check. This
- * draws the same paths the map draws, at the same metres-per-pixel, so the shape can be
- * reviewed — and so the counter-intuitive part is visible: the cone WIDENS with altitude,
- * then narrows, then disappears.
+ * fleet is on the ground there is nothing on screen to review. This draws the same SVG the
+ * map draws, at the same metres-per-pixel, so the shape can be checked — including the two
+ * things that are easy to get wrong and invisible in a unit test: that a helicopter's cone
+ * differs from a fixed wing's, and that the fade runs least-transparent at the aircraft.
  *
  *   node --experimental-strip-types scripts/render-cone.ts > /tmp/cone.html
- *   google-chrome-stable --headless --screenshot=/tmp/cone.png --window-size=1200,760 \
+ *   google-chrome-stable --headless --screenshot=/tmp/cone.png --window-size=1250,900 \
  *     --hide-scrollbars file:///tmp/cone.html
  */
-import { visionConeForAltitude, visionConePathPx, metresPerPixel, coneCeilingM } from '../lib/pilot-vision.ts'
+import {
+  visionConeForAltitude, visionConeSVG, metresPerPixel, coneCeilingM, VISION_PROFILES,
+  type VisionRole,
+} from '../lib/pilot-vision.ts'
 
-// A realistic map view: the fleet's operating area, at zoom 12 (~30 m/px at this latitude).
+// A realistic map view: the fleet's operating area, at zoom 12 (~15 m/px at this latitude).
 const ZOOM = 12
 const LAT = -37.8
 const MPP = metresPerPixel(ZOOM, LAT)
+const ALTITUDES_FT = [500, 1000, 2000, 4000, 8000, 12000, 20000, 28000]
 
-const ALTITUDES_FT = [500, 1000, 2000, 3000, 5000, 8000, 12000, 20000]
-
-const cell = (ft: number) => {
+const cell = (role: VisionRole, ft: number) => {
   const altM = ft * 0.3048
-  const cone = visionConeForAltitude(altM)
+  const cone = visionConeForAltitude(altM, { role })
   if (!cone) {
-    return `<div class="cell"><div class="box"><span class="none">no useful forward view</span></div>
-      <div class="cap">${ft.toLocaleString()} ft<br><span class="dim">blind area has closed over the usable range</span></div></div>`
+    return `<div class="cell"><div class="box" style="width:220px;height:230px">
+      <span class="none">no useful<br>forward view</span></div>
+      <div class="cap">${ft.toLocaleString()} ft<br><span class="dim">band closed<br>(blind area &gt; acuity range)</span></div></div>`
   }
-  const path = visionConePathPx(cone, MPP)
-  // Centre the origin in the box so the shape has room to extend ahead (upward).
-  const box = 300
-  const ox = box / 2
-  const oy = box - 30
-  const reach = Math.round(cone.farM / MPP)
+  const box = 220
+  const svg = visionConeSVG(cone, MPP, { idSuffix: `${role}-${ft}` })
   return `<div class="cell">
-    <div class="box" style="width:${box}px;height:${box}px">
-      <svg width="${box}" height="${box}">
-        <g transform="translate(${ox},${oy})">
-          <line x1="0" y1="0" x2="0" y2="-${oy - 6}" stroke="#263746" stroke-width="1"/>
-          <path d="${path}"></path>
+    <div class="box" style="width:${box}px;height:230px">
+      <svg width="${box}" height="230" overflow="visible" style="transform:translateY(85px)">
+        <line x1="${box / 2}" y1="15" x2="${box / 2}" y2="95" stroke="#263746" stroke-width="1"></line>
+        <g transform="translate(${box / 2},95)">
+          <g class="cone">${svg.replace(/<\/?svg[^>]*>/g, '')}</g>
           <circle cx="0" cy="0" r="3" fill="#00d4ff"></circle>
         </g>
       </svg>
     </div>
     <div class="cap">${ft.toLocaleString()} ft &nbsp;·&nbsp; ${Math.round(altM)} m<br>
-      <span class="dim">${Math.round(cone.nearM)} m – ${Math.round(cone.farM)} m &nbsp;(${Math.round(cone.farM - cone.nearM)} m band)<br>
-      limited by ${cone.limitedBy} &nbsp;·&nbsp; ${reach}px at zoom ${ZOOM}</span></div>
+      <span class="dim">${Math.round(cone.nearM)}–${Math.round(cone.farM)} m
+      (${Math.round(cone.farM - cone.nearM)} m)<br>${cone.limitedBy}</span></div>
   </div>`
 }
 
-const ceiling = Math.round(coneCeilingM())
+const closest = (r: VisionRole) => Math.round(coneCeilingM({ role: r }))
+const half = VISION_PROFILES.rotary.halfFovDeg !== VISION_PROFILES.fixedwing.halfFovDeg
+
 const html = `<!doctype html><html><head><meta charset="utf-8"><style>
   body { background:#0A0B0D; color:#c9d1d9; font:12px/1.5 monospace; margin:0; padding:16px; }
-  h1 { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:#8b949e; margin:0 0 4px; }
-  .note { color:#667582; font-size:11px; margin:0 0 16px; max-width:900px; }
-  .row { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start; }
+  h1 { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:#8b949e; margin:18px 0 2px; }
+  .note { color:#667582; font-size:11px; margin:0 0 10px; max-width:1080px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; }
   .cell { text-align:center; }
-  .box { background:#0e1218; border:1px solid #232a33; border-radius:6px; display:flex; align-items:center; justify-content:center; }
-  .cap { font-size:10px; color:#8b949e; margin-top:6px; }
+  .box { background:#0e1218; border:1px solid #232a33; border-radius:6px; display:flex; align-items:flex-start; justify-content:center; overflow:hidden; }
+  .cap { font-size:10px; color:#8b949e; margin-top:4px; }
   .dim { color:#5b6472; }
-  .none { color:#667582; font-size:11px; }
-  path { fill: rgba(0,212,255,0.08); stroke: rgba(0,212,255,0.45); stroke-width:1; stroke-dasharray:3 4; }
+  .none { color:#667582; font-size:10px; align-self:center; }
+  path { stroke: rgba(0,212,255,0.35); stroke-width:1; stroke-dasharray:3 4; }
+  .rotary path { stroke: rgba(91,214,138,0.40); }
+  .rotary .cone path { fill-opacity: 1; }
 </style></head><body>
-<h1>Forward-visibility cone by altitude</h1>
-<p class="note">Drawn from lib/pilot-vision.ts at ${MPP.toFixed(1)} m/px (zoom ${ZOOM}, lat ${LAT}).
-20/20 acuity = 1 arcmin; detection = 1 line pair (Johnson); clear air. An ESTIMATE, not a sensor spec.
-The band widens with altitude while geometry limits the far edge, then narrows as the blind area beneath
-the aircraft eats into the acuity-limited range — and above about ${ceiling} m there is no usable band at all.</p>
-<div class="row">${ALTITUDES_FT.map(cell).join('')}</div>
+
+<h1>Helicopter (rotary) — hovering, steep look-down, wide scan</h1>
+<p class="note">Profile: near depression ${VISION_PROFILES.rotary.nearDepressionDeg}°, far ${VISION_PROFILES.rotary.farDepressionDeg}°,
+half-FOV ±${VISION_PROFILES.rotary.halfFovDeg}°. Usable band closes above ~${closest('rotary')} m.</p>
+<div class="row rotary">${ALTITUDES_FT.map((ft) => cell('rotary', ft)).join('')}</div>
+
+<h1>Fixed wing (King Air) — forward flight, shallower look-down, narrower scan</h1>
+<p class="note">Profile: near depression ${VISION_PROFILES.fixedwing.nearDepressionDeg}°, far ${VISION_PROFILES.fixedwing.farDepressionDeg}°,
+half-FOV ±${VISION_PROFILES.fixedwing.halfFovDeg}°. A bigger blind area behind the nose, so the band closes LOWER — above ~${closest('fixedwing')} m.
+Same acuity physics in both rows; only the look-down geometry differs${half ? '' : ' (FOV assumed equal)'}.</p>
+<div class="row">${ALTITUDES_FT.map((ft) => cell('fixedwing', ft)).join('')}</div>
+
+<p class="note" style="margin-top:14px">Drawn at ${MPP.toFixed(1)} m/px (zoom ${ZOOM}, lat ${LAT}) from lib/pilot-vision.ts.
+20/20 acuity = 1 arcminute; detection = 1 line pair (Johnson); clear air; 80 m minimum visible distance.
+An ESTIMATE — a model, not a sensor spec. The fill is least transparent at the aircraft and fades to nothing at the far edge.</p>
 </body></html>`
 
 process.stdout.write(html)
