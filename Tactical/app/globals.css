@@ -725,12 +725,12 @@ samp,
    meaning (it identifies the unit), and it is motion-gated below. */
 @keyframes vp-police-blink {
   0%, 49.99% {
-    filter: drop-shadow(0 0 3px rgba(45, 140, 255, 0.95))
-            drop-shadow(0 0 9px rgba(45, 140, 255, 0.55));
+    filter: drop-shadow(0 0 2px rgba(45, 140, 255, 0.6))
+            drop-shadow(0 0 5px rgba(45, 140, 255, 0.3));
   }
   50%, 100% {
-    filter: drop-shadow(0 0 3px rgba(255, 45, 45, 0.95))
-            drop-shadow(0 0 9px rgba(255, 45, 45, 0.55));
+    filter: drop-shadow(0 0 2px rgba(255, 45, 45, 0.6))
+            drop-shadow(0 0 5px rgba(255, 45, 45, 0.3));
   }
 }
 /* steps(), not a fade: a light bar swaps colour, it does not cross-fade. */
@@ -743,23 +743,27 @@ samp,
    3542 red pixels to 6713 blue ones half a cycle apart) but the operator still read it
    as "not flashing". At 26px a glow is a faint shimmer; this paints an actual ring that
    changes colour, which is unmistakable at that size. The ring is transparent through
-   the middle so the glyph underneath stays clean. */
+   the middle so the glyph underneath stays clean.
+   INTENSITY: halved after the first version overshot — the operator's next note was "too
+   much glow around the hats". The ring is now tighter (-5px, not -7) and about half the
+   alpha, so it reads as a light on the cap rather than a bloom around it. Still colour and
+   motion, which is what carries the meaning at 30px. */
 @keyframes vp-police-halo {
   0%, 49.99% {
-    background: radial-gradient(circle, rgba(45, 140, 255, 0) 42%,
-                rgba(45, 140, 255, 0.85) 62%, rgba(45, 140, 255, 0) 80%);
-    box-shadow: 0 0 12px 3px rgba(45, 140, 255, 0.6);
+    background: radial-gradient(circle, rgba(45, 140, 255, 0) 52%,
+                rgba(45, 140, 255, 0.42) 66%, rgba(45, 140, 255, 0) 78%);
+    box-shadow: 0 0 6px 1px rgba(45, 140, 255, 0.28);
   }
   50%, 100% {
-    background: radial-gradient(circle, rgba(255, 45, 45, 0) 42%,
-                rgba(255, 45, 45, 0.85) 62%, rgba(255, 45, 45, 0) 80%);
-    box-shadow: 0 0 12px 3px rgba(255, 45, 45, 0.6);
+    background: radial-gradient(circle, rgba(255, 45, 45, 0) 52%,
+                rgba(255, 45, 45, 0.42) 66%, rgba(255, 45, 45, 0) 78%);
+    box-shadow: 0 0 6px 1px rgba(255, 45, 45, 0.28);
   }
 }
 .vp-rp-marker.vp-police::after {
   content: '';
   position: absolute;
-  inset: -7px;
+  inset: -5px;
   border-radius: 50%;
   pointer-events: none;
   animation: vp-police-halo 1.1s steps(1, end) infinite;
@@ -767,14 +771,14 @@ samp,
 @media (prefers-reduced-motion: reduce) {
   .vp-rp-marker.vp-police {
     animation: none;
-    filter: drop-shadow(0 0 4px rgba(45, 140, 255, 0.85));
+    filter: drop-shadow(0 0 3px rgba(45, 140, 255, 0.5));
   }
   /* Still a light, just a steady one: a static blue ring keeps the unit identifiable
      for someone who has asked the system not to animate. */
   .vp-rp-marker.vp-police::after {
     animation: none;
-    background: radial-gradient(circle, rgba(45, 140, 255, 0) 42%,
-                rgba(45, 140, 255, 0.8) 62%, rgba(45, 140, 255, 0) 80%);
+    background: radial-gradient(circle, rgba(45, 140, 255, 0) 52%,
+                rgba(45, 140, 255, 0.4) 66%, rgba(45, 140, 255, 0) 78%);
   }
 }
 .vp-rp-marker.selected {
