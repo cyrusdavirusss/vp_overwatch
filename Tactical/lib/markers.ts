@@ -28,6 +28,11 @@ export const GREEN = '#5BD68A' // reported / unconfirmed (softer state)
 export const BLUE = '#1a6bff' // informational ground contact — cameras, concealed units
 export const INK0 = '#0A0B0D' // marker base fill
 
+// Blades, prop discs and hub highlights: near-white, so they read over both the aircraft
+// body and the dark map. Module-level because BOTH aircraft glyphs draw them — it used to
+// live inside rotarySVG, which is exactly why the King Air glyph could not reference it.
+const PALE = '#e6f9ff'
+
 // ── Aircraft silhouettes ────────────────────────────────────────────────────
 
 /**
@@ -55,7 +60,6 @@ export const INK0 = '#0A0B0D' // marker base fill
  * the spinning blade group inside it turns independently of that.
  */
 function rotarySVG(size: number): string {
-  const PALE = '#e6f9ff' // blades + hub: near-white, legible over body AND map
   const BODY2 = '#0086ab' // boom / sponsons: darker cyan for depth
   const BLADE = 'M11.5 1.6 l1.0 0 l0 4.2 l1.35 0 l0 11.4 l-1.35 0 l0 4.2 l-1.0 0 z'
   const bladeAt = (a: number, op: number) =>
@@ -78,13 +82,28 @@ function rotarySVG(size: number): string {
 </svg>`
 }
 
+/**
+ * Fixed wing — drawn as the airframe that actually flies this role: a Beechcraft King Air
+ * 350ER (VH-PVE), the fleet's only fixed-wing aircraft.
+ *
+ * The cues that make a twin turboprop read rather than a jet, in order of how much they
+ * matter at 36px:
+ *   STRAIGHT wings  — a King Air's wings are unswept; a swept leading edge reads as a jet
+ *   two NACELLES    on the wings, each with a pale prop disc across its face (no jet pods)
+ *   a T-TAIL        — the tailplane sits at the very aft end, past the fin
+ * The previous glyph was a generic swept-wing jet with no engines at all.
+ */
 function fixedwingSVG(size: number): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
-  <path d="M12 2.2 L13.35 19 L12 21.6 L10.65 19 Z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.4"></path>
-  <path d="M2.6 12.6 L10.9 10.7 L10.9 14.2 L2.6 16.1 Z" fill="${AMBER}"></path>
-  <path d="M21.4 12.6 L13.1 10.7 L13.1 14.2 L21.4 16.1 Z" fill="${AMBER}"></path>
-  <path d="M7.7 19.2 L11.3 18.6 L11.3 20.3 L7.7 20.4 Z" fill="${AMBER}"></path>
-  <path d="M16.3 19.2 L12.7 18.6 L12.7 20.3 L16.3 20.4 Z" fill="${AMBER}"></path>
+  <path d="M12 2.4 c0.78 0 1.32 0.95 1.32 2.25 l0 13.55 l-1.32 4.2 l-1.32 -4.2 l0 -13.55 c0 -1.3 0.54 -2.25 1.32 -2.25 z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.4"></path>
+  <path d="M11 10.5 L2.6 11.3 L2.4 13.3 L11 13.7 Z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.3"></path>
+  <path d="M13 10.5 L21.4 11.3 L21.6 13.3 L13 13.7 Z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.3"></path>
+  <rect x="5.6" y="8.2" width="2.4" height="5.6" rx="0.6" fill="${AMBER}" stroke="${INK0}" stroke-width="0.3"></rect>
+  <rect x="16" y="8.2" width="2.4" height="5.6" rx="0.6" fill="${AMBER}" stroke="${INK0}" stroke-width="0.3"></rect>
+  <path d="M5.1 8.3 H8.5" stroke="${PALE}" stroke-width="0.85" stroke-linecap="round"></path>
+  <path d="M15.5 8.3 H18.9" stroke="${PALE}" stroke-width="0.85" stroke-linecap="round"></path>
+  <path d="M12 17.4 V21.6" stroke="${PALE}" stroke-width="0.45" opacity="0.85"></path>
+  <path d="M7.9 19.2 L12 18.7 L16.1 19.2 L16.1 20.3 L12 20 L7.9 20.3 Z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.3"></path>
 </svg>`
 }
 
