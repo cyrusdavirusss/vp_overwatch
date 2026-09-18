@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useDashboardAircraft, type DashboardAircraft } from '@/hooks/useDashboardAircraft'
+import { PushAlertsToggle } from '@/components/push-alerts-toggle'
 
 function readCsrf(): string {
   if (typeof document === 'undefined') return ''
@@ -141,6 +142,14 @@ export default function DashboardPage() {
           Share my location for proximity alerts
         </button>
         <p style={{ color: '#8892a0', fontSize: 12, marginTop: 8 }}>{locStatus}</p>
+
+        {/* Browser push lives here, next to the other opt-in alert control: both answer
+            "how do I want to be told", and splitting them across two surfaces would
+            make the answer harder to find than the feature is worth. */}
+        <div style={{ marginTop: 12 }}>
+          <PushAlertsToggle />
+        </div>
+
         <p style={{ color: '#5b6472', fontSize: 11, marginTop: 4 }}>
           Alerts are opt-in. “No signal” means only that tracking telemetry wasn’t received — it does not indicate any incident.
         </p>
