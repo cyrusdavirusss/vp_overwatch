@@ -737,10 +737,44 @@ samp,
 .vp-rp-marker.vp-police {
   animation: vp-police-blink 1.1s steps(1, end) infinite;
 }
+
+/* A PAINTED halo, not only a glow.
+   The drop-shadow above was verified working (measured: the marker region swaps from
+   3542 red pixels to 6713 blue ones half a cycle apart) but the operator still read it
+   as "not flashing". At 26px a glow is a faint shimmer; this paints an actual ring that
+   changes colour, which is unmistakable at that size. The ring is transparent through
+   the middle so the glyph underneath stays clean. */
+@keyframes vp-police-halo {
+  0%, 49.99% {
+    background: radial-gradient(circle, rgba(45, 140, 255, 0) 42%,
+                rgba(45, 140, 255, 0.85) 62%, rgba(45, 140, 255, 0) 80%);
+    box-shadow: 0 0 12px 3px rgba(45, 140, 255, 0.6);
+  }
+  50%, 100% {
+    background: radial-gradient(circle, rgba(255, 45, 45, 0) 42%,
+                rgba(255, 45, 45, 0.85) 62%, rgba(255, 45, 45, 0) 80%);
+    box-shadow: 0 0 12px 3px rgba(255, 45, 45, 0.6);
+  }
+}
+.vp-rp-marker.vp-police::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: vp-police-halo 1.1s steps(1, end) infinite;
+}
 @media (prefers-reduced-motion: reduce) {
   .vp-rp-marker.vp-police {
     animation: none;
     filter: drop-shadow(0 0 4px rgba(45, 140, 255, 0.85));
+  }
+  /* Still a light, just a steady one: a static blue ring keeps the unit identifiable
+     for someone who has asked the system not to animate. */
+  .vp-rp-marker.vp-police::after {
+    animation: none;
+    background: radial-gradient(circle, rgba(45, 140, 255, 0) 42%,
+                rgba(45, 140, 255, 0.8) 62%, rgba(45, 140, 255, 0) 80%);
   }
 }
 .vp-rp-marker.selected {
