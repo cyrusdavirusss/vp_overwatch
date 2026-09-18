@@ -92,10 +92,17 @@ function rotarySVG(size: number): string {
  *   two NACELLES    on the wings, each with a pale prop disc across its face (no jet pods)
  *   a T-TAIL        — the tailplane sits at the very aft end, past the fin
  * The previous glyph was a generic swept-wing jet with no engines at all.
+ *
+ * The nose is CUT OFF STRAIGHT, by the operator's instruction, rather than domed. That
+ * needs enough fuselage ahead of the wing to read as a slice: the first attempt put the
+ * face 2-3 px ahead of the leading edge at 36px and a review pass read it as a sprite
+ * cropped by its bounding box, with the flat front and pointed tail making the direction
+ * ambiguous. Hence the longer nose section (y 3 -> 10.5) and a slightly narrower face than
+ * the body behind it, so the cut is visibly a cut.
  */
 function fixedwingSVG(size: number): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
-  <path d="M12 2.4 c0.78 0 1.32 0.95 1.32 2.25 l0 13.55 l-1.32 4.2 l-1.32 -4.2 l0 -13.55 c0 -1.3 0.54 -2.25 1.32 -2.25 z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.4"></path>
+  <path d="M10.8 3 L13.2 3 L13.32 18.2 L12 22.4 L10.68 18.2 Z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.4"></path>
   <path d="M11 10.5 L2.6 11.3 L2.4 13.3 L11 13.7 Z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.3"></path>
   <path d="M13 10.5 L21.4 11.3 L21.6 13.3 L13 13.7 Z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.3"></path>
   <rect x="5.6" y="8.2" width="2.4" height="5.6" rx="0.6" fill="${AMBER}" stroke="${INK0}" stroke-width="0.3"></rect>
