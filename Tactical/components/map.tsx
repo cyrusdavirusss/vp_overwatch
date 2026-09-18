@@ -14,6 +14,7 @@ import {
 import { buildMapStyle, registerPmtilesProtocol, outsideCoverage, type MapViewType } from '@/lib/map-style'
 import type { CommunityDot } from '@/lib/visual-sighting'
 import { aircraftMarkerSVG, reportMarkerSVG, isGlowingKind, RED, BLUE } from '@/lib/markers'
+import { deadReckon } from '@/lib/geo/dead-reckoning'
 
 // Register the pmtiles:// protocol once, at the map module root. This module
 // is only ever loaded client-side (via the lazy map loader), so it is safe to
@@ -70,6 +71,17 @@ export interface VPMapProps {
 const FOCUS_MS = 400
 const FOCUS_ZOOM = 10
 const AIRCRAFT_TWEEN_MS = 900
+
+/**
+ * How long a marker may keep being predicted forward from its last fix.
+ *
+ * The poll gap is 3s and polls do occasionally fail, so a marker needs some room — but
+ * not unlimited room. Past this the marker stops where it is and the app's existing
+ * silent/stale styling takes over, because a contact we have not heard from for a minute
+ * should look parked, not still cruising. deadReckon() also caps its own extrapolation
+ * at 30s, so this is the outer limit of a smaller inner one.
+ */
+const AIRCRAFT_PREDICT_MAX_SEC = 60
 
 // ── Out-of-sight sighting pick ─────────────────────────────────────────────
 // MapLibre lays out the world as 2^zoom tiles of 512 px, so the ground
@@ -142,6 +154,14 @@ interface AircraftMarkerEntry {
   callout: HTMLDivElement
   cur: [number, number]
   raf: number | null
+  /**
+   * The latest known fix, kept so the prediction loop can advance the marker between
+   * polls. ts is when the FIX was made (absolute), not when we received it — otherwise
+   * a payload that arrives late would be predicted as if it were fresh.
+   */
+  fix: { lat: number; lng: number; headingDeg: number | null; groundSpeedKt: number | null; ts: number } | null
+  /** Live contacts are predicted forward; a silent ghost stays where it was last seen. */
+  live: boolean
 }
 
 export function VPMap({
@@ -517,7 +537,7 @@ export function VPMap({
           const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
             .setLngLat(target)
             .addTo(map)
-          entry = { marker, rot, callout, cur: target, raf: null }
+          entry = { marker, rot, callout, cur: target, raf: null, fix: null, live: false }
           aircraftMarkers.current.set(a.id, entry)
         }
 
@@ -554,7 +574,32 @@ export function VPMap({
         const acOpacity = a.isActive ? '1' : String(0.2 + 0.3 * fuelFrac)
         entry.rot.style.opacity = acOpacity
         entry.callout.style.opacity = acOpacity
-        moveMarker(entry, target, !scrubbing)
+
+        // Record this fix and hand the marker to the prediction loop.
+        //
+        // Why not just tween: AIRCRAFT_TWEEN_MS is 900ms against a 3000ms poll, so the
+        // old tween glided for under a second and then left the marker parked for the
+        // remaining 2.1s. That pause is what reads as lag. Predicting from the fix each
+        // frame removes the pause entirely: the marker travels at the aircraft's own
+        // speed and track rather than hopping between poll results.
+        entry.fix = {
+          lat: pos.lat,
+          lng: pos.lng,
+          headingDeg: pos.hdg ?? null,
+          groundSpeedKt: pos.spd ?? null,
+          // Legacy trail points have no absolute time; the receive time is the honest
+          // fallback (it underestimates the age slightly, which is the safe direction).
+          ts: pos.ts ?? Date.now(),
+        }
+        entry.live = a.isActive === true
+        if (entry.live && !scrubbing) {
+          // Prediction owns the position now — a tween on top would fight it.
+          if (entry.raf) { cancelAnimationFrame(entry.raf); entry.raf = null }
+          entry.cur = target
+          entry.marker.setLngLat(target)
+        } else {
+          moveMarker(entry, target, !scrubbing)
+        }
       }
     }
     for (const [id, entry] of aircraftMarkers.current) {
@@ -745,6 +790,51 @@ export function VPMap({
       }
     }
   }, [ready, communityDots])
+
+  // Continuous dead-reckoning between polls.
+  //
+  // Measured: the poll gap is 3000ms while AIRCRAFT_TWEEN_MS was 900ms, so each marker
+  // glided for under a second and then sat parked for the remaining 2.1s. This loop
+  // advances every LIVE marker from its last fix each frame instead, so motion is
+  // continuous rather than stepped. It uses the honest deadReckon() helper, which
+  // refuses to invent motion without a heading and speed, and caps its own extrapolation
+  // at 30s; past AIRCRAFT_PREDICT_MAX_SEC the marker is left where it is and the app's
+  // silent/stale styling takes over.
+  //
+  // Silent aircraft and scrubbed time are deliberately NOT predicted: a ghost must not
+  // appear to keep flying, and during time-travel the position is a historical fact.
+  useEffect(() => {
+    if (!ready) return
+    let raf = 0
+    const step = () => {
+      raf = requestAnimationFrame(step)
+      // scrubT !== 0 means time-travel: positions are historical facts then, not things
+      // to predict forward from.
+      if (scrubT !== 0) return
+      const now = Date.now()
+      for (const entry of aircraftMarkers.current.values()) {
+        if (!entry.live || !entry.fix) continue
+        const ageSec = (now - entry.fix.ts) / 1000
+        if (!(ageSec >= 0) || ageSec > AIRCRAFT_PREDICT_MAX_SEC) continue
+        const p = deadReckon(
+          {
+            lat: entry.fix.lat,
+            lng: entry.fix.lng,
+            headingDeg: entry.fix.headingDeg,
+            groundSpeedKt: entry.fix.groundSpeedKt,
+          },
+          ageSec,
+        )
+        // Skip sub-pixel churn: MapLibre re-projects on every setLngLat, and a parked
+        // aircraft would otherwise be pushed through that 60 times a second for nothing.
+        if (Math.abs(p.lng - entry.cur[0]) < 1e-6 && Math.abs(p.lat - entry.cur[1]) < 1e-6) continue
+        entry.cur = [p.lng, p.lat]
+        entry.marker.setLngLat(entry.cur)
+      }
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [ready, scrubT])
 
   // Aircraft marker click handlers are bound here so they always see the
   // latest callback identity without recreating markers.
