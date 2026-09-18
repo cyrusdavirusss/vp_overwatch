@@ -16,7 +16,8 @@ import { SubscribeModal } from '@/components/subscribe-modal'
 import { TermsGate } from '@/components/terms-gate'
 import { VPSButton, SIGHTING_PICK_RANGE_M, type VPSKind } from '@/components/vps-button'
 import { RouteAlertPanel } from '@/components/route-alert-panel'
-import { useRealtimeData, sampleTrack } from '@/hooks/useRealtimeData'
+import { useRealtimeData, sampleTrack, type RealtimeData } from '@/hooks/useRealtimeData'
+import { mockAircraft, mockRequested } from '@/lib/mock-flight'
 import { useClientLocation } from '@/hooks/useClientLocation'
 import { useCommunityDots } from '@/hooks/useCommunityDots'
 import { useRouteAlerts } from '@/hooks/useRouteAlerts'
@@ -54,7 +55,7 @@ export default function VPOverwatch() {
     return () => window.removeEventListener('resize', update)
   }, [])
 
-  const liveData = useRealtimeData({
+  const realtime = useRealtimeData({
     // The backend fast-police loop refreshes adsb.lol every 3s (FAST_POLICE_INTERVAL);
     // poll the client at the same cadence so the map is near-real-time instead of
     // lagging up to 30s behind the store. /api/aircraft/active just returns in-memory
@@ -63,6 +64,30 @@ export default function VPOverwatch() {
     reportsInterval: 10_000,
     relayInterval: 3_000,
   })
+
+  // ── Mock flight (?mock=1) — review fixture, never a default ─────────────────
+  // Substituted HERE, at the single source of the aircraft feed, so every consumer
+  // (map, counts, filtered list, detail panel, route alerts) sees the same synthetic
+  // pair and nothing downstream needs a special case. It is gated on an explicit query
+  // flag and labelled on screen: synthetic contacts that looked like real tracking would
+  // break this app's rule about never implying more certainty than we have.
+  const mockMode = useMemo(
+    () => (typeof window !== 'undefined' ? mockRequested(window.location.search) : false),
+    [],
+  )
+  const [mockTick, setMockTick] = useState(0)
+  useEffect(() => {
+    if (!mockMode) return
+    // Same 3s cadence as the real feed, so dead-reckoning and the cones run their
+    // production paths between updates rather than being handed a smooth stream.
+    const id = setInterval(() => setMockTick((t) => t + 1), 3_000)
+    return () => clearInterval(id)
+  }, [mockMode])
+  const liveData: RealtimeData = useMemo(
+    () => (mockMode ? { ...realtime, aircraft: mockAircraft(Date.now()) } : realtime),
+    // mockTick is the recompute trigger; it is deliberately not read in the body.
+    [realtime, mockMode, mockTick],
+  )
 
   const clientLocation = useClientLocation()
   const communityDots = useCommunityDots()
@@ -585,6 +610,21 @@ export default function VPOverwatch() {
               <AnnouncementsBanner />
             </div>
 
+            {/* Mock flight is labelled where it cannot be missed: synthetic contacts must
+                never read as real tracking, not even in a screenshot. */}
+            {mockMode && (
+              <div
+                className="absolute top-3 left-3 z-30 px-2 py-1 rounded border font-mono text-[10px] tracking-[0.12em] uppercase"
+                style={{
+                  borderColor: 'var(--vp-amber)',
+                  color: 'var(--vp-amber)',
+                  background: 'color-mix(in srgb, var(--ink-1) 92%, transparent)',
+                }}
+              >
+                Mock flight — synthetic aircraft, not real traffic
+              </div>
+            )}
+
             {/* MLAT / Blind-Sky awareness banner — bottom-left of the map */}
             <div className="absolute left-3 bottom-3 z-10 max-w-[300px]">
               <MlatBanner
@@ -901,6 +941,20 @@ export default function VPOverwatch() {
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 w-[min(560px,calc(100%-1.5rem))]">
             <AnnouncementsBanner />
           </div>
+
+          {/* Mock flight label (see the desktop branch for why) */}
+          {mockMode && (
+            <div
+              className="absolute top-3 left-3 z-30 px-2 py-1 rounded border font-mono text-[10px] tracking-[0.12em] uppercase"
+              style={{
+                borderColor: 'var(--vp-amber)',
+                color: 'var(--vp-amber)',
+                background: 'color-mix(in srgb, var(--ink-1) 92%, transparent)',
+              }}
+            >
+              Mock flight — synthetic aircraft, not real traffic
+            </div>
+          )}
 
           {/* MLAT / Blind-Sky awareness banner — bottom-left of the map */}
           <div className="absolute left-3 bottom-3 z-10 max-w-[300px]">
