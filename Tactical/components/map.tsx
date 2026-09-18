@@ -60,6 +60,11 @@ export interface VPMapProps {
   fitAllTrigger?: number
   /** Increment to force a re-center on the user, even if coords are unchanged. */
   recenterTrigger?: number
+  /**
+   * WazeAPI police coverage boxes, from /api/coverage (which only answers on a local
+   * origin). Null or empty on the public site, where this is not drawn at all.
+   */
+  coverage?: GeoJSON.FeatureCollection | null
   /** Crowdsourced community sighting dots (approximate positions). */
   communityDots?: CommunityDot[]
   /** Basemap view mode (radar / dark / light / grayscale / satellite). */
@@ -194,6 +199,7 @@ export function VPMap({
   followMode,
   onUserPan,
   fitAllTrigger,
+  coverage,
   recenterTrigger,
   communityDots = [],
   viewType = 'radar',
@@ -871,6 +877,14 @@ export function VPMap({
     return () => cancelAnimationFrame(raf)
   }, [ready, scrubT])
 
+  // Coverage boxes: operator-only, so on the public site the collection is empty and
+  // nothing draws — the layer exists but has nothing in it.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    setData(map, 'vp-coverage', coverage?.features ?? [])
+  }, [ready, coverage])
+
   // Aircraft marker click handlers are bound here so they always see the
   // latest callback identity without recreating markers.
   useEffect(() => {
@@ -948,6 +962,7 @@ function addVpOverlays(map: maplibregl.Map) {
   addSrc('vp-conn')
   addSrc('vp-trails')
   addSrc('vp-acc')
+  addSrc('vp-coverage')
   addSrc('vp-predict')
 
   // Aerodromes: a STATIC dataset (public/aerodromes.geojson, built from the
@@ -960,6 +975,29 @@ function addVpOverlays(map: maplibregl.Map) {
       type: 'geojson',
       data: '/aerodromes.geojson',
       attribution: 'Aerodrome data: OurAirports (public domain)',
+    })
+
+  // Coverage boxes: the police areas this deployment actually pays WazeAPI to poll, each
+  // labelled with its monthly cost, for deciding whether to buy more.
+  //
+  // OPERATOR-ONLY. The data comes from /api/coverage, which 404s for anything arriving
+  // through the public tunnel — so on the live site this source stays empty and nothing
+  // draws. The footprint of what we collect is not a public feature.
+  if (!map.getLayer('vp-coverage-line'))
+    map.addLayer({
+      id: 'vp-coverage-line', type: 'line', source: 'vp-coverage',
+      paint: { 'line-color': '#B8C5CF', 'line-width': 1.1, 'line-opacity': 0.7, 'line-dasharray': [2, 3] },
+    })
+  if (!map.getLayer('vp-coverage-label'))
+    map.addLayer({
+      id: 'vp-coverage-label', type: 'symbol', source: 'vp-coverage', minzoom: 8,
+      layout: {
+        'text-field': ['get', 'label'],
+        'text-size': 10,
+        'text-font': ['Noto Sans Medium'],
+        'text-allow-overlap': false,
+      },
+      paint: { 'text-color': '#CFE4F2', 'text-halo-color': '#070B10', 'text-halo-width': 1.4 },
     })
 
   if (!map.getLayer('vp-hex-fill'))
