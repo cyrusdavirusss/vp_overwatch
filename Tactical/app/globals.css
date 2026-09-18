@@ -904,7 +904,37 @@ samp,
 
 /* Aircraft / ground / community HTML marker classes (available for v2 markers) */
 .vp-aircraft-marker { width: 32px; height: 32px; cursor: pointer; position: relative; }
-.vp-aircraft-marker:hover .vp-marker-ring { border-color: rgba(0,212,255,0.8); }
+.vp-ac-marker:hover .vp-marker-ring { border-color: rgba(0,212,255,0.8); }
+
+/* Pilot/sensor forward-visibility cone.
+   Origin sits ON the aircraft (left/top at the marker's centre, zero-size box) so the
+   path, which is drawn from (0,0) forward, rotates about the aircraft itself. Dashed
+   rather than solid, and faint: this is an estimate from lib/pilot-vision.ts, not a
+   surveyed boundary, and it should read that way. */
+.vp-ac-vision {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  transform-origin: 0 0;
+}
+.vp-ac-vision svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+}
+.vp-ac-vision path {
+  fill: rgba(0, 212, 255, 0.08);
+  stroke: rgba(0, 212, 255, 0.45);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  stroke-linejoin: round;
+}
 .vp-marker-ring { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid rgba(0,212,255,0.35); transition: border-color 160ms ease; }
 .vp-marker-ring.selected { border-color: rgba(0,212,255,0.8); animation: vp-pulse-cyan 1.5s ease-in-out infinite; }
 .vp-marker-dot { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 10px; height: 10px; border-radius: 50%; background: var(--vp-cyan); box-shadow: 0 0 8px 3px rgba(0,212,255,0.5); }
