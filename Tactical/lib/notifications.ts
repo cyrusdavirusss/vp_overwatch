@@ -10,6 +10,7 @@
  */
 
 import { announceLabelForHex } from '@/lib/adsb/config'
+import { lostSignalOutageSeconds, mayDispatchLostSignal } from '@/lib/alerts/policy'
 
 import {
   hermesEnabled,
@@ -230,12 +231,26 @@ export async function notifyTakeoff(
 
 /**
  * Notify subscribers when an aircraft goes stealth (was active, vanished mid-flight).
+ *
+ * ENFORCES THE OPERATOR'S FLOOR: an intrusive channel may only go out when the aircraft
+ * has been unseen for at least stealthMinOutageSeconds() — 60s by default. A shorter gap
+ * is a coverage hole, not a lost aircraft, and ringing a phone for one teaches the user
+ * to ignore the phone. The outage is measured against the last-observed time the caller
+ * passes in; if it cannot be measured, the intrusive channels are REFUSED rather than
+ * guessed at (see lib/alerts/policy.ts).
+ *
+ * VERIFIED 2026-09-18: nothing calls this function today. Its only references in the repo
+ * are this definition and an unused import in lib/store.ts; the live alert path is
+ * lib/alerts/engine.ts, which dispatches proximity_enter only. So this guard is
+ * preventative — it is what makes wiring a lost-signal alert up later safe rather than a
+ * thing to remember.
  */
 export async function notifyStealth(
   state: NotifState,
   hex: string,
   callsign: string,
-  brief?: AircraftBrief
+  brief?: AircraftBrief,
+  lastObservedAt?: number | null
 ): Promise<void> {
   if (state.stealthWarnings.has(hex)) return  // already warned
 
@@ -243,12 +258,26 @@ export async function notifyStealth(
   const matchingSubscribers = state.subscribers.filter(s => canCall(s) && s.notifyOn.stealth)
   const now = Date.now()
 
+  const outageSeconds = lostSignalOutageSeconds(lastObservedAt, now)
+  const decision = mayDispatchLostSignal('call', outageSeconds)
+
   const event: NotificationEvent = {
     id: `notif-stealth-${hex}-${now}`,
     hex, callsign, eventType: 'stealth', message,
     calledSubscribers: [],
     timestamp: now,
     delivered: false,
+  }
+
+  if (!decision.allowed) {
+    // Record the decision, including when it was suppressed and why. "We did not call"
+    // is a fact worth having later, especially when the answer to "why didn't I get a
+    // call?" is "the aircraft was only unseen for 40 seconds".
+    event.error = `suppressed: ${decision.reason}`
+    state.eventLog.push(event)
+    state.stealthWarnings.add(hex)
+    trimEventLog(state)
+    return
   }
 
   for (const sub of matchingSubscribers) {
