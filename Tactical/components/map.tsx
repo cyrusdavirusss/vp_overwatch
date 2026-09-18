@@ -15,6 +15,7 @@ import { buildMapStyle, registerPmtilesProtocol, outsideCoverage, type MapViewTy
 import type { CommunityDot } from '@/lib/visual-sighting'
 import { aircraftMarkerSVG, reportMarkerSVG, isGlowingKind, RED, BLUE } from '@/lib/markers'
 import { deadReckon } from '@/lib/geo/dead-reckoning'
+import { visionConeForAltitude, visionConePathPx, metresPerPixel } from '@/lib/pilot-vision'
 
 // Register the pmtiles:// protocol once, at the map module root. This module
 // is only ever loaded client-side (via the lazy map loader), so it is safe to
@@ -162,6 +163,13 @@ interface AircraftMarkerEntry {
   fix: { lat: number; lng: number; headingDeg: number | null; groundSpeedKt: number | null; ts: number } | null
   /** Live contacts are predicted forward; a silent ghost stays where it was last seen. */
   live: boolean
+  /** The forward-visibility cone: rotated with heading, sized from altitude and zoom. */
+  vision: HTMLDivElement | null
+  /** Key of the cone currently drawn, so an unchanged cone is not rebuilt every frame. */
+  coneKey: string
+  /** Altitude in metres (the source is feet) and heading, for the cone. */
+  altM: number | null
+  hdg: number
 }
 
 export function VPMap({
@@ -534,10 +542,19 @@ export function VPMap({
           callout.innerHTML =
             `<div class="vp-co-callsign"></div><div class="vp-co-data"></div><div class="vp-co-stem"></div>`
           el.appendChild(callout)
+          // The forward-visibility cone lives in its own rotated wrapper, because it must
+          // follow the heading for BOTH kinds — the rotary glyph deliberately does not.
+          const vision = document.createElement('div')
+          vision.className = 'vp-ac-vision'
+          vision.title = 'Estimated forward visibility — a model (20/20 acuity, Johnson detection, clear air), not a sensor spec'
+          el.appendChild(vision)
           const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
             .setLngLat(target)
             .addTo(map)
-          entry = { marker, rot, callout, cur: target, raf: null, fix: null, live: false }
+          entry = {
+            marker, rot, callout, cur: target, raf: null, fix: null, live: false,
+            vision, coneKey: '', altM: null, hdg: 0,
+          }
           aircraftMarkers.current.set(a.id, entry)
         }
 
@@ -600,6 +617,16 @@ export function VPMap({
         } else {
           moveMarker(entry, target, !scrubbing)
         }
+
+        // Altitude drives the cone (feet in the feed, metres in the model), and the
+        // heading rotates it. Stored here so the per-frame loop can re-size it on zoom
+        // without waiting for the next poll.
+        entry.altM = typeof a.altitude === 'number' && Number.isFinite(a.altitude)
+          ? a.altitude * 0.3048
+          : null
+        entry.hdg = typeof pos.hdg === 'number' && Number.isFinite(pos.hdg)
+          ? pos.hdg
+          : (typeof a.heading === 'number' ? a.heading : 0)
       }
     }
     for (const [id, entry] of aircraftMarkers.current) {
@@ -811,8 +838,11 @@ export function VPMap({
       // scrubT !== 0 means time-travel: positions are historical facts then, not things
       // to predict forward from.
       if (scrubT !== 0) return
+      const map = mapRef.current
+      if (!map) return
       const now = Date.now()
       for (const entry of aircraftMarkers.current.values()) {
+        updateVision(entry, map)
         if (!entry.live || !entry.fix) continue
         const ageSec = (now - entry.fix.ts) / 1000
         if (!(ageSec >= 0) || ageSec > AIRCRAFT_PREDICT_MAX_SEC) continue
@@ -1041,6 +1071,42 @@ function applySatFallback(map: maplibregl.Map) {
 function setData(map: maplibregl.Map, id: string, features: GeoJSON.Feature[]) {
   const src = map.getSource(id) as maplibregl.GeoJSONSource | undefined
   src?.setData({ type: 'FeatureCollection', features })
+}
+
+/**
+ * Size and rotate an aircraft's forward-visibility cone.
+ *
+ * The cone is a MODEL (see lib/pilot-vision.ts): it grows with altitude until 20/20 acuity
+ * limits what can be detected, then NARROWS as the blind area beneath the aircraft eats
+ * into that fixed usable range, and disappears above the altitude where the band closes.
+ * Sizing is in pixels from the map's current ground resolution, so the cone means the same
+ * physical thing at every zoom, and it is rotated to the aircraft's heading for BOTH kinds
+ * — the rotary glyph deliberately does not rotate, but where a crew is looking is not a
+ * property of the glyph.
+ *
+ * A silent aircraft gets no cone. A ghost has no forward view worth showing, and drawing
+ * one would assert a live observer we cannot see.
+ */
+function updateVision(entry: AircraftMarkerEntry, map: maplibregl.Map) {
+  const el = entry.vision
+  if (!el) return
+  el.style.transform = `rotate(${entry.hdg || 0}deg)`
+
+  const clear = (key: string) => {
+    if (entry.coneKey !== key) { el.innerHTML = ''; entry.coneKey = key }
+  }
+  if (!entry.live || entry.altM === null) return clear('none')
+
+  const cone = visionConeForAltitude(entry.altM)
+  if (!cone) return clear('closed')
+
+  const centre = map.getCenter()
+  const mpp = metresPerPixel(map.getZoom(), centre.lat)
+  const key = `${Math.round(cone.nearM)}:${Math.round(cone.farM)}:${mpp.toFixed(2)}`
+  if (key === entry.coneKey) return
+  entry.coneKey = key
+  el.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" overflow="visible">` +
+    `<path d="${visionConePathPx(cone, mpp)}"></path></svg>`
 }
 
 // Move an aircraft marker, optionally tweening from its current visual

@@ -462,13 +462,19 @@ const KNOWN_AIRCRAFT: Record<string, { registration: string; role: Aircraft['rol
   // fuelEnduranceMinutes = best-endurance max, derived in lib/fuel-model.ts from
   // usable fuel / minimum fuel flow (AW139 ~274, EC135 ~210, C208 ~374). Used as
   // a fallback; the live figure comes from the physics fuel model per poll.
+  //
+  // THIS TABLE AND lib/fuel-model.ts MUST AGREE. They did not: PERF_BY_HEX already
+  // mapped 7C4EE8 to PERF_KINGAIR350ER while this table called the same airframe an
+  // AW139 helicopter, so the King Air rendered with a helicopter glyph and an AW139
+  // label. When a hex's role/type changes here, change it there too — and note that
+  // fuel-model.ts is the one that carries the researched figures.
   '7C7F8C': { registration: 'VH-PVH', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
   '7C2B22': { registration: 'VH-PVI', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'EC135', typeLabel: 'Eurocopter EC135', fuelEnduranceMinutes: 210 },
   '7C1F40': { registration: 'VH-PVK', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
   '7C4EF2': { registration: 'VH-PVO', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
   '7C4EF4': { registration: 'VH-PVQ', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
   '7C4EF5': { registration: 'VH-PVR', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
-  '7C4EE8': { registration: 'VH-PVE', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
+  '7C4EE8': { registration: 'VH-PVE', role: 'fixedwing', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'B350', typeLabel: 'Beechcraft King Air 350ER', fuelEnduranceMinutes: 690 },
   '7CF102': { registration: 'VH-AFC', role: 'fixedwing', operator: 'Australian Federal Police', operatorShort: 'AFP', type: 'C208', typeLabel: 'Cessna 208 Caravan', fuelEnduranceMinutes: 374 },
 }
 
@@ -1277,7 +1283,11 @@ async function pollFastPolice(): Promise<void> {
         callsign,
         type: ac.t || known?.type || 'A139',
         typeLabel: known?.typeLabel || ac.t || 'AgustaWestland AW139',
-        role: 'rotary',
+        // Role comes from the roster when the hex is known. Hardcoding 'rotary' here
+        // made every police hex a helicopter, which drew the King Air (7C4EE8) with a
+        // rotor glyph and an AW139 label — while lib/fuel-model.ts had it right.
+        // Unknown police hexes still default to rotary, as they always were.
+        role: known?.role ?? 'rotary',
         operator: 'Victoria Police',
         operatorShort: 'VICPOL',
         startTime: effectiveStartTime,
