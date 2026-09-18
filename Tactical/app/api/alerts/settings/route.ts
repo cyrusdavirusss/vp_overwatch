@@ -47,6 +47,11 @@ export async function GET(req: NextRequest) {
       call: twilioConfigured(),
       inapp: true,
     },
+    // The VAPID public key is public by definition (it is sent to the browser's push
+    // service as part of every subscription) and the client cannot subscribe without
+    // it, so shipping it here beats duplicating it into a second NEXT_PUBLIC_ var where
+    // the two copies could drift apart.
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? null,
   }, { headers: { 'Cache-Control': 'private, no-store' } })
 }
 
