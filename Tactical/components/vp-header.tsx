@@ -28,6 +28,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { PwaInstall } from "@/components/pwa-install";
 
 interface VPHeaderProps {
   airCount: number;
@@ -270,6 +271,7 @@ export function VPHeader({
 
         {/* Actions */}
         <div className="vp-header-actions">
+          <PwaInstall />
           <button
             className="vp-btn vp-btn--subscribe"
             onClick={onSubscribeClick}
