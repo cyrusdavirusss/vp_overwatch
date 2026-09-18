@@ -89,6 +89,19 @@ export default function VPOverwatch() {
     [realtime, mockMode, mockTick],
   )
 
+  // ── WazeAPI coverage boxes (operator-only overlay) ──────────────────────────
+  // The endpoint answers only on a local origin, so on the live site this fetch returns
+  // 404 and nothing is drawn — the collection footprint is not a public feature.
+  const [coverage, setCoverage] = useState<GeoJSON.FeatureCollection | null>(null)
+  useEffect(() => {
+    let alive = true
+    fetch('/api/coverage', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive && d?.features) setCoverage(d.features as GeoJSON.FeatureCollection) })
+      .catch(() => { /* not local, or the app is offline: simply no boxes */ })
+    return () => { alive = false }
+  }, [])
+
   const clientLocation = useClientLocation()
   const communityDots = useCommunityDots()
   // Live GPS fix present → hide the manual "Set Location" button; keep it only
@@ -304,6 +317,15 @@ export default function VPOverwatch() {
   const onFitAll = useCallback(() => {
     setFitAllCounter((c) => c + 1)
   }, [])
+
+  // A mock flight you cannot see is worse than none: the map opens on the whole state,
+  // so bring the synthetic pair into view once, after they exist.
+  const mockFitDone = useRef(false)
+  useEffect(() => {
+    if (!mockMode || mockFitDone.current || liveData.aircraft.length === 0) return
+    mockFitDone.current = true
+    onFitAll()
+  }, [mockMode, liveData.aircraft, onFitAll])
 
   const onManualSetLocation = useCallback((lat: number, lng: number) => {
     setShowLocationSetter(false)
@@ -554,6 +576,7 @@ export default function VPOverwatch() {
               pickTarget={sightingPick}
               followMode={followUser}
               onUserPan={() => setFollowUser(false)}
+              coverage={coverage}
               fitAllTrigger={fitAllCounter}
               recenterTrigger={recenterCounter}
               communityDots={communityDots}
@@ -881,6 +904,7 @@ export default function VPOverwatch() {
                     : undefined
             }
             pickTarget={sightingPick}
+            coverage={coverage}
             fitAllTrigger={fitAllCounter}
             recenterTrigger={recenterCounter}
             communityDots={communityDots}
