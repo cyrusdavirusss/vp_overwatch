@@ -15,7 +15,7 @@ import { buildMapStyle, registerPmtilesProtocol, outsideCoverage, type MapViewTy
 import type { CommunityDot } from '@/lib/visual-sighting'
 import { aircraftMarkerSVG, reportMarkerSVG, isGlowingKind, RED, BLUE } from '@/lib/markers'
 import { deadReckon } from '@/lib/geo/dead-reckoning'
-import { visionConeForAltitude, visionConePathPx, metresPerPixel } from '@/lib/pilot-vision'
+import { visionConeForAltitude, visionConeSVG, metresPerPixel } from '@/lib/pilot-vision'
 
 // Register the pmtiles:// protocol once, at the map module root. This module
 // is only ever loaded client-side (via the lazy map loader), so it is safe to
@@ -170,6 +170,10 @@ interface AircraftMarkerEntry {
   /** Altitude in metres (the source is feet) and heading, for the cone. */
   altM: number | null
   hdg: number
+  /** The airframe's role, because the two roles see differently (lib/pilot-vision.ts). */
+  role: Aircraft['role']
+  /** Stable id used to keep this marker's cone gradient unique on the map. */
+  markerId: string
 }
 
 export function VPMap({
@@ -553,7 +557,7 @@ export function VPMap({
             .addTo(map)
           entry = {
             marker, rot, callout, cur: target, raf: null, fix: null, live: false,
-            vision, coneKey: '', altM: null, hdg: 0,
+            vision, coneKey: '', altM: null, hdg: 0, role: a.role, markerId: a.id,
           }
           aircraftMarkers.current.set(a.id, entry)
         }
@@ -627,6 +631,7 @@ export function VPMap({
         entry.hdg = typeof pos.hdg === 'number' && Number.isFinite(pos.hdg)
           ? pos.hdg
           : (typeof a.heading === 'number' ? a.heading : 0)
+        entry.role = a.role
       }
     }
     for (const [id, entry] of aircraftMarkers.current) {
@@ -1097,16 +1102,17 @@ function updateVision(entry: AircraftMarkerEntry, map: maplibregl.Map) {
   }
   if (!entry.live || entry.altM === null) return clear('none')
 
-  const cone = visionConeForAltitude(entry.altM)
-  if (!cone) return clear('closed')
+  // The role changes the model, not just the glyph: a hovering helicopter looks down more
+  // steeply and scans wider than a fixed wing that must keep flying forward.
+  const cone = visionConeForAltitude(entry.altM, { role: entry.role })
+  if (!cone) return clear(`closed-${entry.role}`)
 
   const centre = map.getCenter()
   const mpp = metresPerPixel(map.getZoom(), centre.lat)
-  const key = `${Math.round(cone.nearM)}:${Math.round(cone.farM)}:${mpp.toFixed(2)}`
+  const key = `${entry.role}:${Math.round(cone.nearM)}:${Math.round(cone.farM)}:${mpp.toFixed(2)}`
   if (key === entry.coneKey) return
   entry.coneKey = key
-  el.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" overflow="visible">` +
-    `<path d="${visionConePathPx(cone, mpp)}"></path></svg>`
+  el.innerHTML = visionConeSVG(cone, mpp, { idSuffix: entry.markerId })
 }
 
 // Move an aircraft marker, optionally tweening from its current visual

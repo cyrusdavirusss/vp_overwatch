@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import {
   visionConeForAltitude,
   visionConePathPx,
+  visionConeSVG,
   acuityLimitedRangeM,
   coneCeilingM,
   metresPerPixel,
@@ -144,4 +145,49 @@ test('an unusable scale yields an empty path rather than nonsense', () => {
 test('metres per pixel falls as you zoom in, and follows latitude', () => {
   assert.ok(metresPerPixel(14, -37.8) < metresPerPixel(10, -37.8))
   assert.ok(metresPerPixel(12, 0) > metresPerPixel(12, -37.8))
+})
+
+test('a helicopter and a fixed wing do not see the same way', () => {
+  const alt = 1000
+  const heli = visionConeForAltitude(alt, { role: 'rotary' })!
+  const wing = visionConeForAltitude(alt, { role: 'fixedwing' })!
+  assert.ok(heli && wing)
+  // Hovering lets a helicopter look down more steeply, so LESS ground is blind beneath it.
+  assert.ok(heli.nearM < wing.nearM, `heli near ${heli.nearM} m vs fixed wing ${wing.nearM} m`)
+  // It can also hold a wider scan because it can orbit and point sideways.
+  assert.ok(heli.halfAngleDeg > wing.halfAngleDeg)
+  // Consequence worth knowing: the helicopter keeps a usable cone higher up, because its
+  // blind area grows more slowly. It is the near angle that decides the ceiling.
+  const heliCeiling = coneCeilingM({ role: 'rotary' })
+  const wingCeiling = coneCeilingM({ role: 'fixedwing' })
+  assert.ok(heliCeiling > wingCeiling, `heli ceiling ${heliCeiling} m vs wing ${wingCeiling} m`)
+})
+
+test('the cone fades from the aircraft outward', () => {
+  const cone = visionConeForAltitude(500, { role: 'rotary' })!
+  const svg = visionConeSVG(cone, 10, { idSuffix: 'abc123' })
+  assert.match(svg, /<linearGradient/)
+  const opacities = [...svg.matchAll(/stop-opacity="([\d.]+)"/g)].map((m) => Number(m[1]))
+  assert.equal(opacities.length, 3)
+  assert.ok(opacities[0] > opacities[1], 'least transparent nearest the aircraft')
+  assert.ok(opacities[1] > opacities[2], 'and fading further out')
+  assert.equal(opacities[2], 0, 'gone at the far edge, which is a limit not a boundary')
+  // The gradient has to be referenced, and unique per marker: two aircraft on the map at
+  // once must not share an id or one silently paints the other's cone.
+  assert.match(svg, /fill="url\(#vp-cone-abc123\)"/)
+  assert.match(svg, /id="vp-cone-abc123"/)
+  assert.notEqual(visionConeSVG(cone, 10, { idSuffix: 'other' }), svg)
+})
+
+test('a marker id with awkward characters cannot break the gradient id', () => {
+  const cone = visionConeForAltitude(500)!
+  const svg = visionConeSVG(cone, 10, { idSuffix: '7c4ef2/x y' })
+  assert.match(svg, /id="vp-cone-7c4ef2xy"/)
+  assert.match(svg, /fill="url\(#vp-cone-7c4ef2xy\)"/)
+})
+
+test('an unusable scale yields no SVG at all', () => {
+  const cone = visionConeForAltitude(500)!
+  assert.equal(visionConeSVG(cone, 0), '')
+  assert.equal(visionConeSVG(cone, Number.NaN), '')
 })

@@ -97,6 +97,36 @@ export const SENSOR_ZOOM = 1
 
 const DEG = Math.PI / 180
 
+/**
+ * The two airframes do not see the same way, and the difference is not decoration.
+ *
+ * A HELICOPTER can hover, so it can hold a fixed point under itself and depress its sensor
+ * steeply — a small blind area beneath it, and a wide scan because it can also orbit and
+ * point sideways. A FIXED WING must keep flying forward: looking steeply down while
+ * travelling fast is not a useful view, so its useful look-down is shallower (a bigger
+ * blind area behind the nose) but reaches further ahead, and its scan is narrower because
+ * the sensor looks where the aircraft is going.
+ *
+ * These angles are reasoned choices, not measurements of this fleet's equipment. What the
+ * model gets right is the CONSEQUENCE of the choice: the steeper a helicopter's near angle,
+ * the higher it can climb before the blind area closes over the acuity-limited range, so
+ * helicopters keep a usable cone to a higher altitude than the fixed wing does.
+ */
+export type VisionRole = 'rotary' | 'fixedwing'
+
+export interface VisionProfile {
+  nearDepressionDeg: number
+  farDepressionDeg: number
+  halfFovDeg: number
+}
+
+export const VISION_PROFILES: Record<VisionRole, VisionProfile> = {
+  // Hovering: steep look-down, wide scan.
+  rotary: { nearDepressionDeg: 75, farDepressionDeg: 10, halfFovDeg: 35 },
+  // Forward flight: shallower look-down, narrower scan, further ahead.
+  fixedwing: { nearDepressionDeg: 50, farDepressionDeg: 8, halfFovDeg: 25 },
+}
+
 export interface VisionCone {
   /** Distance ahead where visible ground starts, in metres. */
   nearM: number
@@ -109,6 +139,8 @@ export interface VisionCone {
 }
 
 export interface VisionOverrides {
+  /** Which airframe is looking. Sets the default angles; individual angles still win. */
+  role?: VisionRole
   nearDepressionDeg?: number
   farDepressionDeg?: number
   halfFovDeg?: number
@@ -146,8 +178,9 @@ export function visionConeForAltitude(
   if (typeof altitudeM !== 'number' || !Number.isFinite(altitudeM)) return null
   if (altitudeM < MIN_ALTITUDE_M) return null
 
-  const nearDep = (o.nearDepressionDeg ?? NEAR_DEPRESSION_DEG) * DEG
-  const farDep = (o.farDepressionDeg ?? FAR_DEPRESSION_DEG) * DEG
+  const profile = o.role ? VISION_PROFILES[o.role] : undefined
+  const nearDep = (o.nearDepressionDeg ?? profile?.nearDepressionDeg ?? NEAR_DEPRESSION_DEG) * DEG
+  const farDep = (o.farDepressionDeg ?? profile?.farDepressionDeg ?? FAR_DEPRESSION_DEG) * DEG
   if (nearDep <= farDep) return null
 
   const minVisible = o.minVisibleM ?? MIN_VISIBLE_M
@@ -175,7 +208,7 @@ export function visionConeForAltitude(
   // Band closed: whatever is visible starts beyond where anything can be made out.
   if (farM <= nearM) return null
 
-  return { nearM, farM, halfAngleDeg: o.halfFovDeg ?? HALF_FOV_DEG, limitedBy }
+  return { nearM, farM, halfAngleDeg: o.halfFovDeg ?? profile?.halfFovDeg ?? HALF_FOV_DEG, limitedBy }
 }
 
 /**
@@ -215,9 +248,42 @@ export function coneCeilingM(o: VisionOverrides = {}): number {
     o.linePairs ?? LINE_PAIRS_FOR_TASK,
     o.sensorZoom ?? SENSOR_ZOOM,
   )
-  const farDep = (o.farDepressionDeg ?? FAR_DEPRESSION_DEG) * DEG
-  const nearDep = (o.nearDepressionDeg ?? NEAR_DEPRESSION_DEG) * DEG
+  const profile = o.role ? VISION_PROFILES[o.role] : undefined
+  const farDep = (o.farDepressionDeg ?? profile?.farDepressionDeg ?? FAR_DEPRESSION_DEG) * DEG
+  const nearDep = (o.nearDepressionDeg ?? profile?.nearDepressionDeg ?? NEAR_DEPRESSION_DEG) * DEG
   const closesAt = acuity * Math.tan(nearDep) // where near edge reaches the acuity limit
   const opensTo = acuity * Math.tan(farDep) // where geometry stops being the limit
   return Math.max(closesAt, opensTo)
+}
+
+/**
+ * The complete cone as an SVG string: the path, plus its gradient.
+ *
+ * THE GRADIENT IS THE POINT. The cone is most opaque at the aircraft and fades to nothing
+ * at the far edge, because that is what it means: the near ground is what the crew can see
+ * well, and the far edge is a modelled limit, not a boundary. A flat fill would draw a hard
+ * edge the model does not have.
+ *
+ * The gradient id must be unique per marker — several of these SVGs are live on the map at
+ * once, and duplicate ids resolve to whichever the browser parsed first, so one aircraft's
+ * gradient would silently paint another's cone.
+ */
+export function visionConeSVG(
+  cone: VisionCone,
+  metresPerPixel: number,
+  o: { idSuffix?: string; colour?: string } = {},
+): string {
+  const path = visionConePathPx(cone, metresPerPixel)
+  if (!path) return ''
+  const colour = o.colour ?? '0, 212, 255'
+  const id = `vp-cone-${(o.idSuffix ?? 'x').replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const yNear = -cone.nearM / metresPerPixel
+  const yFar = -cone.farM / metresPerPixel
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" overflow="visible">`
+    + `<defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="${yNear}" x2="0" y2="${yFar}">`
+    + `<stop offset="0" stop-color="rgb(${colour})" stop-opacity="0.34"></stop>`
+    + `<stop offset="0.5" stop-color="rgb(${colour})" stop-opacity="0.15"></stop>`
+    + `<stop offset="1" stop-color="rgb(${colour})" stop-opacity="0"></stop>`
+    + `</linearGradient></defs>`
+    + `<path d="${path}" fill="url(#${id})"></path></svg>`
 }
