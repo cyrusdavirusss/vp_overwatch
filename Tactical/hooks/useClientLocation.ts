@@ -19,26 +19,36 @@ interface UseClientLocationResult {
   hasLocation: boolean
 }
 
-// Grid size for coordinate snapping. Truncating lat/lng to 3 decimal places
-// rounds each accepted fix to roughly a 110 m cell, so the stored point is a
-// neighbourhood-level grid square rather than the exact device position.
+// Grid size for coordinate snapping, applied ONLY to the coordinates pushed to
+// the server. Truncating lat/lng to 3 decimal places rounds each accepted fix to
+// roughly a 110 m cell, so what leaves the device is a neighbourhood-level grid
+// square rather than the exact position.
+//
+// The device's own copy of the fix is NOT snapped: the map draws from the raw
+// coordinates so the dot moves smoothly. Snapping the drawn position made the
+// marker jump in ~110 m steps and stall between them, which read as the map not
+// tracking at all. Privacy belongs at the boundary — what is stored and sent —
+// not between the phone and its own screen.
 const GRID_DECIMALS = 3
 
-const snapToGrid = (n: number) => Math.trunc(n * 10 ** GRID_DECIMALS) / 10 ** GRID_DECIMALS
+// round, not trunc: truncating biases every pushed point toward zero, i.e.
+// consistently down and left by up to a full cell.
+const snapToGrid = (n: number) => Math.round(n * 10 ** GRID_DECIMALS) / 10 ** GRID_DECIMALS
 
 /**
  * Client-only live geolocation hook.
  *
  * - watchPosition with maximumAge 0 gives continuous fresh fixes, so the
  *   position tracks the device as it moves.
- * - enableHighAccuracy is false: the browser may answer from the coarser
- *   network/IP source, and all fixes are accepted regardless of accuracy.
- * - Every accepted fix is snapped to a ~110 m grid (GRID_DECIMALS), so the
- *   exact device position is never stored.
+ * - enableHighAccuracy is TRUE. It was false, which let the browser answer from
+ *   the coarse network/IP source; on a phone in a vehicle that is the difference
+ *   between a GPS fix and a suburb-level guess, and it was a large part of why
+ *   tracking looked wrong.
+ * - `position` carries the raw fix, for drawing.
+ * - `latestFix` carries the grid-snapped fix, and is the only one transmitted
+ *   (POST /api/gps/set every 10s). The exact device position is never stored or
+ *   sent.
  * - A manual pin briefly (60s) suppresses live updates, then GPS resumes.
- * - The grid-snapped position is pushed to the server every 10s (POST
- *   /api/gps/set) so the backend knows the user's neighbourhood-level
- *   location; the exact device position is still never stored or sent.
  */
 const GPS_PUSH_INTERVAL = 10_000
 
@@ -55,11 +65,13 @@ export function useClientLocation(): UseClientLocationResult {
     setPermissionState('granted')
     if (Date.now() < manualUntil.current) return // honour a fresh manual pin
     setIsManual(false)
-    const lat = snapToGrid(pos.coords.latitude)
-    const lng = snapToGrid(pos.coords.longitude)
+    // Raw coordinates for the device's own map — full precision, never leaves.
+    const lat = pos.coords.latitude
+    const lng = pos.coords.longitude
+    // Snapped coordinates for the periodic server push — the only copy transmitted.
     latestFix.current = {
-      lat,
-      lng,
+      lat: snapToGrid(lat),
+      lng: snapToGrid(lng),
       accuracy: pos.coords.accuracy,
       heading: pos.coords.heading ?? 0,
     }
@@ -80,7 +92,9 @@ export function useClientLocation(): UseClientLocationResult {
     manualUntil.current = 0
     setIsManual(false)
     watchId.current = navigator.geolocation.watchPosition(handlePosition, handleError, {
-      enableHighAccuracy: false,
+      // Real GPS. With this false the browser was free to answer from the coarse
+      // network/IP source, which on a moving phone is a suburb-level guess.
+      enableHighAccuracy: true,
       timeout: 15000,
       maximumAge: 0,
     })
