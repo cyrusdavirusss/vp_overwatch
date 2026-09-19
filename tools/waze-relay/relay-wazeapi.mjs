@@ -90,7 +90,24 @@ const DEFAULT_TILES = [
   ['Pakenham',      '-38.155,145.395', '-38.025,145.525'],
 ];
 let TILES = DEFAULT_TILES;
-try { if (process.env.WAZEAPI_TILES) TILES = JSON.parse(process.env.WAZEAPI_TILES); } catch { console.warn('[wazeapi] bad WAZEAPI_TILES JSON, using defaults'); }
+/* tiles.json (version-controlled) is the source of truth for what we pay to watch.
+   Order: the tracked file first, then WAZEAPI_TILES as a one-off override, then the
+   hardcoded fallback above. The env used to be the only place the live list existed,
+   which left a config worth tens of dollars a month with no diff and no history. */
+const TILES_FILE = path.join(__dirname, 'tiles.json');
+let tilesPollSeconds = null;
+try {
+  const j = JSON.parse(fs.readFileSync(TILES_FILE, 'utf8'));
+  if (Array.isArray(j.tiles) && j.tiles.length) {
+    TILES = j.tiles;
+    if (Number(j.pollSeconds) > 0) tilesPollSeconds = Number(j.pollSeconds);
+    console.log(`[tiles] loaded ${TILES.length} boxes from tiles.json`);
+  }
+} catch (e) {
+  if (e.code !== 'ENOENT') console.warn('[tiles] tiles.json unreadable, falling back:', e.message);
+}
+try { if (process.env.WAZEAPI_TILES) { TILES = JSON.parse(process.env.WAZEAPI_TILES); console.log('[tiles] WAZEAPI_TILES override in play'); } } catch { console.warn('[wazeapi] bad WAZEAPI_TILES JSON, using defaults'); }
+if (tilesPollSeconds && !process.env.POLL_SECONDS) process.env.POLL_SECONDS = String(tilesPollSeconds);
 
 /* A swapped or malformed corner returns an empty result set, which looks exactly
    like "no police about" — so refuse to run with a broken box rather than lie. */

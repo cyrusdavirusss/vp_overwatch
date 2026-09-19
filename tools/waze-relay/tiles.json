@@ -1,0 +1,99 @@
+{
+  "_comment": [
+    "WazeAPI coverage boxes. THIS FILE IS THE SOURCE OF TRUTH \u2014 it is version-controlled,",
+    "because the box list is what the monthly bill is computed from and a change to it is",
+    "a change of what the deployment watches.",
+    "",
+    "Format: [name, 'south,west', 'north,east'] \u2014 the relay's own tile format.",
+    "Override for a one-off test with WAZEAPI_TILES in the relay's .env (env wins), but a",
+    "change that is meant to last belongs here so it has a diff, an author and a date.",
+    "",
+    "Cost: one request per box per poll. At the 30-minute interval below that is",
+    "48 requests/box/day -> $2.88 per box per month at $0.0020/request.",
+    "15 boxes = 21,600 requests = $43.20/month (or $38.20 on the Pro plan, which covers",
+    "20,000 and bills the overflow at the same $0.0020).",
+    "",
+    "HISTORY worth keeping: Box Hill East -> 'Box Hill / Doncaster' and Ringwood ->",
+    "Bayswater (2026-09-18) removed a 6.7 x 7.0 km overlap with the Glen Waverley box,",
+    "which was the box containing Mulgrave. Inner South and Inner North-West were added the",
+    "same day to close the two largest gaps in the inner ring."
+  ],
+  "pollSeconds": 1800,
+  "tiles": [
+    [
+      "North",
+      "-37.745,144.895",
+      "-37.615,145.025"
+    ],
+    [
+      "West",
+      "-37.869,144.769",
+      "-37.745,144.895"
+    ],
+    [
+      "CBD",
+      "-37.875,144.895",
+      "-37.745,145.025"
+    ],
+    [
+      "Inner South",
+      "-37.965,144.895",
+      "-37.835,145.025"
+    ],
+    [
+      "Inner SE",
+      "-37.965,144.985",
+      "-37.835,145.115"
+    ],
+    [
+      "Inner North-West",
+      "-37.745,144.774",
+      "-37.615,144.893"
+    ],
+    [
+      "Box Hill / Doncaster",
+      "-37.860,145.055",
+      "-37.730,145.184"
+    ],
+    [
+      "Glen Waverley",
+      "-37.965,145.135",
+      "-37.835,145.265"
+    ],
+    [
+      "Dandenong",
+      "-38.065,145.145",
+      "-37.935,145.275"
+    ],
+    [
+      "Bayswater",
+      "-37.855,145.215",
+      "-37.731,145.340"
+    ],
+    [
+      "Casey",
+      "-38.125,145.255",
+      "-37.995,145.385"
+    ],
+    [
+      "Pakenham",
+      "-38.154,145.395",
+      "-38.025,145.524"
+    ],
+    [
+      "Frankston",
+      "-38.205,145.055",
+      "-38.075,145.185"
+    ],
+    [
+      "Hoppers Crossing",
+      "-37.948,144.635",
+      "-37.818,144.765"
+    ],
+    [
+      "Mill Park",
+      "-37.731,145.030",
+      "-37.601,145.160"
+    ]
+  ]
+}

@@ -986,18 +986,32 @@ function addVpOverlays(map: maplibregl.Map) {
   if (!map.getLayer('vp-coverage-line'))
     map.addLayer({
       id: 'vp-coverage-line', type: 'line', source: 'vp-coverage',
-      paint: { 'line-color': '#B8C5CF', 'line-width': 1.1, 'line-opacity': 0.7, 'line-dasharray': [2, 3] },
+      // Strengthened after the first version was too faint to spot without zooming in:
+      // 1.1px at 0.7 opacity with short dashes disappeared against the basemap. Now a
+      // longer dash, thicker, with a dark casing under it so the line reads over both the
+      // light satellite basemap and the dark radar one.
+      paint: {
+        'line-color': '#EAF2F8',
+        'line-width': 1.7,
+        'line-opacity': 0.95,
+        'line-dasharray': [4, 3],
+      },
     })
+  if (!map.getLayer('vp-coverage-casing'))
+    map.addLayer({
+      id: 'vp-coverage-casing', type: 'line', source: 'vp-coverage',
+      paint: { 'line-color': '#04121C', 'line-width': 3.2, 'line-opacity': 0.55, 'line-dasharray': [4, 3] },
+    }, 'vp-coverage-line')
   if (!map.getLayer('vp-coverage-label'))
     map.addLayer({
-      id: 'vp-coverage-label', type: 'symbol', source: 'vp-coverage', minzoom: 8,
+      id: 'vp-coverage-label', type: 'symbol', source: 'vp-coverage', minzoom: 7,
       layout: {
         'text-field': ['get', 'label'],
-        'text-size': 10,
+        'text-size': 11,
         'text-font': ['Noto Sans Medium'],
         'text-allow-overlap': false,
       },
-      paint: { 'text-color': '#CFE4F2', 'text-halo-color': '#070B10', 'text-halo-width': 1.4 },
+      paint: { 'text-color': '#F1F5F8', 'text-halo-color': '#04121C', 'text-halo-width': 2 },
     })
 
   if (!map.getLayer('vp-hex-fill'))
