@@ -218,14 +218,26 @@ export function visionConeForAltitude(
  *
  * A truncated triangle, not a plain one: the near edge is a real line of ground, so the
  * shape begins at the visibility floor rather than at a point under the aircraft.
+ *
+ * A MINIMUM RENDERED LENGTH IS APPLIED, and the reason is measured: at the zoom an operator
+ * watches a whole state at, a genuine 50-200 m forward visibility renders 14-50 px, so the
+ * cone was drawn true to scale and was a 20x14 px speck — which is precisely the "I can't
+ * see it" complaint. Below MIN_CONE_PX the FAR edge is pushed out and the width recomputed
+ * from the same half-angle, so the angle and proportions stay honest and the cone stays
+ * attached to the aircraft (the near edge is never moved). Above the floor it is exact.
+ * It is a legibility floor on length, and this comment is the record that it is a floor.
  */
+export const MIN_CONE_PX = 26
 export function visionConePathPx(cone: VisionCone, metresPerPixel: number): string {
   if (!Number.isFinite(metresPerPixel) || metresPerPixel <= 0) return ''
   const half = Math.tan(cone.halfAngleDeg * DEG)
-  const yNear = -cone.nearM / metresPerPixel
-  const yFar = -cone.farM / metresPerPixel
-  const xNear = (cone.nearM * half) / metresPerPixel
-  const xFar = (cone.farM * half) / metresPerPixel
+  const nearPx = cone.nearM / metresPerPixel
+  const farPxRaw = cone.farM / metresPerPixel
+  const farPx = Math.max(farPxRaw, MIN_CONE_PX, nearPx + 6)
+  const yNear = -nearPx
+  const yFar = -farPx
+  const xNear = nearPx * half
+  const xFar = farPx * half
   const r = (n: number) => Math.round(n * 10) / 10
   return `M ${r(-xNear)} ${r(yNear)} L ${r(-xFar)} ${r(yFar)} L ${r(xFar)} ${r(yFar)} L ${r(xNear)} ${r(yNear)} Z`
 }
@@ -275,14 +287,22 @@ export function visionConeSVG(
 ): string {
   const path = visionConePathPx(cone, metresPerPixel)
   if (!path) return ''
-  const colour = o.colour ?? '0, 212, 255'
+  // TEAL, not yellow: yellow is the breadcrumb trail's colour, and a cone in the same hue as
+  // the track reads as part of the track. Deliberately not the airframe's role colour either
+  // — the cone models what the pilot can see, not what the aircraft is, so it has to read as
+  // its own layer. The gradient fades from the aircraft outward, so the near end is strongest.
+  //
+  // The gradient must stay here and NOT be replaced by a CSS fill on .vp-ac-vision path: CSS
+  // overrides the fill="url(#...)" presentation attribute, and that bug silently killed the
+  // gradient and left a flat 12% smear the operator could not see.
+  const colour = o.colour ?? '45, 212, 191'
   const id = `vp-cone-${(o.idSuffix ?? 'x').replace(/[^a-zA-Z0-9_-]/g, '')}`
   const yNear = -cone.nearM / metresPerPixel
   const yFar = -cone.farM / metresPerPixel
   return `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" overflow="visible">`
     + `<defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="${yNear}" x2="0" y2="${yFar}">`
-    + `<stop offset="0" stop-color="rgb(${colour})" stop-opacity="0.34"></stop>`
-    + `<stop offset="0.5" stop-color="rgb(${colour})" stop-opacity="0.15"></stop>`
+    + `<stop offset="0" stop-color="rgb(${colour})" stop-opacity="0.50"></stop>`
+    + `<stop offset="0.5" stop-color="rgb(${colour})" stop-opacity="0.22"></stop>`
     + `<stop offset="1" stop-color="rgb(${colour})" stop-opacity="0"></stop>`
     + `</linearGradient></defs>`
     + `<path d="${path}" fill="url(#${id})"></path></svg>`
