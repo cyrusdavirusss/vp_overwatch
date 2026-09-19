@@ -15,7 +15,14 @@ import { buildMapStyle, registerPmtilesProtocol, outsideCoverage, type MapViewTy
 import type { CommunityDot } from '@/lib/visual-sighting'
 import { aircraftMarkerSVG, reportMarkerSVG, isGlowingKind, RED, BLUE } from '@/lib/markers'
 import { deadReckon } from '@/lib/geo/dead-reckoning'
-import { visionConeForAltitude, visionConeSVG, metresPerPixel } from '@/lib/pilot-vision'
+import {
+  visionConeForAltitude,
+  visionConeSVG,
+  metresPerPixel,
+  EOIR_ZOOM_ESTIMATE,
+  MAX_SENSOR_RANGE_M,
+} from '@/lib/pilot-vision'
+import { estimateSensorPointing, type PointingEstimate } from '@/lib/sensor-pointing'
 import { zoomInByPercentCapped } from '@/lib/zoom'
 
 // Register the pmtiles:// protocol once, at the map module root. This module
@@ -180,6 +187,11 @@ interface AircraftMarkerEntry {
   vision: HTMLDivElement | null
   /** Key of the cone currently drawn, so an unchanged cone is not rebuilt every frame. */
   coneKey: string
+  /**
+   * Where the sensor is inferred to be looking. The turret slews independently of the
+   * nose, so the cone must not be pinned to heading — see lib/sensor-pointing.ts.
+   */
+  pointing: PointingEstimate | null
   /** Altitude in metres (the source is feet) and heading, for the cone. */
   altM: number | null
   hdg: number
@@ -643,7 +655,7 @@ export function VPMap({
             .addTo(map)
           entry = {
             marker, rot, callout, cur: target, raf: null, fix: null, live: false,
-            vision, coneKey: '', altM: null, hdg: 0, role: a.role, markerId: a.id,
+            vision, coneKey: '', pointing: null, altM: null, hdg: 0, role: a.role, markerId: a.id,
           }
           aircraftMarkers.current.set(a.id, entry)
         }
@@ -718,6 +730,19 @@ export function VPMap({
           ? pos.hdg
           : (typeof a.heading === 'number' ? a.heading : 0)
         entry.role = a.role
+        // Infer where the camera is pointed. ADS-B never carries the turret angle, so this
+        // is an inference with an uncertainty, and the cone is drawn as wide as the
+        // uncertainty and in a duller colour when there is no basis for it.
+        const reach = typeof entry.altM === 'number' && entry.altM > 0
+          ? Math.min(MAX_SENSOR_RANGE_M, Math.max(2000, entry.altM * 12))
+          : MAX_SENSOR_RANGE_M
+        entry.pointing = estimateSensorPointing({
+          track: Array.isArray(a.track) ? a.track : [],
+          headingDeg: entry.hdg,
+          groundSpeedKt: typeof a.speed === 'number' ? a.speed : null,
+          contacts: reports.map((r) => ({ lat: r.lat, lng: r.lng })),
+          reachM: reach,
+        })
       }
     }
     for (const [id, entry] of aircraftMarkers.current) {
@@ -1227,7 +1252,8 @@ function setData(map: maplibregl.Map, id: string, features: GeoJSON.Feature[]) {
 function updateVision(entry: AircraftMarkerEntry, map: maplibregl.Map) {
   const el = entry.vision
   if (!el) return
-  el.style.transform = `rotate(${entry.hdg || 0}deg)`
+  // The bearing the sensor is inferred to be on — NOT the airframe's heading.
+  el.style.transform = `rotate(${entry.pointing?.bearingDeg ?? entry.hdg ?? 0}deg)`
 
   const clear = (key: string) => {
     if (entry.coneKey !== key) { el.innerHTML = ''; entry.coneKey = key }
@@ -1236,15 +1262,32 @@ function updateVision(entry: AircraftMarkerEntry, map: maplibregl.Map) {
 
   // The role changes the model, not just the glyph: a hovering helicopter looks down more
   // steeply and scans wider than a fixed wing that must keep flying forward.
-  const cone = visionConeForAltitude(entry.altM, { role: entry.role })
+  const cone = visionConeForAltitude(entry.altM, {
+    role: entry.role,
+    // The fleet's aircraft carry a stabilised EO/IR turret, so the useful reach is the
+    // pod's, not an unaided eye's. See EOIR_ZOOM_ESTIMATE for how that number is derived.
+    sensorZoom: EOIR_ZOOM_ESTIMATE,
+    maxRangeM: MAX_SENSOR_RANGE_M,
+    // The uncertainty in the inferred bearing IS the cone's width: an orbit estimate is
+    // narrow, a bare along-track fallback is wide.
+    halfFovDeg: entry.pointing?.spreadDeg,
+  })
   if (!cone) return clear(`closed-${entry.role}`)
 
   const centre = map.getCenter()
   const mpp = metresPerPixel(map.getZoom(), centre.lat)
+  const inferred = entry.pointing && entry.pointing.basis !== 'nose'
   const key = `${entry.role}:${Math.round(cone.nearM)}:${Math.round(cone.farM)}:${mpp.toFixed(2)}`
+    + `:${Math.round(entry.pointing?.bearingDeg ?? entry.hdg)}:${entry.pointing?.basis ?? 'none'}:${cone.halfAngleDeg}`
   if (key === entry.coneKey) return
   entry.coneKey = key
-  el.innerHTML = visionConeSVG(cone, mpp, { idSuffix: entry.markerId })
+  // Teal when the bearing is inferred from track geometry; muted grey when it is only the
+  // nose. The difference is deliberate: an operator should be able to tell at a glance
+  // which cones are a prediction and which are a placeholder.
+  el.innerHTML = visionConeSVG(cone, mpp, {
+    idSuffix: entry.markerId,
+    colour: inferred ? '45, 212, 191' : '148, 163, 184',
+  })
 }
 
 // Move an aircraft marker, optionally tweening from its current visual

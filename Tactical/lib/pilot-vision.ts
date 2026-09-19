@@ -90,10 +90,42 @@ export const MIN_ALTITUDE_M = 15
 /**
  * Optical magnification of the crew's sensor. 1 = unaided eye. An EO/IR turret with a zoom
  * lens multiplies the acuity-limited range roughly by its magnification, which is how a
- * 350ER can identify anything from 25,000 ft. Left at 1 so the default describes a person
- * looking out of the window, which is what was asked for; raise it when modelling a pod.
+ * 350ER can identify anything from 25,000 ft.
+ *
+ * This default describes a person looking out of the window. The armoured aircraft in this
+ * fleet carry a stabilised EO/IR turret, and modelling that is what EOIR_ZOOM_ESTIMATE is
+ * for — see below.
  */
 export const SENSOR_ZOOM = 1
+
+/**
+ * Modelled magnification of the fleet's EO/IR turret, for when the cone should represent
+ * what the CAMERA can reach rather than what an unaided eye can.
+ *
+ * HOW THIS NUMBER IS ARRIVED AT. There is one published performance claim to anchor it:
+ * the Air Wing says the camera reads registration numbers "from a long distance", and the
+ * aircraft's own published operating band is 1,000-3,000 ft for the helicopters. Treating
+ * identification of a plate character (45 mm) as Johnson identification (6.4 line pairs)
+ * at the top of that band, 914 m:
+ *
+ *     magnification = range x linePairs x 2 x MAR / targetWidth
+ *                   = 914 x 6.4 x 2 x 0.000291 / 0.045  ~= 76x
+ *
+ * At the bottom of the band, 305 m, the same sum gives ~25x. So the pod's effective
+ * magnification lies somewhere in 25-80x; this takes the middle of that band. It is a
+ * MODELLED figure standing in for an unpublished one, it is deliberately conservative
+ * (a real turret's optical-plus-digital chain reaches higher), and it is a named constant
+ * so it can be argued with. When the turret's actual lens is identified, replace it.
+ */
+export const EOIR_ZOOM_ESTIMATE = 50
+
+/**
+ * Range cap when modelling the sensor rather than the eye. The 8 km default exists so a
+ * high aircraft cannot paint a cone across the viewport; a pod's acuity-limited reach is
+ * tens of km and is really bounded by haze and the horizon, so the pod gets a larger cap.
+ * HAZE_RANGE_M (20 km) is still the tighter of the two in clear air, which is correct.
+ */
+export const MAX_SENSOR_RANGE_M = 20_000
 
 const DEG = Math.PI / 180
 
