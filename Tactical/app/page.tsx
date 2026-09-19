@@ -983,6 +983,13 @@ export default function VPOverwatch() {
                     : undefined
             }
             pickTarget={sightingPick}
+            // These two were only passed to the DESKTOP map, so on a phone the
+            // map never entered follow mode. Without followMode every GPS fix
+            // took the one-off "fly to" branch instead of live following, and
+            // without onUserPan a deliberate pan could not stop the follow.
+            // The phone is the primary client — this is the layout that matters.
+            followMode={followUser}
+            onUserPan={() => setFollowUser(false)}
             coverage={coverage}
             fitAllTrigger={fitAllCounter}
             recenterTrigger={recenterCounter}

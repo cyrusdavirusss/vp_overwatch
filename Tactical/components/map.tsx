@@ -16,6 +16,7 @@ import type { CommunityDot } from '@/lib/visual-sighting'
 import { aircraftMarkerSVG, reportMarkerSVG, isGlowingKind, RED, BLUE } from '@/lib/markers'
 import { deadReckon } from '@/lib/geo/dead-reckoning'
 import { visionConeForAltitude, visionConeSVG, metresPerPixel } from '@/lib/pilot-vision'
+import { zoomInByPercentCapped } from '@/lib/zoom'
 
 // Register the pmtiles:// protocol once, at the map module root. This module
 // is only ever loaded client-side (via the lazy map loader), so it is safe to
@@ -366,8 +367,17 @@ export function VPMap({
       onMapClickRef.current?.(e.lngLat.lat, e.lngLat.lng)
     })
 
-    // Any deliberate camera interaction pauses live-follow.
-    const pauseFollow = () => onUserPanRef.current?.()
+    // Any deliberate camera interaction pauses live-follow — but ONLY a real one.
+    // MapLibre fires zoomstart / pitchstart / rotatestart for PROGRAMMATIC camera
+    // moves as well, which made this fire on every locate press (it zooms), on
+    // every flyTo, and on the opening fit. Each one silently switched follow off,
+    // and from then on the map stopped tracking the user: the dot drove away and
+    // the camera stayed put. Events from a gesture carry originalEvent; the ones
+    // MapLibre generates for its own animations do not.
+    const pauseFollow = (e?: { originalEvent?: unknown }) => {
+      if (!e || !e.originalEvent) return
+      onUserPanRef.current?.()
+    }
     map.on('dragstart', pauseFollow)
     map.on('zoomstart', pauseFollow)
     map.on('pitchstart', pauseFollow)
@@ -486,10 +496,13 @@ export function VPMap({
     const map = mapRef.current
     if (!ready || !map || !focusTarget) return
 
-    // An explicit locate-FAB press (recenterTrigger bumped) must always recenter,
-    // even onto the same coords — clear the dedup so the move below isn't skipped.
-    if (recenterTrigger !== lastRecenterTrigger.current) {
+    // A locate-FAB press is distinguishable from an ordinary follow update: it
+    // bumps recenterTrigger. That matters because the two want different camera
+    // behaviour — a press zooms in a step, a follow update must not touch zoom.
+    const pressedLocate = recenterTrigger !== lastRecenterTrigger.current
+    if (pressedLocate) {
       lastRecenterTrigger.current = recenterTrigger
+      // Clear the dedup so a press recentres even onto identical coords.
       lastFocusRef.current = null
     }
 
@@ -498,16 +511,29 @@ export function VPMap({
     if (lastFocusRef.current === focusKey) return
     lastFocusRef.current = focusKey
 
-    if (followMode) {
-      // Live follow: pan only, keep the user's current zoom, gentle ease.
+    if (pressedLocate) {
+      // Locate press: centre on the user AND zoom in by a quarter of the current
+      // scale. Repeated presses keep stepping in. The default easing is used
+      // deliberately — a spring overshoots, which reads as a wobble when the
+      // destination is the user's own position.
       map.easeTo({
         center: [focusTarget.lng, focusTarget.lat],
-        duration: 800,
-        easing: springEase,
+        zoom: zoomInByPercentCapped(map.getZoom(), map.getMaxZoom()),
+        duration: 700,
+        essential: true,
+      })
+    } else if (followMode) {
+      // Live follow: pan only, keep the user's current zoom, short ease. Was
+      // 800ms with a spring easing, which never settled between GPS fixes — each
+      // new fix restarted the animation, so the map lagged behind the user and
+      // overshot as it chased.
+      map.easeTo({
+        center: [focusTarget.lng, focusTarget.lat],
+        duration: 450,
         essential: true,
       })
     } else {
-      // Deliberate focus (recenter / select a unit): fly in with momentum.
+      // Deliberate focus (select a unit): fly in with momentum.
       map.flyTo({
         center: [focusTarget.lng, focusTarget.lat],
         zoom: Math.max(map.getZoom(), FOCUS_ZOOM),
