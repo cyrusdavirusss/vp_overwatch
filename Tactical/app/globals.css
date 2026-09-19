@@ -956,10 +956,14 @@ samp,
   overflow: visible;
 }
 .vp-ac-vision path {
-  fill: rgba(0, 212, 255, 0.08);
-  stroke: rgba(0, 212, 255, 0.45);
-  stroke-width: 1;
-  stroke-dasharray: 3 4;
+  /* The fill is deliberately NOT set here: this is an SVG element whose fill comes from a
+     gradient (fill="url(#...)"), and a CSS `fill` overrides a presentation attribute. Setting
+     it here — as an earlier pass did — silently killed the gradient and left a flat 12%
+     smear, which is why the operator could not see the cone at all.
+     The outline is teal to match the interior, so the cone reads as one object. */
+  stroke: rgba(45, 212, 191, 0.85);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
   stroke-linejoin: round;
 }
 .vp-marker-ring { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid rgba(0,212,255,0.35); transition: border-color 160ms ease; }
