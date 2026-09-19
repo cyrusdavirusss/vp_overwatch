@@ -22,12 +22,19 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
     const rawAlerts: any[] = body?.alerts ?? []
-    // POLICE-only: VP-Overwatch ingests police sightings only, regardless of
-    // what the relay sends (Waze georss returns all alert types per tile).
-    const alerts = Array.isArray(rawAlerts)
-      ? rawAlerts.filter((a) => String(a?.type ?? '').toUpperCase().startsWith('POLICE'))
-      : []
-    console.log(`[ingest] ${alerts.length} police / ${rawAlerts.length} raw from=${src}`)
+    // POLICE + CAMERA. VP-Overwatch carries police sightings and the speed and
+    // red-light cameras, which Waze publishes as their own top-level type
+    // (`CAMERA`) rather than under POLICE. Filtering strictly on POLICE silently
+    // dropped every fixed camera — the permanent ones never expire from the feed,
+    // so they were the most reliable thing available and were the only category
+    // missing. Jams, hazards, roadworks and closures stay out: this is not a
+    // traffic map.
+    const KEEP = (t: unknown) => {
+      const s = String(t ?? '').toUpperCase()
+      return s.startsWith('POLICE') || s === 'CAMERA'
+    }
+    const alerts = Array.isArray(rawAlerts) ? rawAlerts.filter((a) => KEEP(a?.type)) : []
+    console.log(`[ingest] ${alerts.length} police+camera / ${rawAlerts.length} raw from=${src}`)
 
     if (alerts.length === 0) {
       return Response.json({ ingested: 0, total: Array.isArray(rawAlerts) ? rawAlerts.length : 0 })
