@@ -1290,3 +1290,100 @@
     transition: none !important;
   }
 }
+
+/* ── Landscape immersion ──────────────────────────────────────────────────────
+   Phone or tablet turned sideways: the map is the entire screen and every piece
+   of chrome is gone — header, ON AIR strip, rails, view tabs, status chips.
+
+   `data-vp-immersive` is set on <html> by hooks/useImmersiveLandscape.ts and has
+   three values:
+     off       portrait or desktop — nothing in this block applies
+     on        immersed — map only
+     revealed  the operator tapped the tab that brings the chrome back
+
+   Selection-driven surfaces are deliberately NOT hidden: an aircraft detail, a
+   report detail or the filter sheet is the "appropriate bar comes out" case.
+   The mock-flight label also stays — it is a data-integrity warning, and hiding
+   it in a screenshot would imply synthetic traffic was real tracking.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+html[data-vp-immersive='on'] .vp-chrome,
+html[data-vp-immersive='on'] .vp-imm-hide,
+html[data-vp-immersive='on'] .vp-map-pill,
+html[data-vp-immersive='on'] .vp-fab-cluster,
+html[data-vp-immersive='on'] .vp-mlat-banner,
+html[data-vp-immersive='on'] .vp-announce,
+html[data-vp-immersive='on'] .vp-vps-button {
+  display: none !important;
+}
+
+/* When revealed, the header and the control cluster come back. The map-view pill
+   does not: switching views lives on the FAB's layers button, and tabs are
+   precisely what immersion exists to remove. */
+html[data-vp-immersive='revealed'] .vp-chrome { display: block !important; }
+html[data-vp-immersive='revealed'] .vp-fab-cluster { display: flex !important; }
+html[data-vp-immersive='revealed'] .vp-mlat-banner { display: block !important; }
+html[data-vp-immersive='revealed'] .vp-announce { display: flex !important; }
+
+/* The immersion tab. Low opacity so it reads as a seam in the map rather than a
+   control sitting on it, and it brightens on touch. */
+.vp-imm-handle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  gap: 4px;
+}
+.vp-imm-handle button {
+  width: 34px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 18, 26, 0.55);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  color: var(--fg-4);
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 160ms ease, color 160ms ease;
+}
+.vp-imm-handle button:hover,
+.vp-imm-handle button:active,
+.vp-imm-handle:focus-within button { opacity: 1; color: var(--fg-1); }
+
+/* Selection-driven panels become right-hand bars. Landscape viewports are short:
+   a bottom sheet covers the horizon the operator is watching, which is the one
+   thing the map is there for. */
+html[data-vp-immersive='on'] .vp-detail-panel,
+html[data-vp-immersive='revealed'] .vp-detail-panel {
+  top: 0 !important;
+  bottom: 0 !important;
+  left: auto !important;
+  right: 0 !important;
+  width: min(420px, 46vw) !important;
+  height: 100% !important;
+  border-left: 1px solid var(--border) !important;
+  border-top: none !important;
+  border-radius: 0 !important;
+  z-index: 45;
+}
+html[data-vp-immersive='on'] .vp-report-sheet,
+html[data-vp-immersive='revealed'] .vp-report-sheet {
+  top: 0 !important;
+  bottom: 0 !important;
+  left: auto !important;
+  right: 0 !important;
+  width: min(420px, 46vw) !important;
+  max-height: 100% !important;
+  border-left: 1px solid var(--border) !important;
+  border-top: none !important;
+  z-index: 44;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vp-imm-handle button { transition: none; }
+}

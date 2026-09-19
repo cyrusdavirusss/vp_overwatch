@@ -143,7 +143,7 @@ export function VPSButton({ onReport, onPickSighting, pickedPoint, onCancelPick 
   const showKinds = mode === 'in-sight' || (mode === 'out-of-sight' && point !== null)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+    <div className="vp-vps-button" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
       {/* Flyout appears above the main button */}
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>

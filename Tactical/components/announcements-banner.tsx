@@ -77,7 +77,7 @@ export function AnnouncementsBanner() {
 
   return (
     <div
-      className="rounded-md border px-2.5 py-1.5 flex items-start gap-2"
+      className="vp-announce rounded-md border px-2.5 py-1.5 flex items-start gap-2"
       style={{
         borderColor: style.color,
         background: 'color-mix(in srgb, var(--ink-1) 94%, transparent)',
