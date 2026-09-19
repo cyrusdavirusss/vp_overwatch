@@ -10,6 +10,11 @@ interface FabClusterProps {
   followUser?: boolean
   onFitAll: () => void
   onRoute?: () => void
+  /** Head-up mode: rotate the map to the direction the phone is facing. */
+  onHeading?: () => void
+  headingActive?: boolean
+  /** Live compass heading, for the needle. Null while unavailable. */
+  heading?: number | null
 }
 
 export function FabCluster({
@@ -20,6 +25,9 @@ export function FabCluster({
   followUser,
   onFitAll,
   onRoute,
+  onHeading,
+  headingActive,
+  heading,
 }: FabClusterProps) {
   return (
     <div className="vp-fab-cluster">
@@ -50,6 +58,26 @@ export function FabCluster({
           <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-[var(--green)] border-2 border-ink-0 rounded-full" />
         )}
       </FabBtn>
+      {/* Head-up mode. Only offered where the device actually reports orientation
+          (the prop is omitted on desktop), and the needle turns with the live
+          heading so the control shows what the map is doing. */}
+      {onHeading && (
+        <FabBtn onClick={onHeading} primary={headingActive} label={headingActive ? 'Head-up: on (tap for north-up)' : 'Head-up: rotate map to phone'}>
+          <svg
+            width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+            style={{
+              transform: `rotate(${headingActive && heading != null ? -heading : 0}deg)`,
+              transition: headingActive ? 'transform 120ms linear' : 'transform 200ms ease',
+            }}
+          >
+            <circle cx="12" cy="12" r="9" />
+            <polygon points="12 4.5 14.2 12 12 12" fill="currentColor" stroke="none" />
+            <polygon points="12 19.5 9.8 12 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" />
+          </svg>
+          {headingActive && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-[var(--green)] border-2 border-ink-0 rounded-full" />}
+        </FabBtn>
+      )}
     </div>
   )
 }

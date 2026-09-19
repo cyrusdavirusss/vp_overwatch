@@ -22,6 +22,7 @@ import { useClientLocation } from '@/hooks/useClientLocation'
 import { useCommunityDots } from '@/hooks/useCommunityDots'
 import { useRouteAlerts } from '@/hooks/useRouteAlerts'
 import { useImmersiveLandscape } from '@/hooks/useImmersiveLandscape'
+import { useDeviceHeading } from '@/hooks/useDeviceHeading'
 import type { MapViewType } from '@/lib/map-style'
 import type { User, Report } from '@/lib/data'
 import { isSilentContact } from '@/lib/data'
@@ -61,6 +62,27 @@ export default function VPOverwatch() {
   // for it back. See hooks/useImmersiveLandscape.ts for why fullscreen has to be
   // gesture-triggered rather than pure orientation-driven.
   const immersion = useImmersiveLandscape()
+
+  // ── Head-up mode ────────────────────────────────────────────────────────────
+  // Rotate the map to the direction the phone is facing. The compass has to be
+  // started from a tap: iOS refuses motion permission requested outside a user
+  // gesture, so this cannot be switched on at mount. The heading itself reaches
+  // the map by ref, not props, so the frame-rate stream never re-renders the app.
+  const heading = useDeviceHeading()
+  const [headingMode, setHeadingMode] = useState(false)
+  const onToggleHeading = useCallback(async () => {
+    // Off is decided by the mode alone, never by whether data happens to be
+    // flowing: if a sensor reports nothing (desktop, or permission refused) the
+    // control would otherwise be stuck on with no way to cancel it. A stalled
+    // stream does get a retry path, via the hook's `denied` flag.
+    if (headingMode && !heading.denied) {
+      heading.stop()
+      setHeadingMode(false)
+      return
+    }
+    await heading.start()
+    setHeadingMode(true)
+  }, [heading, headingMode])
 
   const realtime = useRealtimeData({
     // The backend fast-police loop refreshes adsb.lol every 3s (FAST_POLICE_INTERVAL);
@@ -585,6 +607,8 @@ export default function VPOverwatch() {
               pickTarget={sightingPick}
               followMode={followUser}
               onUserPan={() => setFollowUser(false)}
+              headingMode={headingMode}
+              headingRef={heading.headingRef}
               coverage={coverage}
               fitAllTrigger={fitAllCounter}
               recenterTrigger={recenterCounter}
@@ -614,6 +638,9 @@ export default function VPOverwatch() {
               followUser={followUser}
               onFitAll={onFitAll}
               onRoute={() => setPickingDest(true)}
+              onHeading={heading.supported ? onToggleHeading : undefined}
+              headingActive={headingMode}
+              heading={heading.heading}
             />
 
             {/* Route awareness — destination pick hint + threat panel (desktop) */}
@@ -961,6 +988,8 @@ export default function VPOverwatch() {
             recenterTrigger={recenterCounter}
             communityDots={communityDots}
             viewType={mapView}
+            headingMode={headingMode}
+            headingRef={heading.headingRef}
           />
 
           {/* Map view pill — floating top-center */}
@@ -1011,6 +1040,9 @@ export default function VPOverwatch() {
             onSetLocation={gpsLive ? undefined : () => setShowLocationSetter(true)}
             followUser={followUser}
             onFitAll={onFitAll}
+            onHeading={heading.supported ? onToggleHeading : undefined}
+            headingActive={headingMode}
+            heading={heading.heading}
           />
 
           {/* Operator announcements — top-centre, dismissed per notice */}

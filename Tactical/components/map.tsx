@@ -69,6 +69,13 @@ export interface VPMapProps {
   communityDots?: CommunityDot[]
   /** Basemap view mode (radar / dark / light / grayscale / satellite). */
   viewType?: MapViewType
+  /**
+   * Head-up mode. When true the map's bearing follows the device compass and
+   * user rotation is disabled, so a stray two-finger twist cannot fight it.
+   */
+  headingMode?: boolean
+  /** Live compass heading (degrees from north). Read per frame, never via state. */
+  headingRef?: React.MutableRefObject<number | null>
 }
 
 // Motion: 400ms camera-focus duration with the design system's spring ease
@@ -203,10 +210,57 @@ export function VPMap({
   recenterTrigger,
   communityDots = [],
   viewType = 'radar',
+  headingMode = false,
+  headingRef,
 }: VPMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const [ready, setReady] = useState(false)
+
+  // ── Head-up mode ────────────────────────────────────────────────────────────
+  // The compass heading arrives at frame rate, so this deliberately does NOT go
+  // through React state: it reads the ref inside its own loop and only pushes to
+  // MapLibre when the bearing has moved further than the eye can ignore. While
+  // head-up is on, user rotation is disabled — otherwise a two-finger twist and
+  // the compass fight over the bearing and the map judders.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+
+    if (!headingMode) {
+      if (!map.dragRotate.isEnabled()) map.dragRotate.enable()
+      map.touchZoomRotate.enableRotation()
+      map.setBearing(0)
+      return
+    }
+
+    map.dragRotate.disable()
+    map.touchZoomRotate.disableRotation()
+
+    let raf = 0
+    let applied = map.getBearing()
+    const tick = () => {
+      const h = headingRef?.current
+      if (h != null && Number.isFinite(h)) {
+        const target = ((h % 360) + 360) % 360
+        let diff = target - applied
+        if (diff > 180) diff -= 360
+        if (diff < -180) diff += 360
+        if (Math.abs(diff) > 0.6) {
+          applied = ((applied + diff) % 360 + 360) % 360
+          map.setBearing(applied)
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      if (!map.dragRotate.isEnabled()) map.dragRotate.enable()
+      map.touchZoomRotate.enableRotation()
+    }
+  }, [headingMode, headingRef, ready])
   // Set when the map cannot be created at all — no WebGL context, or a context
   // lost mid-session. Without this the throw escapes to the page-level error
   // boundary and the entire app becomes "This page couldn't load", so a client
