@@ -472,9 +472,13 @@ const KNOWN_AIRCRAFT: Record<string, { registration: string; role: Aircraft['rol
   // AW139 helicopter, so the King Air rendered with a helicopter glyph and an AW139
   // label. When a hex's role/type changes here, change it there too — and note that
   // fuel-model.ts is the one that carries the researched figures.
-  '7C7F8C': { registration: 'VH-PVH', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
+  // VH-PVH and VH-PVK were AS365 Dauphins, not AW139s — Wikipedia's fleet history has
+  // VH-PVH on CHOGM 2011 support in Perth, and both came from the 1986 Romanian VIP
+  // purchase. Their hexes return nothing in hexdb, so these are almost certainly retired
+  // airframes that should not be presented as current AW139s.
+  '7C7F8C': { registration: 'VH-PVH', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AS365', typeLabel: 'Aerospatiale AS365 Dauphin', fuelEnduranceMinutes: 274 },
   '7C2B22': { registration: 'VH-PVI', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'EC135', typeLabel: 'Eurocopter EC135', fuelEnduranceMinutes: 210 },
-  '7C1F40': { registration: 'VH-PVK', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AW139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
+  '7C1F40': { registration: 'VH-PVK', role: 'rotary', operator: 'VicPol Air Wing', operatorShort: 'VPAW', type: 'AS365', typeLabel: 'Aerospatiale AS365 Dauphin', fuelEnduranceMinutes: 274 },
   '7C4EF2': { registration: 'VH-PVO', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
   '7C4EF4': { registration: 'VH-PVQ', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
   '7C4EF5': { registration: 'VH-PVR', role: 'rotary', operator: 'Victoria Police', operatorShort: 'VICPOL', type: 'A139', typeLabel: 'AgustaWestland AW139', fuelEnduranceMinutes: 274 },
@@ -1283,9 +1287,15 @@ async function pollFastPolice(): Promise<void> {
       s.aircraftMap.set(hex, {
         id: hex,
         hex,
-        registration: ac.r || known?.registration || 'N/A',
+        // Roster FIRST for the known fleet. The feed is third-party and unverified;
+        // the roster is the checked fleet (hexdb + production lists + Police Aviation
+        // News). With ac.r first, a bad or stale feed registration silently replaced
+        // a verified one.
+        registration: known?.registration || ac.r || 'N/A',
         callsign,
-        type: ac.t || known?.type || 'A139',
+        // Same reasoning as registration: typeLabel already preferred the roster while
+        // type did not, so the two could disagree — a King Air drawn with a heli glyph.
+        type: known?.type || ac.t || 'A139',
         typeLabel: known?.typeLabel || ac.t || 'AgustaWestland AW139',
         // Role comes from the roster when the hex is known. Hardcoding 'rotary' here
         // made every police hex a helicopter, which drew the King Air (7C4EE8) with a
