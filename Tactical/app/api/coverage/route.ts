@@ -75,17 +75,29 @@ function isLocalOnly(req: NextRequest): boolean {
 function findRelayEnv(): { path: string | null; tried: string[] } {
   const override = process.env.VP_WAZE_RELAY_ENV
   const tried: string[] = []
-  const bases: string[] = override ? [override] : []
+  const bases: string[] = []
   let dir = process.cwd()
   for (let up = 0; up < 5; up++) {
     bases.push(path.join(dir, 'tools', 'waze-relay', '.env'))
     dir = path.dirname(dir)
   }
+  if (override) bases.unshift(override)
   for (const candidate of bases) {
     tried.push(candidate)
     try { readFileSync(candidate); return { path: candidate, tried } } catch { /* next */ }
   }
   return { path: null, tried }
+}
+
+/** The tracked tile list, which is the source of truth for what we pay to watch. */
+function findTilesJson(): string | null {
+  let dir = process.cwd()
+  for (let up = 0; up < 5; up++) {
+    const candidate = path.join(dir, 'tools', 'waze-relay', 'tiles.json')
+    try { readFileSync(candidate); return candidate } catch { /* next */ }
+    dir = path.dirname(dir)
+  }
+  return null
 }
 
 export async function GET(req: NextRequest) {
@@ -94,17 +106,35 @@ export async function GET(req: NextRequest) {
     return new NextResponse('Not found', { status: 404 })
   }
 
+  // tiles.json first (version-controlled), then the relay .env's WAZEAPI_TILES as the
+  // one-off override — the same precedence the relay itself uses, so the boxes on the map
+  // and the boxes being polled cannot disagree.
+  let tiles: TileSpec[] = []
+  let pollSeconds = 1800
+  let source = ''
+  const tilesJson = findTilesJson()
+  if (tilesJson) {
+    try {
+      const j = JSON.parse(readFileSync(tilesJson, 'utf8'))
+      tiles = parseTiles(JSON.stringify(j.tiles ?? []))
+      if (Number(j.pollSeconds) > 0) pollSeconds = Number(j.pollSeconds)
+      source = tilesJson
+    } catch { /* fall through to the env */ }
+  }
   const found = findRelayEnv()
   const env = found.path ? envFrom(found.path) : {}
-  const tiles = parseTiles(env.WAZEAPI_TILES || '[]')
-  const pollSeconds = Number(env.POLL_SECONDS) > 0 ? Number(env.POLL_SECONDS) : 1800
+  if (env.WAZEAPI_TILES) {
+    const fromEnv = parseTiles(env.WAZEAPI_TILES)
+    if (fromEnv.length) { tiles = fromEnv; source = `${found.path} (WAZEAPI_TILES override)` }
+    if (Number(env.POLL_SECONDS) > 0) pollSeconds = Number(env.POLL_SECONDS)
+  }
 
   if (tiles.length === 0) {
     return NextResponse.json({
       error: 'no_tiles',
-      reason: found.path
-        ? `Read ${found.path} but found no usable WAZEAPI_TILES.`
-        : `Could not find the relay's .env. Tried: ${found.tried.join(', ')}`,
+      reason: tilesJson || found.path
+        ? `Read ${tilesJson ?? found.path} but found no usable tiles.`
+        : `Could not find tiles.json or the relay's .env. Tried: ${found.tried.join(', ')}`,
       tiles: [],
     }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
   }
@@ -131,7 +161,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     tiles: tiles.length,
     pollSeconds,
-    relayEnv: found.path,
+    relayEnv: source || found.path,
     requestsPerMonth: Math.round(requestsPerTilePerMonth * tiles.length),
     monthlyUsd: Number((usdPerTilePerMonth * tiles.length).toFixed(2)),
     usdPerTilePerMonth: Number(usdPerTilePerMonth.toFixed(2)),
