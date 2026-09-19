@@ -576,15 +576,15 @@ export function VPMap({
         if (cs) cs.textContent = a.label || a.callsign || a.registration
         if (cd) cd.textContent = `${pos.alt != null ? pos.alt.toLocaleString() + 'ft' : '—'} · ${Math.round(pos.spd)}kts`
 
-        // The rotary marker does NOT rotate with heading — too much movement on
-        // top of the spinning blades, and a near-symmetric rotor star encodes
-        // little direction anyway, so the whole icon just wheeled around for no
-        // information gained. Heading is still readable from the predictive
-        // vector, the trail and the alt/spd callout. The fixed wing keeps its
-        // heading rotation: its silhouette is asymmetric, so rotation there is
-        // informative.
-        if (a.role === 'rotary') entry.rot.style.transform = ''
-        else entry.rot.style.transform = `rotate(${pos.hdg}deg)`
+        // The nose leads for BOTH kinds: the body rotates with the heading.
+        //
+        // An earlier pass removed this for the helicopter because the wheel-around was
+        // distracting ("kill that helicopter rotation its too much") — that was BEFORE
+        // dead-reckoning, when the heading jumped once every three seconds and a rotation
+        // snapped 30-90 degrees at a time. It now turns continuously, so the body can
+        // follow the track without the jump, and the rotor spins inside this rotating
+        // wrapper so the blades still read as spinning independently of the body.
+        entry.rot.style.transform = `rotate(${pos.hdg}deg)`
         const markerEl = entry.marker.getElement() as HTMLDivElement
         markerEl.classList.toggle('selected', isSel)
         // Silent (off-ADS-B) aircraft read as a last-known/maybe-landed ghost,
