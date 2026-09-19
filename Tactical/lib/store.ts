@@ -383,9 +383,13 @@ function wazeKind(subtype: string | null, type: string): Report['kind'] {
  * returning would otherwise sit on the map for hours. (Reports were showing up
  * four hours old for exactly that reason.)
  *
- * Only police sightings belong on the map. Accidents, jams, hazards and closures
- * are excluded — the relay already filters to POLICE, and this is the second gate
- * so a widened filter cannot quietly put roadworks on a police-awareness map.
+ * Only police sightings and cameras belong on the map. Accidents, jams, hazards
+ * and closures are excluded — the relay filters those out, and this is the second
+ * gate so a widened filter cannot quietly put roadworks on a police-awareness map.
+ *
+ * Cameras are kept deliberately: the fixed speed and red-light ones are permanent
+ * infrastructure and come from Waze's own top-level `CAMERA` type, so they need to
+ * be selected explicitly rather than falling out of the POLICE filter.
  */
 function maxAgeMsForReport(r: { type?: string | null; kind?: string | null }): number | null {
   if (r.kind === 'camera') return CAMERA_MAX_AGE_MS
@@ -1580,9 +1584,23 @@ export function getStore() {
       const now = Date.now()
       for (const [uuid, r] of s.reportsMap) {
         const maxAge = maxAgeMsForReport(r)
-        // Legacy reports ingested before pubMillis existed fall back to lastSeenAt.
-        const published = (r as any).pubMillis ?? (r as any).lastSeenAt ?? (now - r.reportedAgo * 1000)
-        if (maxAge === null || now - published > maxAge) s.reportsMap.delete(uuid)
+        // Two different clocks, because two different things are being timed.
+        //
+        // Police sightings age from PUBLICATION: a unit Waze keeps re-serving
+        // must still be able to time out, or it lingers on the map for hours once
+        // it has driven away.
+        //
+        // Cameras are the opposite case. A fixed speed or red-light camera is
+        // permanent infrastructure with a publication timestamp from whenever it
+        // was first listed, so ageing it by publication deleted it instantly —
+        // which is why the permanent cameras were missing. Those age from when
+        // the feed LAST CARRIED them, so they stay up while Waze lists them and
+        // drop off when it stops.
+        const isCamera = r.kind === 'camera'
+        const stamp = isCamera
+          ? ((r as any).lastSeenAt ?? (r as any).pubMillis ?? (now - r.reportedAgo * 1000))
+          : ((r as any).pubMillis ?? (r as any).lastSeenAt ?? (now - r.reportedAgo * 1000))
+        if (maxAge === null || now - stamp > maxAge) s.reportsMap.delete(uuid)
       }
     },
 

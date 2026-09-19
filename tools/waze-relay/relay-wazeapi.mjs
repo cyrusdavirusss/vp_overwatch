@@ -134,6 +134,12 @@ if (tileProblems.length) {
 
 const sleep = (ms) => new Promise(r=>setTimeout(r,ms));
 const isPolice = (t) => String(t||'').toUpperCase().startsWith('POLICE');
+/* What the map receives: police sightings, plus Waze's own top-level CAMERA type
+   — the fixed speed and red-light cameras. Those are permanent infrastructure and
+   are always in the feed, so they are the most reliable thing on the map. The
+   type-breakdown logging below deliberately keeps using isPolice, so the evidence
+   about whether the server-side filter is honoured stays comparable. */
+const isKept = (t) => { const s = String(t||'').toUpperCase(); return s.startsWith('POLICE') || s === 'CAMERA'; };
 
 // ── quota bookkeeping, surfaced in the logs ────────────────────────────────
 const quota = { limit: null, remaining: null, reset: null, rateLimit: null, rateRemaining: null };
@@ -259,7 +265,7 @@ async function fetchTile([name, bl, tr], attempt = 1, withFilter = filterInPlay)
   const types = {};
   for (const a of alerts) { const t = String(a.type || 'UNKNOWN').toUpperCase(); types[t] = (types[t] || 0) + 1; }
 
-  const police = alerts.filter(a => isPolice(a.type)).map(a => {
+  const police = alerts.filter(a => isKept(a.type)).map(a => {
     const lat = a.locationY ?? a.location?.lat ?? a.latitude;
     const lng = a.locationX ?? a.location?.lng ?? a.longitude;
     return {
