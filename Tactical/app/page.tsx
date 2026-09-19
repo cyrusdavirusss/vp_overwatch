@@ -21,6 +21,7 @@ import { mockAircraft, mockRequested } from '@/lib/mock-flight'
 import { useClientLocation } from '@/hooks/useClientLocation'
 import { useCommunityDots } from '@/hooks/useCommunityDots'
 import { useRouteAlerts } from '@/hooks/useRouteAlerts'
+import { useImmersiveLandscape } from '@/hooks/useImmersiveLandscape'
 import type { MapViewType } from '@/lib/map-style'
 import type { User, Report } from '@/lib/data'
 import { isSilentContact } from '@/lib/data'
@@ -54,6 +55,12 @@ export default function VPOverwatch() {
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
   }, [])
+
+  // Landscape immersion (phone/tablet rotated sideways): the map gets the whole
+  // screen and the chrome is hidden until something is selected or the user asks
+  // for it back. See hooks/useImmersiveLandscape.ts for why fullscreen has to be
+  // gesture-triggered rather than pure orientation-driven.
+  const immersion = useImmersiveLandscape()
 
   const realtime = useRealtimeData({
     // The backend fast-police loop refreshes adsb.lol every 3s (FAST_POLICE_INTERVAL);
@@ -459,7 +466,9 @@ export default function VPOverwatch() {
     return () => window.removeEventListener('resize', apply)
   }, [])
 
-  if (isDesktop) {
+  // In landscape immersion the desktop three-column layout is wrong even on a
+  // large tablet: the whole point is an unobstructed map, so immersion wins.
+  if (isDesktop && !immersion.immersive) {
     return (
       <div className="w-screen h-screen bg-ink-0 flex flex-col overflow-hidden" style={{ fontFamily: 'var(--font-ui)' }}>
         <VPHeader
@@ -819,12 +828,16 @@ export default function VPOverwatch() {
   const chromeH = chromeCollapsed ? 0 : MOBILE_STRIP_H + MOBILE_ONAIR_H
 
   return (
-    <div className="min-h-screen bg-ink-0 flex items-center justify-center">
+    <div className={immersion.immersive
+      ? 'w-screen h-[100dvh] overflow-hidden bg-ink-0'
+      : 'min-h-screen bg-ink-0 flex items-center justify-center'}>
       <div
-        className="relative overflow-hidden bg-ink-0"
+        className={`relative overflow-hidden bg-ink-0 ${immersion.immersive ? 'vp-imm-frame' : ''}`}
         style={{
-          width: screenDims.w,
-          height: screenDims.h,
+          // Immersion uses the real viewport: the mobile frame exists to preview a
+          // phone-sized layout, but in landscape the device IS the frame.
+          width: immersion.immersive ? '100vw' : screenDims.w,
+          height: immersion.immersive ? '100dvh' : screenDims.h,
           fontFamily: 'var(--font-ui)',
         }}
       >
@@ -862,7 +875,7 @@ export default function VPOverwatch() {
 
         {/* Collapse handle — sits on the seam between chrome and map. */}
         <button
-          className="vp-chrome-collapse"
+          className="vp-chrome-collapse vp-imm-hide"
           style={{ top: chromeH, transition: 'top 240ms var(--ease-out, ease)' }}
           onClick={() => setChromeCollapsed((v) => !v)}
           aria-label={chromeCollapsed ? 'Show header' : 'Hide header'}
@@ -873,9 +886,48 @@ export default function VPOverwatch() {
           </svg>
         </button>
 
+        {/* Landscape immersion control — the only chrome left once the phone is
+            sideways. Everything else is hidden by CSS. The fullscreen button
+            rides along with the reveal because the Fullscreen API requires a
+            gesture: it cannot be triggered by the rotation itself. */}
+        {immersion.immersive && (
+          <div className="vp-imm-handle">
+            <button
+              onClick={immersion.toggleReveal}
+              aria-label={immersion.revealed ? 'Hide controls' : 'Show controls'}
+              title={immersion.revealed ? 'Hide controls' : 'Show controls'}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                {immersion.revealed ? <path d="M6 15l6-6 6 6" /> : <path d="M6 9l6 6 6-6" />}
+              </svg>
+            </button>
+            {immersion.revealed && (
+              <button
+                onClick={immersion.toggleFullscreen}
+                aria-label={immersion.fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                title={immersion.fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  {immersion.fullscreen
+                    ? <path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M15 21h4a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4" />
+                    : <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />}
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
+
         <div
-          className="absolute left-0 right-0"
-          style={{ top: chromeH, bottom: 0, transition: 'top 240ms var(--ease-out, ease)' }}
+          className="vp-map-area absolute left-0 right-0"
+          style={{
+            // Immersion reclaims the chrome's height — the map starts at the very top.
+            top: immersion.immersive ? 0 : chromeH,
+            bottom: 0,
+            transition: 'top 240ms var(--ease-out, ease)',
+          }}
+          // Touching the map in immersion puts the chrome away again; panels opened
+          // by a selection are unaffected, since they are their own surfaces.
+          onPointerDown={immersion.immersive ? immersion.conceal : undefined}
         >
           {isLostSignal && <div className="vp-map-lost-tint" />}
           <LazyMap
@@ -1022,7 +1074,7 @@ export default function VPOverwatch() {
 
           {/* Ground report detail — bottom overlay */}
           {selectedReport && (
-            <div className="absolute left-0 right-0 bottom-0 z-30 max-h-[55%] overflow-y-auto bg-ink-1 border-t border-border">
+            <div className="vp-report-sheet absolute left-0 right-0 bottom-0 z-30 max-h-[55%] overflow-y-auto bg-ink-1 border-t border-border">
               <ReportDetail report={selectedReport} user={userPosition} onClose={onCloseDetail} />
             </div>
           )}
