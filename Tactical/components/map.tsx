@@ -47,8 +47,6 @@ export interface VPMapProps {
     aerodromes: boolean
   }
   focusTarget?: { lat: number; lng: number } | null
-  /** Explicit view for a fixture (mock scenario): centre + zoom, applied once per change. */
-  focusBounds?: { lat: number; lng: number; zoom: number } | null
   hasSilentAircraft?: boolean
   /** When true, the map shows a crosshair and a click sets the position. */
   pickMode?: boolean
@@ -214,7 +212,6 @@ export function VPMap({
   scrubT,
   layers,
   focusTarget,
-  focusBounds,
   hasSilentAircraft,
   pickMode,
   onMapClick,
@@ -505,20 +502,6 @@ export function VPMap({
     map.on('styledata', apply)
     return () => { map.off('styledata', apply) }
   }, [ready, layers.aerodromes])
-
-  // ── Fixture view (mock scenario) ───────────────────────────────────────
-  //
-  // Separate from focusTarget because that one pans and KEEPS the zoom (it is the
-  // follow-camera). A fixture needs its own zoom, or three contacts on one street stay
-  // a pixel in a metro-wide view — which is indistinguishable from "nothing is showing".
-  const lastFixtureRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (!ready || !map || !focusBounds) return
-    const key = `${focusBounds.lng},${focusBounds.lat},${focusBounds.zoom}`
-    if (lastFixtureRef.current === key) return
-    lastFixtureRef.current = key
-    map.flyTo({ center: [focusBounds.lng, focusBounds.lat], zoom: focusBounds.zoom, duration: 800, essential: true })
-  }, [ready, map, focusBounds])
 
   // ── Camera focus (flyTo with momentum + spring ease) ───────────────────
   useEffect(() => {

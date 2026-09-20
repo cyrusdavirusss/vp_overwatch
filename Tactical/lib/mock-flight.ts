@@ -220,21 +220,3 @@ export function mockContacts(scenario: MockScenario, nowMs: number = Date.now())
   }
   return mockAircraft(nowMs)
 }
-
-/**
- * Where the map should look for a scenario.
- *
- * The map opens on the whole state, and its fit-all covers the aircraft AND the ground
- * reports — so with 47 reports spread over the metro, three contacts on one street end
- * up as a single pixel. A scenario therefore states its own view: the street for the
- * units, the metro for the flight.
- */
-export interface MockFocus { lat: number; lng: number; zoom: number }
-
-export function mockFocus(scenario: MockScenario): MockFocus {
-  if (scenario === 'overseas-drive') {
-    // Midpoint of the street, close enough that the three units are individually legible.
-    return { lat: -37.9537037, lng: 145.1859920, zoom: 16 }
-  }
-  return { lat: -37.8136, lng: 144.9631, zoom: 9 }
-}
