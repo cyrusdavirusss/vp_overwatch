@@ -30,9 +30,36 @@ const SENDGRID_API = 'https://api.sendgrid.com/v3/mail/send'
 const SEND_TIMEOUT_MS = 15_000
 
 // ── configuration probes ────────────────────────────────────────────────────
+//
+// The provider is a deployment choice, not a code path. ALERT_PROVIDER selects it
+// and defaults to Twilio so an existing deployment keeps working untouched. Every
+// sender below dispatches on it, which is what makes swapping vendors a config
+// change rather than a rewrite.
+
+import {
+  sinchSmsConfigured, sinchVoiceConfigured, mailgunConfigured,
+  sinchSendSms, sinchSendCall, mailgunSendEmail,
+} from './providers/sinch.ts'
+
+export type AlertProvider = 'twilio' | 'sinch'
+
+export function alertProvider(): AlertProvider {
+  return process.env.ALERT_PROVIDER === 'sinch' ? 'sinch' : 'twilio'
+}
 
 export function pushConfigured(): boolean {
   return Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY)
+}
+
+/** Can the server deliver a text right now, with whichever provider is selected? */
+export function smsConfigured(): boolean {
+  return alertProvider() === 'sinch' ? sinchSmsConfigured() : twilioConfigured()
+}
+
+/** Can the server place a call right now? Voice is a separate Sinch capability
+ *  from SMS and carries its own credentials, so it is probed separately. */
+export function callConfigured(): boolean {
+  return alertProvider() === 'sinch' ? sinchVoiceConfigured() : twilioConfigured()
 }
 
 export function twilioConfigured(): boolean {
@@ -50,13 +77,17 @@ export function twilioConfigured(): boolean {
  * all. Fail closed.
  */
 export function emailConfigured(): boolean {
-  return Boolean(process.env.SENDGRID_API_KEY && process.env.ALERT_EMAIL_FROM && process.env.ALERT_PUBLIC_URL)
+  // ALERT_PUBLIC_URL is required either way: it is what the unsubscribe link is
+  // built from, and an alert email that cannot be unsubscribed from must not send.
+  if (!process.env.ALERT_PUBLIC_URL) return false
+  return alertProvider() === 'sinch' ? mailgunConfigured() : Boolean(process.env.SENDGRID_API_KEY && process.env.ALERT_EMAIL_FROM)
 }
 
 export function channelConfigured(channel: DeliveryChannel): boolean {
   if (channel === 'push') return pushConfigured()
   if (channel === 'email') return emailConfigured()
-  if (channel === 'sms' || channel === 'call') return twilioConfigured()
+  if (channel === 'sms') return smsConfigured()
+  if (channel === 'call') return callConfigured()
   return true // in-app is always available: it needs no provider
 }
 
@@ -64,8 +95,11 @@ export function channelConfigured(channel: DeliveryChannel): boolean {
 export function channelUnavailableReason(channel: DeliveryChannel): string | null {
   if (channel === 'push') return pushConfigured() ? null : 'Push keys are not configured on the server.'
   if (channel === 'email') return emailConfigured() ? null : 'Email provider (SendGrid) is not configured on the server.'
-  if (channel === 'sms' || channel === 'call') {
-    return twilioConfigured() ? null : 'Text/voice provider (Twilio) is not configured on the server.'
+  if (channel === 'sms') {
+    return smsConfigured() ? null : `Text provider (${alertProvider()}) is not configured on the server.`
+  }
+  if (channel === 'call') {
+    return callConfigured() ? null : `Voice provider (${alertProvider()}) is not configured on the server.`
   }
   return null
 }
@@ -124,6 +158,7 @@ export async function sendPush(sub: PushSubscriptionJson | null, title: string, 
  * message — callers must have verified the user actually asked for this.
  */
 export async function sendSms(to: string | null, body: string): Promise<DeliveryStatus> {
+  if (alertProvider() === 'sinch') return (await sinchSendSms(to, body)) as DeliveryStatus
   if (!twilioConfigured()) return 'disabled'
   if (!to) return 'failed'
   return twilioPost('Messages.json', { To: to, From: process.env.TWILIO_PHONE_NUMBER as string, Body: body })
@@ -149,9 +184,13 @@ export function spokenMessage(message: string): string {
 
 /** Place a call that reads the message aloud in an Australian voice. */
 export async function sendCall(to: string | null, message: string): Promise<DeliveryStatus> {
+  // The doubled read is applied before the handoff, so both providers speak the
+  // same sentence twice rather than one of them quietly not doing it.
+  const spoken = spokenMessage(message)
+  if (alertProvider() === 'sinch') return (await sinchSendCall(to, spoken)) as DeliveryStatus
   if (!twilioConfigured()) return 'disabled'
   if (!to) return 'failed'
-  const twiml = `<Response><Say voice="alice" language="en-AU">${escapeXml(spokenMessage(message))}</Say></Response>`
+  const twiml = `<Response><Say voice="alice" language="en-AU">${escapeXml(spoken)}</Say></Response>`
   return twilioPost('Calls.json', { To: to, From: process.env.TWILIO_PHONE_NUMBER as string, Twiml: twiml })
 }
 
@@ -180,6 +219,8 @@ export interface EmailResult {
 export async function sendEmail(to: string | null, subject: string, body: string, opts: { unsubscribeUrl?: string } = {}): Promise<EmailResult> {
   if (!emailConfigured()) return { status: 'disabled', gone: false }
   if (!to || !/.+@.+\..+/.test(to)) return { status: 'failed', gone: false }
+
+  if (alertProvider() === 'sinch') return await mailgunSendEmail(to, subject, body, opts)
 
   const from = process.env.ALERT_EMAIL_FROM as string
   const fromName = process.env.ALERT_EMAIL_FROM_NAME || 'VP-Overwatch'
