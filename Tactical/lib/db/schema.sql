@@ -189,3 +189,27 @@ CREATE TABLE IF NOT EXISTS announcements (
 -- The read path is "live announcements, newest first"; this partial index is that query.
 CREATE INDEX IF NOT EXISTS idx_announcements_live ON announcements(pinned DESC, published_at DESC)
   WHERE withdrawn_at IS NULL;
+
+-- ── Email channel, consent audit trail, quiet hours, STOP matching ────────
+-- Consent was a bare boolean, which is enough to gate a send but not enough to
+-- PROVE one. Australian outbound calls and SMS are regulated (Spam Act / Do Not
+-- Call Register), so when asked "who consented, when, and how do you know", the
+-- answer has to be in the row and not in someone's memory.
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS email_enabled     BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS email_consent     BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS sms_consent_at    TIMESTAMPTZ;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS call_consent_at   TIMESTAMPTZ;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS email_consent_at  TIMESTAMPTZ;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS consent_method    TEXT;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS consent_proof     TEXT;
+-- Blind index: a salted hash of the E.164 number, so an inbound STOP can be
+-- matched to a user WITHOUT decrypting everyone's number to find them.
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS contact_hash      TEXT;
+-- Quiet hours, stored as local hours in a named zone. NULL start/end = off.
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS quiet_hours_start SMALLINT;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS quiet_hours_end   SMALLINT;
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS quiet_hours_tz    TEXT NOT NULL DEFAULT 'Australia/Melbourne';
+ALTER TABLE user_alert_settings ADD COLUMN IF NOT EXISTS urgent_bypass     BOOLEAN NOT NULL DEFAULT TRUE;
+
+CREATE INDEX IF NOT EXISTS user_alert_settings_contact_hash_idx
+  ON user_alert_settings (contact_hash) WHERE contact_hash IS NOT NULL;

@@ -1,6 +1,6 @@
 /**
- * Alert delivery for the three opt-in channels: browser notification, text
- * message, and automated phone call. A user may enable any combination.
+ * Alert delivery for the four opt-in channels: browser notification, email,
+ * text message, and automated phone call. A user may enable any combination.
  *
  * Every sender reports honestly, because a delivery ledger that lies is worse
  * than no ledger at all:
@@ -12,16 +12,21 @@
  * Nothing here is ever recorded as 'sent' on the strength of an intention.
  * Credentials are env-only: VAPID_* for push, TWILIO_* for text + voice.
  *
- * Twilio is called over its REST API with fetch rather than the SDK: this module
- * is imported both by Next.js route handlers and by plain node scripts
- * (`node --experimental-strip-types`), and the SDK's dynamic require does not
- * resolve in the latter.
+ * Twilio and SendGrid are called over their REST APIs with fetch rather than
+ * through an SDK: this module is imported both by Next.js route handlers and by
+ * plain node scripts (`node --experimental-strip-types`), and a package's dynamic
+ * require does not resolve in the latter.
  */
 
-export type DeliveryChannel = 'push' | 'sms' | 'call' | 'inapp'
-export type DeliveryStatus = 'sent' | 'failed' | 'disabled'
+export type DeliveryChannel = 'push' | 'email' | 'sms' | 'call' | 'inapp'
+export type DeliveryStatus = 'sent' | 'failed' | 'disabled' | 'held'
+// 'held' means the server deliberately did NOT send this one, and the row says
+// so. Quiet hours are the only thing that produce it today. Without it, a held
+// alert is indistinguishable from one that was never asked for, and the first
+// support question ("why didn't I get the call?") becomes unanswerable.
 
 const TWILIO_API = 'https://api.twilio.com/2010-04-01/Accounts'
+const SENDGRID_API = 'https://api.sendgrid.com/v3/mail/send'
 const SEND_TIMEOUT_MS = 15_000
 
 // ── configuration probes ────────────────────────────────────────────────────
@@ -34,8 +39,23 @@ export function twilioConfigured(): boolean {
   return Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER)
 }
 
+/**
+ * Email needs a SENDER as well as a key. Without a verified From address on a
+ * domain the provider is willing to sign for, the send is rejected — so a missing
+ * From is treated as "not configured" rather than attempted and failed.
+ *
+ * It also requires ALERT_PUBLIC_URL, which is what the unsubscribe link is built
+ * from. An alert email with no way out is spam regardless of how useful the alert
+ * is, so a deployment that cannot produce that link must not be able to send at
+ * all. Fail closed.
+ */
+export function emailConfigured(): boolean {
+  return Boolean(process.env.SENDGRID_API_KEY && process.env.ALERT_EMAIL_FROM && process.env.ALERT_PUBLIC_URL)
+}
+
 export function channelConfigured(channel: DeliveryChannel): boolean {
   if (channel === 'push') return pushConfigured()
+  if (channel === 'email') return emailConfigured()
   if (channel === 'sms' || channel === 'call') return twilioConfigured()
   return true // in-app is always available: it needs no provider
 }
@@ -43,6 +63,7 @@ export function channelConfigured(channel: DeliveryChannel): boolean {
 /** Human-readable reason a channel cannot deliver, for the settings screen. */
 export function channelUnavailableReason(channel: DeliveryChannel): string | null {
   if (channel === 'push') return pushConfigured() ? null : 'Push keys are not configured on the server.'
+  if (channel === 'email') return emailConfigured() ? null : 'Email provider (SendGrid) is not configured on the server.'
   if (channel === 'sms' || channel === 'call') {
     return twilioConfigured() ? null : 'Text/voice provider (Twilio) is not configured on the server.'
   }
@@ -132,6 +153,77 @@ export async function sendCall(to: string | null, message: string): Promise<Deli
   if (!to) return 'failed'
   const twiml = `<Response><Say voice="alice" language="en-AU">${escapeXml(spokenMessage(message))}</Say></Response>`
   return twilioPost('Calls.json', { To: to, From: process.env.TWILIO_PHONE_NUMBER as string, Twiml: twiml })
+}
+
+// ── email ───────────────────────────────────────────────────────────────────
+
+/** Escape for the HTML part. The text part is sent verbatim. */
+function escapeHtml(s: string): string {
+  return s.replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&#39;', '"': '&quot;' }[c] as string))
+}
+
+export interface EmailResult {
+  status: DeliveryStatus
+  /** Provider said this address is dead (bounce/complaint) — stop retrying it. */
+  gone: boolean
+}
+
+/**
+ * Send an alert email.
+ *
+ * Every message carries a working one-click unsubscribe, because an alert email
+ * without a way out is spam no matter how useful the alert is. We ask the
+ * provider to honour that too (List-Unsubscribe), so a provider-side click is
+ * reported back to us as an unsubscribe rather than silently unsubscribing the
+ * person from everything at that provider.
+ */
+export async function sendEmail(to: string | null, subject: string, body: string, opts: { unsubscribeUrl?: string } = {}): Promise<EmailResult> {
+  if (!emailConfigured()) return { status: 'disabled', gone: false }
+  if (!to || !/.+@.+\..+/.test(to)) return { status: 'failed', gone: false }
+
+  const from = process.env.ALERT_EMAIL_FROM as string
+  const fromName = process.env.ALERT_EMAIL_FROM_NAME || 'VP-Overwatch'
+  const text = opts.unsubscribeUrl ? `${body}\n\nUnsubscribe: ${opts.unsubscribeUrl}` : body
+  const html = `<div style="font:15px/1.5 -apple-system,system-ui,sans-serif;color:#111">`
+    + `<p>${escapeHtml(body)}</p>`
+    + (opts.unsubscribeUrl
+        ? `<p style="font-size:12px;color:#666"><a href="${escapeHtml(opts.unsubscribeUrl)}">Unsubscribe from these alerts</a></p>`
+        : '')
+    + `</div>`
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS)
+  try {
+    const res = await fetch(SENDGRID_API, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: to }] }],
+        from: { email: from, name: fromName },
+        subject,
+        content: [
+          { type: 'text/plain', value: text },
+          { type: 'text/html', value: html },
+        ],
+        tracking_settings: { click_tracking: { enable: false }, open_tracking: { enable: false } },
+        ...(opts.unsubscribeUrl ? { headers: { 'List-Unsubscribe': `<${opts.unsubscribeUrl}>` } } : {}),
+      }),
+      signal: controller.signal,
+    })
+    // SendGrid answers 202 with an empty body on acceptance.
+    if (res.ok) return { status: 'sent', gone: false }
+    const detail = await res.text().catch(() => '')
+    console.error(`[channels] sendgrid rejected (${res.status}): ${detail.slice(0, 300)}`)
+    return { status: 'failed', gone: res.status === 400 }
+  } catch (err: any) {
+    console.error('[channels] sendgrid error:', err?.message || err)
+    return { status: 'failed', gone: false }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function twilioPost(path: string, form: Record<string, string>): Promise<DeliveryStatus> {
