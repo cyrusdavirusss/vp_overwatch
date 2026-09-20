@@ -24,7 +24,7 @@ import {
   getAlertEmail, recordConsent, revokeConsent,
 } from '@/lib/alerts/store'
 import { normalizePhone } from '@/lib/auth/crypto'
-import { pushConfigured, emailConfigured, twilioConfigured } from '@/lib/alerts/channels'
+import { pushConfigured, emailConfigured, smsConfigured, callConfigured } from '@/lib/alerts/channels'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,8 +61,8 @@ export async function GET(req: NextRequest) {
     channelsAvailable: {
       push: pushConfigured(),
       email: emailConfigured(),
-      sms: twilioConfigured(),
-      call: twilioConfigured(),
+      sms: smsConfigured(),
+      call: callConfigured(),
       inapp: true,
     },
     // The VAPID public key is public by definition (it is sent to the browser's push
