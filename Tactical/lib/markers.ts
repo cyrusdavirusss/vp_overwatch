@@ -26,6 +26,10 @@ export const AMBER = '#00d4ff' // active aircraft (cyan — VP·Overwatch v2 the
 export const RED = '#FF4757' // confirmed ground threat
 export const GREEN = '#5BD68A' // reported / unconfirmed (softer state)
 export const BLUE = '#1a6bff' // informational ground contact — cameras, concealed units
+// A helicopter sighting is not a unit on a road and must not read as one: it is a
+// thing in the AIR, placed by eye on a privileged broadcast. Violet, because it is
+// the one kind that can appear with no transponder behind it.
+export const HELI = '#b06bff'
 export const INK0 = '#0A0B0D' // marker base fill
 
 // Blades, prop discs and hub highlights: near-white, so they read over both the aircraft
@@ -213,6 +217,21 @@ const REPORT_TEMPLATES: Record<Report['kind'], string> = {
   // camera: the speed camera cropped from the operator's 3-logo sheet, now traced to
   // SVG with the same pipeline as the caps so all three markers are vector.
   camera: ART('/markers/camera-badge.svg'),
+
+  // helicopter: a top-view rotorcraft — rotor disc, body, tail boom, tail rotor.
+  //
+  // Drawn rather than art because there is no source art for it, and drawn TOP-DOWN
+  // because the ground-report family is all flat icons; a profile view would read as a
+  // different class of object among them. The rotor disc is deliberately a thin ring
+  // rather than a filled disc: filled, it swallows the body at 30 px and the whole
+  // marker becomes a dot. Same lesson as the aircraft glyph in this file.
+  helicopter: RING() + `
+  <circle cx="11.4" cy="10.2" r="5.6" stroke="{C}" stroke-width="0.95" fill="none" opacity="0.8"></circle>
+  <path d="M11.4 4.6 L21.2 10.2 M11.4 15.8 L4.2 10.2" stroke="{C}" stroke-width="0.95" opacity="0.55"></path>
+  <path d="M9.9 8.1 c1.5 0 2.2 1 2.2 2.2 l0 1.9 c0 0.85 -0.65 1.5 -1.5 1.5 l-1.4 0 c-0.85 0 -1.5 -0.65 -1.5 -1.5 l0 -1.9 c0 -1.2 0.7 -2.2 2.2 -2.2 z" fill="{C}" stroke="${INK0}" stroke-width="0.35"></path>
+  <path d="M12.1 10.9 l5.6 0 l-0.35 1.15 l-5.25 0 z" fill="{C}" stroke="${INK0}" stroke-width="0.3"></path>
+  <circle cx="18.4" cy="11.47" r="1.5" fill="none" stroke="${INK0}" stroke-width="1.0"></circle>
+  <circle cx="18.4" cy="11.47" r="1.5" fill="none" stroke="{C}" stroke-width="0.55"></circle>`,
 }
 
 export function reportMarkerSVG(

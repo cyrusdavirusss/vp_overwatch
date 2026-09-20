@@ -8,7 +8,7 @@
  * as more reports come in. Reports older than REPORT_TTL_MS expire.
  */
 
-export type GroundKind = 'marked' | 'unmarked' | 'hidden'
+export type GroundKind = 'marked' | 'unmarked' | 'hidden' | 'helicopter'
 
 export interface PendingGroundReport {
   id: string
@@ -17,6 +17,18 @@ export interface PendingGroundReport {
   lng: number
   createdAt: number
   sessionId: string
+  /**
+   * A PRIVILEGED broadcast: published on its own authority, with no need for other
+   * people to corroborate it. See computeCommunityReports for why that exception
+   * exists at all.
+   */
+  authoritative?: boolean
+  /**
+   * How coarse the placement was, in metres. A sighting dropped on a half-state view
+   * is honest about being approximate; carrying the number means the map can say so
+   * instead of implying a precise position.
+   */
+  accuracyM?: number
 }
 
 export interface CommunityReportItem {
@@ -28,6 +40,9 @@ export interface CommunityReportItem {
   reportCount: number // distinct reporters
   createdAt: number
   lastReportAt: number
+  /** Published on a single privileged report, not on corroboration. */
+  authoritative: boolean
+  accuracyM?: number
 }
 
 export const CONFIRM_RADIUS_M = 50
@@ -47,6 +62,20 @@ export const CAMERA_MAX_AGE_MS = 90 * 60 * 1000
 
 /** Police lifetime — the community-report pool and the legacy restore window. */
 export const REPORT_TTL_MS = POLICE_MAX_AGE_MS
+
+/**
+ * A helicopter gets a SHORTER window than a ground unit, because it is the one report
+ * that moves fast. A parked unit reported 40 minutes ago is probably still within a
+ * street or two; a helicopter in transit does 130-150 kt, so 40 minutes is ~160 km —
+ * a quarter of the state. Fifteen minutes is still ~60 km of possible drift, which is
+ * why the sighting carries its own accuracy and why "approximately" is the honest word.
+ */
+export const HELICOPTER_TTL_MS = 15 * 60 * 1000
+
+/** Per-kind freshness window. Everything except a helicopter uses the police window. */
+export function ttlForKind(kind: GroundKind): number {
+  return kind === 'helicopter' ? HELICOPTER_TTL_MS : REPORT_TTL_MS
+}
 
 const R = 6371000
 const toRad = (d: number) => (d * Math.PI) / 180
@@ -77,7 +106,7 @@ export function computeCommunityReports(
   pending: PendingGroundReport[],
   now: number = Date.now()
 ): CommunityReportItem[] {
-  const fresh = pending.filter((r) => now - r.createdAt < REPORT_TTL_MS)
+  const fresh = pending.filter((r) => now - r.createdAt < ttlForKind(r.kind))
   const clusters: Cluster[] = []
 
   for (const r of fresh) {
@@ -99,7 +128,20 @@ export function computeCommunityReports(
     // A report is a HIDDEN pin until >= CONFIRM_COUNT distinct people confirm
     // it within CONFIRM_RADIUS_M. Unconfirmed clusters are not published.
     const sessions = new Set(c.members.map((m) => m.sessionId))
-    if (sessions.size < CONFIRM_COUNT) continue
+    const authoritative = c.members.some((m) => m.authoritative)
+
+    // The corroboration rule exists because an anonymous pin is a claim about someone
+    // else's position, and one such claim should not put a unit on everyone's map.
+    //
+    // A privileged broadcast is the one case where that rule is wrong. It reports
+    // something that may not be on the map AT ALL: an aircraft that has gone dark has
+    // no ADS-B, so a person on the ground is the only sensor there is. Waiting for
+    // three strangers to independently confirm it would mean the one real sighting
+    // that exists never gets published. So it is published on its own authority —
+    // which is exactly why the submitter has to authenticate.
+    if (!authoritative && sessions.size < CONFIRM_COUNT) continue
+
+    const accuracies = c.members.map((m) => m.accuracyM ?? 0)
     out.push({
       id: `cr-${c.kind}-${c.members[0].id}`,
       kind: c.kind,
@@ -109,6 +151,8 @@ export function computeCommunityReports(
       reportCount: sessions.size,
       createdAt: Math.min(...c.members.map((m) => m.createdAt)),
       lastReportAt: Math.max(...c.members.map((m) => m.createdAt)),
+      authoritative,
+      accuracyM: Math.max(...accuracies) || undefined,
     })
   }
   return out

@@ -51,7 +51,12 @@ export interface VPMapProps {
   /** When true, the map shows a crosshair and a click sets the position. */
   pickMode?: boolean
   /** Called with the clicked coordinate while pickMode is active. */
-  onMapClick?: (lat: number, lng: number) => void
+  /**
+   * A tap on the map. `accuracyM` is how coarse that tap was — derived from the zoom
+   * it was made at, because a finger on a half-state view covers kilometres and a
+   * sighting placed that way must not be served as a precise position.
+   */
+  onMapClick?: (lat: number, lng: number, accuracyM?: number) => void
   /**
    * Out-of-sight sighting pick: on change, fly to this point at a zoom that
    * frames `rangeM` metres of radius on screen so the operator can tap the
@@ -59,7 +64,13 @@ export interface VPMapProps {
    * reference stable (state, not a fresh literal each render) or the camera
    * will keep re-flying.
    */
-  pickTarget?: { lat: number; lng: number; rangeM: number } | null
+  pickTarget?: { lat: number; lng: number; rangeM: number; scopeAreaM2?: number } | null
+  /**
+   * Hold the map north-up and refuse rotation. Used by the stealth-helicopter mode:
+   * the operator is judging where an aircraft is against the ground, and a rotated
+   * map turns "north-west of me" into a guess.
+   */
+  northLock?: boolean
   /** Live-follow: re-center smoothly (pan only, keep zoom) on focus changes. */
   followMode?: boolean
   /** Fired when the user drags the map, so follow mode can be paused. */
@@ -116,6 +127,11 @@ const PICK_MIN_ZOOM = 14
 const PICK_MAX_ZOOM = 19
 const PICK_MS = 650
 
+// A fingertip is worth about 22 px on any touch screen (Apple's own hit-target floor is
+// 44 px across, so ~22 is its radius). Used to turn the map's ground resolution at the
+// moment of a tap into metres of placement error.
+const TAP_PX = 22
+
 function zoomForRadius(rangeM: number, lat: number, el: HTMLElement | null): number {
   const w = el?.clientWidth || 360
   const h = el?.clientHeight || 640
@@ -123,6 +139,29 @@ function zoomForRadius(rangeM: number, lat: number, el: HTMLElement | null): num
   const mPerPx = rangeM / halfAxisPx
   const z = Math.log2((WORLD_M_PER_PX_Z0 * Math.cos((lat * Math.PI) / 180)) / mPerPx)
   return Math.max(PICK_MIN_ZOOM, Math.min(PICK_MAX_ZOOM, z))
+}
+
+/**
+ * The zoom whose visible ground AREA is `areaM2`, for this viewport.
+ *
+ * zoomForRadius cannot express "show me half the state", and the failure is instructive:
+ * that framing fits a radius to the SHORTER axis, so on a portrait phone a radius that
+ * looks right across the width still shows far more ground vertically. Asked for half of
+ * Victoria that way, the map produced the whole state, Bass Strait and a slice of
+ * Tasmania — about 1.4x the state's area, i.e. more than all of it.
+ *
+ * Area is the honest unit for "how much of the state am I looking at", so the wide scope
+ * is stated in square metres and converted here against the real viewport.
+ */
+const SCOPE_MIN_ZOOM = 3
+const SCOPE_MAX_ZOOM = 19
+
+function zoomForArea(areaM2: number, lat: number, el: HTMLElement | null): number {
+  const w = Math.max(1, el?.clientWidth || 360)
+  const h = Math.max(1, el?.clientHeight || 640)
+  const mPerPx = Math.sqrt(areaM2 / (w * h))
+  const z = Math.log2((WORLD_M_PER_PX_Z0 * Math.cos((lat * Math.PI) / 180)) / mPerPx)
+  return Math.max(SCOPE_MIN_ZOOM, Math.min(SCOPE_MAX_ZOOM, z))
 }
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
@@ -219,6 +258,7 @@ export function VPMap({
   followMode,
   onUserPan,
   fitAllTrigger,
+  northLock,
   coverage,
   recenterTrigger,
   communityDots = [],
@@ -239,6 +279,16 @@ export function VPMap({
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
+
+    // North-up hold: rotation is REFUSED and the bearing pinned to 0, rather than the
+    // free case below where it is enabled and merely reset. Held, not just reset — the
+    // point of the mode is that a sighting is placed against a known orientation.
+    if (northLock && !headingMode) {
+      map.dragRotate.disable()
+      map.touchZoomRotate.disableRotation()
+      if (Math.abs(map.getBearing()) > 0.2) map.setBearing(0)
+      return
+    }
 
     if (!headingMode) {
       if (!map.dragRotate.isEnabled()) map.dragRotate.enable()
@@ -273,7 +323,7 @@ export function VPMap({
       if (!map.dragRotate.isEnabled()) map.dragRotate.enable()
       map.touchZoomRotate.enableRotation()
     }
-  }, [headingMode, headingRef, ready])
+  }, [headingMode, headingRef, northLock, ready])
   // Set when the map cannot be created at all — no WebGL context, or a context
   // lost mid-session. Without this the throw escapes to the page-level error
   // boundary and the entire app becomes "This page couldn't load", so a client
@@ -376,7 +426,14 @@ export function VPMap({
 
     // Tap-to-set position (only acts when pickMode is on, via the live callback).
     map.on('click', (e) => {
-      onMapClickRef.current?.(e.lngLat.lat, e.lngLat.lng)
+      // How coarse is this tap? MapLibre's ground resolution is
+      //   metres/px = 78271.5 * cos(lat) / 2^zoom
+      // so at the half-state zoom a fingertip spans kilometres. Handing that number up
+      // means a wide-view sighting is published as approximate instead of being drawn
+      // as though it were placed to the metre.
+      const mPerPx =
+        (WORLD_M_PER_PX_Z0 * Math.cos((e.lngLat.lat * Math.PI) / 180)) / Math.pow(2, map.getZoom())
+      onMapClickRef.current?.(e.lngLat.lat, e.lngLat.lng, mPerPx * TAP_PX)
     })
 
     // Any deliberate camera interaction pauses live-follow — but ONLY a real one.
@@ -586,7 +643,13 @@ export function VPMap({
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map || !pickTarget) return
-    const zoom = zoomForRadius(pickTarget.rangeM, pickTarget.lat, map.getContainer())
+    // Two framings, because they answer different questions. A unit is placed against a
+    // radius ("show me 70 m"), which zoomForRadius clamps to a street-scale band so a
+    // mis-tap costs a street number rather than a suburb. The helicopter sighting asks a
+    // different question — how much of the state is on screen — so it is framed by area.
+    const zoom = pickTarget.scopeAreaM2
+      ? zoomForArea(pickTarget.scopeAreaM2, pickTarget.lat, map.getContainer())
+      : zoomForRadius(pickTarget.rangeM, pickTarget.lat, map.getContainer())
     map.flyTo({
       center: [pickTarget.lng, pickTarget.lat],
       zoom,
