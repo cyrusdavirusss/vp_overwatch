@@ -36,19 +36,54 @@ export async function getActiveUserLocations(): Promise<UserLocation[]> {
     updatedAt: new Date(r.updated_at).getTime(), expiresAt: new Date(r.expires_at).getTime() }))
 }
 
-export interface AlertSettings { userId: number; pushEnabled: boolean; smsEnabled: boolean; smsConsent: boolean; callEnabled: boolean; callConsent: boolean; preciseLocation: boolean; enterMetres: number; exitMetres: number; pushToken: string | null }
+export interface AlertSettings {
+  userId: number
+  pushEnabled: boolean
+  emailEnabled: boolean
+  emailConsent: boolean
+  smsEnabled: boolean
+  smsConsent: boolean
+  callEnabled: boolean
+  callConsent: boolean
+  preciseLocation: boolean
+  enterMetres: number
+  exitMetres: number
+  pushToken: string | null
+  /** Quiet hours in local wall-clock hours; null means the window is off. */
+  quietHoursStart: number | null
+  quietHoursEnd: number | null
+  quietHoursTz: string
+  /** May an urgent event (a proximity entry) interrupt quiet hours anyway? */
+  urgentBypass: boolean
+}
 
 export async function getAlertSettings(userId: number): Promise<AlertSettings> {
   const { rows } = await query<any>(
-    `SELECT user_id, push_enabled, push_token, sms_enabled, sms_consent, call_enabled, call_consent, precise_location, enter_metres, exit_metres
+    `SELECT user_id, push_enabled, push_token, sms_enabled, sms_consent, call_enabled, call_consent, precise_location, enter_metres, exit_metres,
+            email_enabled, email_consent, quiet_hours_start, quiet_hours_end, quiet_hours_tz, urgent_bypass
        FROM user_alert_settings WHERE user_id=$1`, [userId])
   const cfg = proximityConfig()
-  if (rows.length === 0) return { userId, pushEnabled: false, smsEnabled: false, smsConsent: false, callEnabled: false, callConsent: false, preciseLocation: false, enterMetres: cfg.enterMetres, exitMetres: cfg.exitMetres, pushToken: null }
+  if (rows.length === 0) {
+    return {
+      userId, pushEnabled: false, emailEnabled: false, emailConsent: false,
+      smsEnabled: false, smsConsent: false, callEnabled: false, callConsent: false,
+      preciseLocation: false, enterMetres: cfg.enterMetres, exitMetres: cfg.exitMetres, pushToken: null,
+      quietHoursStart: null, quietHoursEnd: null, quietHoursTz: 'Australia/Melbourne', urgentBypass: true,
+    }
+  }
   const r = rows[0]
-  return { userId, pushEnabled: r.push_enabled, smsEnabled: r.sms_enabled, smsConsent: r.sms_consent,
+  return {
+    userId, pushEnabled: r.push_enabled,
+    emailEnabled: r.email_enabled === true, emailConsent: r.email_consent === true,
+    smsEnabled: r.sms_enabled, smsConsent: r.sms_consent,
     callEnabled: r.call_enabled === true, callConsent: r.call_consent === true,
     preciseLocation: r.precise_location === true,
-    enterMetres: r.enter_metres, exitMetres: r.exit_metres, pushToken: r.push_token }
+    enterMetres: r.enter_metres, exitMetres: r.exit_metres, pushToken: r.push_token,
+    quietHoursStart: r.quiet_hours_start === null ? null : Number(r.quiet_hours_start),
+    quietHoursEnd: r.quiet_hours_end === null ? null : Number(r.quiet_hours_end),
+    quietHoursTz: r.quiet_hours_tz || 'Australia/Melbourne',
+    urgentBypass: r.urgent_bypass !== false,
+  }
 }
 
 /**
@@ -58,14 +93,21 @@ export async function getAlertSettings(userId: number): Promise<AlertSettings> {
  */
 export async function setAlertPhone(userId: number, kind: 'sms' | 'call', e164: string | null): Promise<void> {
   const ref = e164 ? encryptField(e164) : null
+  // The blind index is what lets an inbound STOP find this user without
+  // decrypting every stored number to look for a match.
+  const hash = e164 ? hashContact(e164) : null
   if (kind === 'sms') {
     await query(
-      `INSERT INTO user_alert_settings (user_id, sms_number_ref) VALUES ($1,$2)
-       ON CONFLICT (user_id) DO UPDATE SET sms_number_ref=EXCLUDED.sms_number_ref, updated_at=NOW()`, [userId, ref])
+      `INSERT INTO user_alert_settings (user_id, sms_number_ref, contact_hash) VALUES ($1,$2,$3)
+       ON CONFLICT (user_id) DO UPDATE SET sms_number_ref=EXCLUDED.sms_number_ref,
+         contact_hash=COALESCE(EXCLUDED.contact_hash, user_alert_settings.contact_hash), updated_at=NOW()`,
+      [userId, ref, hash])
   } else {
     await query(
-      `INSERT INTO user_alert_settings (user_id, call_number_ref) VALUES ($1,$2)
-       ON CONFLICT (user_id) DO UPDATE SET call_number_ref=EXCLUDED.call_number_ref, updated_at=NOW()`, [userId, ref])
+      `INSERT INTO user_alert_settings (user_id, call_number_ref, contact_hash) VALUES ($1,$2,$3)
+       ON CONFLICT (user_id) DO UPDATE SET call_number_ref=EXCLUDED.call_number_ref,
+         contact_hash=COALESCE(EXCLUDED.contact_hash, user_alert_settings.contact_hash), updated_at=NOW()`,
+      [userId, ref, hash])
   }
 }
 
@@ -118,10 +160,12 @@ export async function setPushSubscription(userId: number, sub: unknown | null): 
   )
 }
 
-export async function updateAlertSettings(userId: number, patch: Partial<Pick<AlertSettings,'pushEnabled'|'smsEnabled'|'smsConsent'|'callEnabled'|'callConsent'|'pushToken'|'preciseLocation'|'enterMetres'|'exitMetres'>>): Promise<void> {
+export async function updateAlertSettings(userId: number, patch: Partial<Pick<AlertSettings,'pushEnabled'|'emailEnabled'|'emailConsent'|'smsEnabled'|'smsConsent'|'callEnabled'|'callConsent'|'pushToken'|'preciseLocation'|'enterMetres'|'exitMetres'|'quietHoursStart'|'quietHoursEnd'|'quietHoursTz'|'urgentBypass'>>): Promise<void> {
   await query(
-    `INSERT INTO user_alert_settings (user_id, push_enabled, sms_enabled, sms_consent, call_enabled, call_consent, push_token, precise_location, enter_metres, exit_metres)
-     VALUES ($1, COALESCE($2,FALSE), COALESCE($3,FALSE), COALESCE($4,FALSE), COALESCE($5,FALSE), COALESCE($6,FALSE), $7, COALESCE($8,FALSE), COALESCE($9,30000), COALESCE($10,33000))
+    `INSERT INTO user_alert_settings (user_id, push_enabled, sms_enabled, sms_consent, call_enabled, call_consent, push_token, precise_location, enter_metres, exit_metres,
+                                      email_enabled, email_consent, quiet_hours_start, quiet_hours_end, quiet_hours_tz, urgent_bypass)
+     VALUES ($1, COALESCE($2,FALSE), COALESCE($3,FALSE), COALESCE($4,FALSE), COALESCE($5,FALSE), COALESCE($6,FALSE), $7, COALESCE($8,FALSE), COALESCE($9,30000), COALESCE($10,33000),
+             COALESCE($11,FALSE), COALESCE($12,FALSE), $13, $14, COALESCE($15,'Australia/Melbourne'), COALESCE($16,TRUE))
      ON CONFLICT (user_id) DO UPDATE SET
        push_enabled=COALESCE($2, user_alert_settings.push_enabled),
        sms_enabled=COALESCE($3, user_alert_settings.sms_enabled),
@@ -132,10 +176,21 @@ export async function updateAlertSettings(userId: number, patch: Partial<Pick<Al
        precise_location=COALESCE($8, user_alert_settings.precise_location),
        enter_metres=COALESCE($9, user_alert_settings.enter_metres),
        exit_metres=COALESCE($10, user_alert_settings.exit_metres),
+       email_enabled=COALESCE($11, user_alert_settings.email_enabled),
+       email_consent=COALESCE($12, user_alert_settings.email_consent),
+       quiet_hours_start=$13,
+       quiet_hours_end=$14,
+       quiet_hours_tz=COALESCE($15, user_alert_settings.quiet_hours_tz),
+       urgent_bypass=COALESCE($16, user_alert_settings.urgent_bypass),
        updated_at=NOW()`,
     [userId, patch.pushEnabled ?? null, patch.smsEnabled ?? null, patch.smsConsent ?? null,
      patch.callEnabled ?? null, patch.callConsent ?? null, patch.pushToken ?? null,
-     patch.preciseLocation ?? null, patch.enterMetres ?? null, patch.exitMetres ?? null],
+     patch.preciseLocation ?? null, patch.enterMetres ?? null, patch.exitMetres ?? null,
+     patch.emailEnabled ?? null, patch.emailConsent ?? null,
+     // Quiet hours are assigned directly, not COALESCEd: a null here means "turn the
+     // window off", which is a value the subscriber intends, not an absent field.
+     patch.quietHoursStart ?? null, patch.quietHoursEnd ?? null,
+     patch.quietHoursTz ?? null, patch.urgentBypass ?? null],
   )
 }
 
@@ -157,7 +212,7 @@ export async function setProximityState(userId: number, registration: string, s:
   )
 }
 
-export async function recordDelivery(userId: number, eventDedupKey: string, channel: 'push'|'sms'|'call'|'inapp', status: 'recorded'|'sent'|'failed'|'disabled'): Promise<boolean> {
+export async function recordDelivery(userId: number, eventDedupKey: string, channel: 'push'|'email'|'sms'|'call'|'inapp', status: 'recorded'|'sent'|'failed'|'disabled'|'held'): Promise<boolean> {
   const dedup = `${userId}:${eventDedupKey}:${channel}`
   const { rowCount } = await query(
     `INSERT INTO notification_deliveries (dedup_key, user_id, event_dedup_key, channel, status, delivered_at)
@@ -185,4 +240,86 @@ export async function listUserDeliveries(userId: number, limit = 50): Promise<an
 
 export function defaultProximityConfig(s: AlertSettings): ProximityConfigMetres {
   return { enterMetres: s.enterMetres, exitMetres: s.exitMetres }
+}
+
+// ── Consent, contact hashing, and inbound commands ────────────────────────
+//
+// Consent is recorded with WHEN and HOW, not just a boolean: the boolean answers
+// "may we", the audit answers "prove it" — and only the second survives a carrier
+// audit or a complaint.
+
+import { createHmac } from 'node:crypto'
+
+export type ConsentChannel = 'sms' | 'call' | 'email'
+
+/**
+ * Salted hash of a phone number, used only to MATCH an inbound message to a user.
+ * Encrypting the number protects it at rest but makes it unsearchable, and
+ * searching is exactly what an inbound STOP requires — so this is the narrow index
+ * that makes that possible without decrypting every row to find one person.
+ */
+export function hashContact(e164: string): string | null {
+  const key = process.env.AUTH_SECRET
+  if (!key || key.length < 16) return null
+  return createHmac('sha256', key).update(e164).digest('hex')
+}
+
+export async function recordConsent(userId: number, channel: ConsentChannel, method: string, proof: string | null = null): Promise<void> {
+  const consentCol = channel === 'sms' ? 'sms_consent' : channel === 'call' ? 'call_consent' : 'email_consent'
+  const atCol = channel === 'sms' ? 'sms_consent_at' : channel === 'call' ? 'call_consent_at' : 'email_consent_at'
+  await query(
+    `INSERT INTO user_alert_settings (user_id, ${consentCol}, ${atCol}, consent_method, consent_proof)
+     VALUES ($1, TRUE, NOW(), $2, $3)
+     ON CONFLICT (user_id) DO UPDATE SET
+       ${consentCol}=TRUE, ${atCol}=NOW(), consent_method=$2, consent_proof=$3, updated_at=NOW()`,
+    [userId, method, proof],
+  )
+}
+
+export async function revokeConsent(userId: number, channel: ConsentChannel, method: string): Promise<void> {
+  const consentCol = channel === 'sms' ? 'sms_consent' : channel === 'call' ? 'call_consent' : 'email_consent'
+  const enabledCol = channel === 'sms' ? 'sms_enabled' : channel === 'call' ? 'call_enabled' : 'email_enabled'
+  await query(
+    `INSERT INTO user_alert_settings (user_id, ${consentCol}, ${enabledCol}, consent_method)
+     VALUES ($1, FALSE, FALSE, $2)
+     ON CONFLICT (user_id) DO UPDATE SET
+       ${consentCol}=FALSE, ${enabledCol}=FALSE, consent_method=$2, updated_at=NOW()`,
+    [userId, method],
+  )
+}
+
+/** The account email, for the email channel. Never returned to a client. */
+export async function getAlertEmail(userId: number): Promise<string | null> {
+  const { rows } = await query<any>(`SELECT email FROM users WHERE id=$1`, [userId])
+  return rows.length ? rows[0].email : null
+}
+
+/** Find a user by the salted hash of their number — the inbound-command lookup. */
+export async function findUserIdByContactHash(hash: string): Promise<number | null> {
+  const { rows } = await query<any>(`SELECT user_id FROM user_alert_settings WHERE contact_hash=$1 LIMIT 1`, [hash])
+  return rows.length ? Number(rows[0].user_id) : null
+}
+
+/**
+ * Handle an inbound STOP. Kills BOTH text and voice and drops each recorded
+ * consent, with the method logged. Voice deliberately goes too: someone who replies
+ * STOP to a text is telling you to stop contacting their phone, and continuing to
+ * ring it is the exact behaviour these rules exist to prevent.
+ */
+export async function stopContact(userId: number, method = 'inbound-stop'): Promise<void> {
+  await query(
+    `UPDATE user_alert_settings
+        SET sms_consent=FALSE, sms_enabled=FALSE, call_consent=FALSE, call_enabled=FALSE,
+            consent_method=$2, updated_at=NOW()
+      WHERE user_id=$1`,
+    [userId, method],
+  )
+}
+
+/** Re-enable after an inbound START/UNSTOP, recording fresh consent. */
+export async function resumeContact(userId: number, channel: 'sms' | 'call', method = 'inbound-start'): Promise<void> {
+  await query(
+    `UPDATE user_alert_settings SET ${channel}_consent=TRUE, ${channel}_enabled=TRUE, consent_method=$2, updated_at=NOW() WHERE user_id=$1`,
+    [userId, method],
+  )
 }

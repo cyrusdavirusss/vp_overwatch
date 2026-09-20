@@ -2,8 +2,10 @@
  * Proximity + notification engine. Wires the tested haversine hysteresis
  * (lib/geo/haversine) to per-user/per-aircraft DB state and idempotent events.
  *
- * Delivery is per-user opt-in and per-channel: browser push, text message, and
- * automated call may be enabled in any combination. Each attempt records the
+ * Delivery is per-user opt-in and per-channel: browser push, email, text message,
+ * and automated call may be enabled in any combination. Intrusive channels (text,
+ * voice) additionally pass the quiet-hours policy; a suppression is written to the
+ * ledger as 'held' so "why didn't I get a call?" has an answer. Each attempt records the
  * provider's ACTUAL outcome ('sent'/'failed') or 'disabled' when that channel
  * has no credentials on the server — never an assumed success.
  */
@@ -13,12 +15,15 @@ import { announceLabelFor } from '../adsb/config.ts'
 import type { AircraftRecord, AircraftEvent } from '../adsb/types.ts'
 import {
   getProximityState, setProximityState, getAlertSettings, recordDelivery,
-  getAlertPhones, clearPushToken, defaultProximityConfig, type UserLocation, type AlertSettings,
+  getAlertPhones, getAlertEmail, clearPushToken, defaultProximityConfig,
+  type UserLocation, type AlertSettings,
 } from './store.ts'
 import {
-  sendPush, sendSms, sendCall, parsePushSubscription,
+  sendPush, sendEmail, sendSms, sendCall, parsePushSubscription,
   type DeliveryChannel, type DeliveryStatus,
 } from './channels.ts'
+import { mayDispatchNow, type QuietHours } from './policy.ts'
+import { unsubscribeUrl } from './tokens.ts'
 import { withProximityLock } from '../db/lease.ts'
 
 function isLiveWithPosition(r: AircraftRecord): boolean {
@@ -49,14 +54,42 @@ async function deliverEvent(
       if (r.gone) await clearPushToken(settings.userId)
     }
 
+    if (settings.emailEnabled && settings.emailConsent) {
+      // Email is not intrusive, so quiet hours do not apply to it. It does require
+      // a usable unsubscribe link, which sendEmail/computeConfig enforce upstream.
+      const address = await getAlertEmail(settings.userId)
+      const r = await sendEmail(address, 'VP·Overwatch alert', body, {
+        unsubscribeUrl: unsubscribeUrl(settings.userId) ?? undefined,
+      })
+      attempts.push({ channel: 'email', status: r.status })
+    }
+
+    const quiet: QuietHours = {
+      startHour: settings.quietHoursStart,
+      endHour: settings.quietHoursEnd,
+      timezone: settings.quietHoursTz,
+      urgentBypass: settings.urgentBypass,
+    }
+    // A proximity entry IS the urgent case: an aircraft is inside the radius this
+    // person chose. That is the alert worth waking someone for, so it may cross
+    // quiet hours when they have left the bypass on.
+    const urgent = ev.eventType === 'proximity_enter'
+
     const wantsSms = settings.smsEnabled && settings.smsConsent
     const wantsCall = settings.callEnabled && settings.callConsent
     if (wantsSms || wantsCall) {
       // Decrypted numbers are read only for users who asked for these channels,
       // and never leave this layer.
       const phones = await getAlertPhones(settings.userId)
-      if (wantsSms) attempts.push({ channel: 'sms', status: await sendSms(phones.sms, body) })
-      if (wantsCall) attempts.push({ channel: 'call', status: await sendCall(phones.call, body) })
+
+      if (wantsSms) {
+        const held = mayDispatchNow('sms', { quiet, urgent })
+        attempts.push({ channel: 'sms', status: held.allowed ? await sendSms(phones.sms, body) : 'held' })
+      }
+      if (wantsCall) {
+        const held = mayDispatchNow('call', { quiet, urgent })
+        attempts.push({ channel: 'call', status: held.allowed ? await sendCall(phones.call, body) : 'held' })
+      }
     }
   } catch (err: any) {
     // A transport failure must never break proximity evaluation itself.
