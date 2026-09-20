@@ -1,11 +1,18 @@
 /**
  * GET/POST /api/alerts/settings — the caller's opt-in alert settings.
  *
- * A user may opt into ANY combination of the three delivery channels:
+ * A user may opt into ANY combination of the four delivery channels:
  *   push  browser notification (subscription arrives from the browser itself)
+ *   email to the account address (needs consent)
  *   sms   text message  (needs a number + recorded consent)
  *   call  automated voice call (needs a number + recorded consent)
  * plus 'inapp' which is always on (a row they read in the dashboard).
+ *
+ * CONSENT IS AUDITED, NOT JUST CHECKED. Flipping a consent flag here also writes
+ * the when/how trail (recordConsent/revokeConsent), because a boolean answers
+ * "may we" while only the trail answers "prove it" — and Australian outbound voice
+ * and SMS are regulated. Withdrawing consent also turns the channel off, so the
+ * intent lands instead of being rejected by the consent gate below.
  *
  * Numbers are accepted in, stored ENCRYPTED, and never returned — the client is
  * only ever told whether one is on file (hasSmsNumber / hasCallNumber).
@@ -14,9 +21,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { requireUser, isResponse, checkCsrf } from '@/lib/auth/middleware'
 import {
   getAlertSettings, updateAlertSettings, setAlertPhone, setPushSubscription, hasAlertPhones,
+  getAlertEmail, recordConsent, revokeConsent,
 } from '@/lib/alerts/store'
 import { normalizePhone } from '@/lib/auth/crypto'
-import { pushConfigured, twilioConfigured } from '@/lib/alerts/channels'
+import { pushConfigured, emailConfigured, twilioConfigured } from '@/lib/alerts/channels'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,17 +40,27 @@ export async function GET(req: NextRequest) {
   if (isResponse(auth)) return auth
   const s = await getAlertSettings(auth.userId)
   const numbers = await hasAlertPhones(auth.userId)
+  const email = await getAlertEmail(auth.userId)
   return NextResponse.json({
     pushEnabled: s.pushEnabled, hasPushSubscription: !!s.pushToken,
+    emailEnabled: s.emailEnabled, emailConsent: s.emailConsent,
+    // Masked: enough for the settings screen to say where alerts would go, not
+    // enough for this response to be worth stealing.
+    emailMasked: email ? email.replace(/^(.{1,2}).*(@.*)$/, '$1***$2') : null,
     smsEnabled: s.smsEnabled, smsConsent: s.smsConsent, hasSmsNumber: numbers.sms,
     callEnabled: s.callEnabled, callConsent: s.callConsent, hasCallNumber: numbers.call,
     preciseLocation: s.preciseLocation,
     enterMetres: s.enterMetres, exitMetres: s.exitMetres,
+    quietHours: {
+      startHour: s.quietHoursStart, endHour: s.quietHoursEnd,
+      timezone: s.quietHoursTz, urgentBypass: s.urgentBypass,
+    },
     // Whether the SERVER can deliver a channel at all. Lets the settings screen
     // show "not available yet" instead of letting someone opt into a dead
     // channel and then silently receive nothing.
     channelsAvailable: {
       push: pushConfigured(),
+      email: emailConfigured(),
       sms: twilioConfigured(),
       call: twilioConfigured(),
       inapp: true,
@@ -64,8 +82,40 @@ export async function POST(req: NextRequest) {
   try { body = await req.json() } catch { return NextResponse.json({ error: 'invalid_body' }, { status: 400 }) }
 
   const patch: Record<string, unknown> = {}
-  for (const key of ['pushEnabled', 'smsEnabled', 'smsConsent', 'callEnabled', 'callConsent', 'preciseLocation'] as const) {
+  for (const key of ['pushEnabled', 'emailEnabled', 'emailConsent', 'smsEnabled', 'smsConsent', 'callEnabled', 'callConsent', 'preciseLocation'] as const) {
     if (typeof body?.[key] === 'boolean') patch[key] = body[key]
+  }
+
+  // Withdrawing consent turns the channel off in the same request. Without this
+  // the consent gate below would reject the withdrawal and leave the person
+  // opted in, which is the one outcome they were trying to avoid.
+  if (patch.emailConsent === false) patch.emailEnabled = false
+  if (patch.smsConsent === false) patch.smsEnabled = false
+  if (patch.callConsent === false) patch.callEnabled = false
+
+  // Quiet hours: two local hours in a named zone, or both null to switch off.
+  if (body?.quietHours !== undefined) {
+    const q = body.quietHours
+    if (q === null) {
+      patch.quietHoursStart = null; patch.quietHoursEnd = null
+    } else {
+      const start = q?.startHour; const end = q?.endHour
+      const hourOk = (h: unknown) => h === null || (Number.isInteger(h) && Number(h) >= 0 && Number(h) <= 23)
+      if (!hourOk(start) || !hourOk(end) || (start === null) !== (end === null)) {
+        return NextResponse.json({ error: 'invalid_quiet_hours', message: 'Quiet hours need both hours set (0-23), or both cleared.' }, { status: 400 })
+      }
+      if (q?.timezone !== undefined) {
+        try {
+          new Intl.DateTimeFormat('en-AU', { timeZone: String(q.timezone) })
+        } catch {
+          return NextResponse.json({ error: 'invalid_timezone', field: 'quietHours', message: `${q.timezone} is not a known timezone.` }, { status: 400 })
+        }
+        patch.quietHoursTz = String(q.timezone)
+      }
+      if (typeof q?.urgentBypass === 'boolean') patch.urgentBypass = q.urgentBypass
+      patch.quietHoursStart = start === null ? null : Number(start)
+      patch.quietHoursEnd = end === null ? null : Number(end)
+    }
   }
 
   // Optional per-user proximity radii. Bounds come from the constants above;
@@ -101,6 +151,9 @@ export async function POST(req: NextRequest) {
   // and consenting in one request, or enabling without ever consenting).
   const current = await getAlertSettings(auth.userId)
   const effective = { ...current, ...patch } as typeof current
+  if (effective.emailEnabled && !effective.emailConsent) {
+    return NextResponse.json({ error: 'consent_required', channel: 'email', message: 'Email alerts need your consent.' }, { status: 400 })
+  }
   if (effective.smsEnabled && !effective.smsConsent) {
     return NextResponse.json({ error: 'consent_required', channel: 'sms', message: 'Text alerts need your consent.' }, { status: 400 })
   }
@@ -123,6 +176,20 @@ export async function POST(req: NextRequest) {
   if (body?.pushSubscription !== undefined) await setPushSubscription(auth.userId, body.pushSubscription)
   if (touchesSmsNumber) await setAlertPhone(auth.userId, 'sms', smsPhone)
   if (touchesCallNumber) await setAlertPhone(auth.userId, 'call', callPhone)
+
+  // The audit trail. Written after the settings land, and only when the flag was
+  // actually part of this request, so a GET-equivalent POST does not restamp the
+  // consent time and quietly destroy the evidence of when it was really given.
+  const CONSENT_CHANNELS = [
+    ['email', 'emailConsent'],
+    ['sms', 'smsConsent'],
+    ['call', 'callConsent'],
+  ] as const
+  for (const [channel, key] of CONSENT_CHANNELS) {
+    const sent = body?.[key]
+    if (sent === true) await recordConsent(auth.userId, channel, 'settings-form', null)
+    else if (sent === false) await revokeConsent(auth.userId, channel, 'settings-form-withdrawn')
+  }
 
   return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'private, no-store' } })
 }
