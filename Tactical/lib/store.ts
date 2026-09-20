@@ -276,7 +276,7 @@ export interface Report {
   wazeUuid: string
   type: string
   subtype: string | null
-  kind: 'marked' | 'unmarked' | 'hidden' | 'stop' | 'checkpoint' | 'rbt' | 'camera'
+  kind: 'marked' | 'unmarked' | 'hidden' | 'stop' | 'checkpoint' | 'rbt' | 'camera' | 'helicopter'
   lat: number
   lng: number
   street: string
@@ -287,6 +287,8 @@ export interface Report {
   reportedAgo: number
   lastConfirmedAgo: number
   descr: string
+  /** Placement uncertainty in metres, for reports that carry one (helicopter sightings). */
+  accuracyM?: number
 }
 
 export interface User {
@@ -329,7 +331,7 @@ export interface SortieEntry {
 
 // ── Notification system ────────────────────────────────────────────────────
 import { createNotifState, notifyTakeoff, notifyLand, notifyStealth, resetHexNotifications, addSubscriber, removeSubscriber, updateSubscriber, type Subscriber, type NotificationEvent, type AircraftBrief } from '@/lib/notifications'
-import { computeCommunityReports, haversineM, REPORT_TTL_MS, POLICE_MAX_AGE_MS, CAMERA_MAX_AGE_MS, type PendingGroundReport, type GroundKind } from '@/lib/community-reports'
+import { computeCommunityReports, haversineM, REPORT_TTL_MS, HELICOPTER_TTL_MS, ttlForKind, POLICE_MAX_AGE_MS, CAMERA_MAX_AGE_MS, type PendingGroundReport, type GroundKind } from '@/lib/community-reports'
 import {
   perfForHex,
   trueAirspeedKt,
@@ -392,6 +394,9 @@ function wazeKind(subtype: string | null, type: string): Report['kind'] {
  * be selected explicitly rather than falling out of the POLICE filter.
  */
 function maxAgeMsForReport(r: { type?: string | null; kind?: string | null }): number | null {
+  // A helicopter ages on the SHORT clock: it is moving the whole time, so the police
+  // window would leave a position on the map that the aircraft left an hour ago.
+  if (r.kind === 'helicopter') return HELICOPTER_TTL_MS
   if (r.kind === 'camera') return CAMERA_MAX_AGE_MS
   if (r.type === 'POLICE') return POLICE_MAX_AGE_MS
   return null
@@ -402,6 +407,7 @@ function wazeLabel(kind: Report['kind'], subtype: string | null, street: string)
     marked: 'Marked unit',
     unmarked: 'Unmarked',
     hidden: 'Hidden unit',
+    helicopter: 'Helicopter sighting',
     stop: 'Roadside stop',
     checkpoint: 'Checkpoint',
     rbt: 'RBT',
@@ -1567,9 +1573,15 @@ export function getStore() {
     },
 
     /** Add a user ("VPS") ground report to the pending pool (hidden until confirmed). */
-    addUserReport(kind: GroundKind, lat: number, lng: number, sessionId: string): void {
+    addUserReport(
+      kind: GroundKind,
+      lat: number,
+      lng: number,
+      sessionId: string,
+      opts: { authoritative?: boolean; accuracyM?: number } = {}
+    ): void {
       const now = Date.now()
-      s.groundReports = s.groundReports.filter((r) => now - r.createdAt < REPORT_TTL_MS)
+      s.groundReports = s.groundReports.filter((r) => now - r.createdAt < ttlForKind(r.kind))
       s.groundReports.push({
         id: `g-${now}-${Math.random().toString(36).slice(2, 7)}`,
         kind,
@@ -1577,6 +1589,8 @@ export function getStore() {
         lng,
         createdAt: now,
         sessionId: sessionId || `anon-${now}`,
+        authoritative: opts.authoritative,
+        accuracyM: opts.accuracyM,
       })
       saveToDisk()
     },
@@ -1641,7 +1655,11 @@ export function getStore() {
         nThumbsUp: 10, // >= 5 → confirmed (red) marker via the existing renderer
         reportedAgo: Math.round((Date.now() - c.lastReportAt) / 1000),
         lastConfirmedAgo: 0,
-        descr: `${c.kind === 'marked' ? 'Marked unit' : c.kind === 'unmarked' ? 'Unmarked unit' : 'Hidden unit / camera'} · community ×${c.reportCount}`,
+        descr:
+          c.kind === 'helicopter'
+            ? `Helicopter sighting${c.accuracyM ? ` · placed to ±${Math.max(1, Math.round(c.accuracyM / 1000))} km` : ''}`
+            : `${c.kind === 'marked' ? 'Marked unit' : c.kind === 'unmarked' ? 'Unmarked unit' : 'Hidden unit / camera'} · community ×${c.reportCount}`,
+        accuracyM: c.accuracyM,
       }))
       return [...waze, ...community]
     },

@@ -21,12 +21,22 @@
  *
  * Only after that does the operator choose the unit kind (marked / unmarked /
  * hidden cam), which is the same for both paths.
+ *
+ *   STEALTH HELICOPTER  A third path, and the only PRIVILEGED one. The operator is
+ *                 reporting an aircraft rather than a unit on a road — and one that may
+ *                 carry no transponder at all, so the map's own data cannot show it and
+ *                 a person on the ground is the only sensor there is. Choosing it scopes
+ *                 the map to roughly half the state, holds it north-up, and arms a tap:
+ *                 one action, no kind step. The result is broadcast to every client on
+ *                 its own authority, without the corroboration an anonymous pin needs,
+ *                 which is exactly why the server gates it on the operator's key.
  */
 
 import { useEffect, useState } from 'react'
+import { HELI } from '@/lib/markers'
 
-export type VPSKind = 'marked' | 'unmarked' | 'hidden'
-export type VPSMode = 'in-sight' | 'out-of-sight'
+export type VPSKind = 'marked' | 'unmarked' | 'hidden' | 'helicopter'
+export type VPSMode = 'in-sight' | 'out-of-sight' | 'helicopter'
 
 /**
  * Radius, in metres, of map shown when tapping an out-of-sight contact. Small
@@ -34,13 +44,37 @@ export type VPSMode = 'in-sight' | 'out-of-sight'
  */
 export const SIGHTING_PICK_RANGE_M = 70
 
+/**
+ * Scope of the stealth-helicopter view, stated as GROUND AREA.
+ *
+ * Victoria is ~227,444 km², so half of it is ~113,700 km². Area, not radius: a radius is
+ * fitted to the shorter screen axis, and on a portrait phone that leaves the taller axis
+ * showing roughly twice as much ground again — which is how a first attempt at "half the
+ * state" produced the whole state, Bass Strait and part of Tasmania.
+ *
+ * The measured cost of the wide view: about 585 m/px on a 420x790 map, so a fingertip
+ * (±22 px) places the sighting to roughly ±13 km. That is not a defect to be hidden — an
+ * approximate position is exactly what this mode exists to publish, which is why the
+ * placed sighting carries its own accuracy and every client is shown it.
+ */
+export const HELI_SCOPE_AREA_M2 = 113_700 * 1_000_000
+
 interface VPSButtonProps {
-  /** Submit the report. `coords` is present only for out-of-sight sightings. */
-  onReport: (kind: VPSKind, coords?: { lat: number; lng: number }) => void
+  /**
+   * Submit the report. `coords` is present only where the operator placed the sighting
+   * on the map. Returns false when a privileged broadcast was REFUSED, so the button can
+   * say so instead of showing the tick it shows for an ordinary report.
+   */
+  onReport: (
+    kind: VPSKind,
+    coords?: { lat: number; lng: number; accuracyM?: number }
+  ) => void | Promise<boolean>
   /** OUT OF SIGHT chosen — the page arms tap-to-place and zooms the map. */
   onPickSighting: () => void
+  /** STEALTH HELICOPTER chosen — the page scopes to half the state and arms the tap. */
+  onHelicopterMode: () => void
   /** Coordinate tapped on the map, handed back by the page. */
-  pickedPoint?: { lat: number; lng: number } | null
+  pickedPoint?: { lat: number; lng: number; accuracyM?: number } | null
   /** Page-side teardown: pick cancelled, or the report went through. */
   onCancelPick: () => void
 }
@@ -54,6 +88,12 @@ const KINDS: { kind: VPSKind; label: string; color: string }[] = [
 const MODES: { mode: VPSMode; label: string; sub: string; color: string }[] = [
   { mode: 'in-sight', label: 'IN SIGHT', sub: 'HERE, AT MY POSITION', color: 'var(--vp-cyan)' },
   { mode: 'out-of-sight', label: 'OUT OF SIGHT', sub: 'TAP WHERE I SAW IT', color: 'var(--vp-amber)' },
+  {
+    mode: 'helicopter',
+    label: 'STEALTH HELICOPTER',
+    sub: 'SCOPE HALF THE STATE, TAP IT, BROADCAST',
+    color: HELI,
+  },
 ]
 
 const base: React.CSSProperties = {
@@ -101,15 +141,22 @@ const sub: React.CSSProperties = {
   opacity: 0.66,
 }
 
-export function VPSButton({ onReport, onPickSighting, pickedPoint, onCancelPick }: VPSButtonProps) {
+export function VPSButton({
+  onReport,
+  onPickSighting,
+  onHelicopterMode,
+  pickedPoint,
+  onCancelPick,
+}: VPSButtonProps) {
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<VPSMode | null>(null)
-  const [point, setPoint] = useState<{ lat: number; lng: number } | null>(null)
+  const [point, setPoint] = useState<{ lat: number; lng: number; accuracyM?: number } | null>(null)
   const [confirm, setConfirm] = useState(false)
+  const [refused, setRefused] = useState(false)
 
   // The page sends the tapped coordinate back while the pick is armed.
   useEffect(() => {
-    if (pickedPoint && mode === 'out-of-sight') setPoint(pickedPoint)
+    if (pickedPoint && (mode === 'out-of-sight' || mode === 'helicopter')) setPoint(pickedPoint)
   }, [pickedPoint, mode])
 
   const reset = () => {
@@ -129,18 +176,36 @@ export function VPSButton({ onReport, onPickSighting, pickedPoint, onCancelPick 
     setPoint(null)
     // OUT OF SIGHT needs the map: zoom onto the observer, arm the crosshair.
     if (m === 'out-of-sight') onPickSighting()
+    // STEALTH HELICOPTER needs the map too, but scoped wide and held north-up.
+    if (m === 'helicopter') onHelicopterMode()
   }
 
-  const pick = (kind: VPSKind) => {
-    onReport(kind, mode === 'out-of-sight' ? point ?? undefined : undefined)
+  const pick = async (kind: VPSKind) => {
+    const placed =
+      mode === 'out-of-sight' || mode === 'helicopter' ? point ?? undefined : undefined
+    const result = await onReport(kind, placed)
     reset()
     onCancelPick()
+    // A privileged broadcast can be refused — no operator key on this device, or one the
+    // server does not accept. A tick that reads "sent" must never appear for something
+    // that was not sent, so the refusal gets its own state.
+    if (result === false) {
+      setRefused(true)
+      window.setTimeout(() => setRefused(false), 3200)
+      return
+    }
     setConfirm(true)
     window.setTimeout(() => setConfirm(false), 2400)
   }
 
-  const awaitingTap = mode === 'out-of-sight' && point === null
+  const awaitingTap = (mode === 'out-of-sight' || mode === 'helicopter') && point === null
   const showKinds = mode === 'in-sight' || (mode === 'out-of-sight' && point !== null)
+  const showBroadcast = mode === 'helicopter' && point !== null
+  // What a tap at this zoom actually means. Kilometres, not metres — the whole reason
+  // the sighting is published as approximate.
+  const accuracyLabel = point?.accuracyM
+    ? `±${Math.max(1, Math.round(point.accuracyM / 1000))} KM`
+    : 'APPROXIMATE'
 
   return (
     <div className="vp-vps-button" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
@@ -157,7 +222,13 @@ export function VPSButton({ onReport, onPickSighting, pickedPoint, onCancelPick 
               paddingLeft: 2,
             }}
           >
-            {mode === null ? 'SIGHTING' : mode === 'in-sight' ? 'SIGHTING · IN SIGHT' : 'SIGHTING · OUT OF SIGHT'}
+            {mode === null
+              ? 'SIGHTING'
+              : mode === 'in-sight'
+                ? 'SIGHTING · IN SIGHT'
+                : mode === 'helicopter'
+                  ? 'STEALTH HELICOPTER'
+                  : 'SIGHTING · OUT OF SIGHT'}
           </span>
 
           {/* Step 1 — how was it seen? */}
@@ -194,12 +265,40 @@ export function VPSButton({ onReport, onPickSighting, pickedPoint, onCancelPick 
                   TAP THE MAP
                 </span>
                 <span style={{ ...sub, paddingLeft: 16 }}>
-                  WHERE YOU SAW IT · {SIGHTING_PICK_RANGE_M} M RADIUS
+                  {mode === 'helicopter'
+                    ? 'WHERE YOU SEE IT · HALF THE STATE IN VIEW'
+                    : `WHERE YOU SAW IT · ${SIGHTING_PICK_RANGE_M} M RADIUS`}
                 </span>
               </div>
               <button onClick={close} style={{ ...rowStyle('rgba(255,255,255,0.35)'), fontSize: 10 }}>
                 CANCEL
               </button>
+            </>
+          )}
+
+          {/* Step 2c — the privileged broadcast. One action, and no kind step: the
+              report IS a helicopter sighting, so there is nothing to choose. */}
+          {showBroadcast && (
+            <>
+              <button
+                onClick={() => pick('helicopter')}
+                aria-label="Broadcast this helicopter sighting to everyone"
+                style={{
+                  ...rowStyle(HELI),
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: 2,
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={dot(HELI)} />
+                  BROADCAST
+                </span>
+                <span style={{ ...sub, paddingLeft: 16 }}>EVERYONE SEES IT · {accuracyLabel}</span>
+              </button>
+              <span style={{ ...sub, color: 'rgba(176,107,255,0.85)', paddingLeft: 2 }}>
+                TAP MAP TO ADJUST
+              </span>
             </>
           )}
 
@@ -221,7 +320,7 @@ export function VPSButton({ onReport, onPickSighting, pickedPoint, onCancelPick 
             <span style={{ ...sub, color: 'rgba(255,170,0,0.75)', paddingLeft: 2 }}>TAP MAP TO ADJUST</span>
           )}
 
-          {(showKinds || awaitingTap) && (
+          {(showKinds || awaitingTap || showBroadcast) && (
             <button onClick={close} style={{ ...rowStyle('rgba(255,255,255,0.35)'), fontSize: 10 }}>
               {showKinds ? 'BACK' : 'CANCEL'}
             </button>
@@ -251,7 +350,12 @@ export function VPSButton({ onReport, onPickSighting, pickedPoint, onCancelPick 
           boxShadow: `0 0 16px ${confirm ? 'rgba(45,140,255,0.3)' : 'rgba(255,45,45,0.25)'}`,
         }}
       >
-        {confirm ? (
+        {refused ? (
+          <>
+            <span style={{ fontSize: 15, lineHeight: 1 }}>✕</span>
+            <span style={{ fontSize: 8 }}>REFUSED</span>
+          </>
+        ) : confirm ? (
           <>
             <span style={{ fontSize: 16, lineHeight: 1 }}>✓</span>
             <span style={{ fontSize: 8 }}>SENT</span>

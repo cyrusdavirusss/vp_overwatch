@@ -81,7 +81,7 @@ export interface Report {
   wazeUuid: string
   type: string
   subtype: string | null
-  kind: 'marked' | 'unmarked' | 'hidden' | 'stop' | 'checkpoint' | 'rbt' | 'camera'
+  kind: 'marked' | 'unmarked' | 'hidden' | 'stop' | 'checkpoint' | 'rbt' | 'camera' | 'helicopter'
   lat: number
   lng: number
   street: string
@@ -92,6 +92,8 @@ export interface Report {
   reportedAgo: number
   lastConfirmedAgo: number
   descr: string
+  /** Placement uncertainty in metres, for reports that carry one (helicopter sightings). */
+  accuracyM?: number
 }
 
 export interface User {

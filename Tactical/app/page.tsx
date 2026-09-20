@@ -14,7 +14,12 @@ import { MlatBanner } from '@/components/mlat-banner'
 import { AROverlay } from '@/components/ar-overlay'
 import { SubscribeModal } from '@/components/subscribe-modal'
 import { TermsGate } from '@/components/terms-gate'
-import { VPSButton, SIGHTING_PICK_RANGE_M, type VPSKind } from '@/components/vps-button'
+import {
+  VPSButton,
+  SIGHTING_PICK_RANGE_M,
+  HELI_SCOPE_AREA_M2,
+  type VPSKind,
+} from '@/components/vps-button'
 import { RouteAlertPanel } from '@/components/route-alert-panel'
 import { useRealtimeData, sampleTrack, type RealtimeData } from '@/hooks/useRealtimeData'
 import { mockAircraft, mockRequested } from '@/lib/mock-flight'
@@ -156,7 +161,11 @@ export default function VPOverwatch() {
 
   // VPS — submit a community ground report. IN SIGHT pins the observer's own
   // position; OUT OF SIGHT passes the coordinate tapped on the zoomed map.
-  const onReportHazard = useCallback(async (kind: VPSKind, coords?: { lat: number; lng: number }) => {
+  // Where the operator's key lives on their device. Not a secret we hold — a value the
+  // operator enters once, that the server checks.
+  const OPERATOR_KEY_STORAGE = 'vp-operator-key'
+
+  const onReportHazard = useCallback(async (kind: VPSKind, coords?: { lat: number; lng: number; accuracyM?: number }) => {
     let sessionId = ''
     try {
       sessionId = localStorage.getItem('vp-session') || ''
@@ -167,13 +176,40 @@ export default function VPOverwatch() {
     } catch { /* private mode — anon */ }
     const lat = coords?.lat ?? userPosition.lat
     const lng = coords?.lng ?? userPosition.lng
+
+    // A helicopter sighting is published to EVERY client without corroboration, so the
+    // server accepts it only from the operator's key. The key is asked for once, on the
+    // device, and kept on the device: it is never put in the bundle, and the only thing
+    // it is ever sent to is this app's own API.
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (kind === 'helicopter') {
+      let key = ''
+      try { key = localStorage.getItem(OPERATOR_KEY_STORAGE) || '' } catch { /* private mode */ }
+      if (!key) {
+        const entered = window.prompt('Operator key — required to broadcast a sighting to everyone')
+        if (!entered?.trim()) return false
+        key = entered.trim()
+        try { localStorage.setItem(OPERATOR_KEY_STORAGE, key) } catch { /* private mode */ }
+      }
+      headers['x-admin-token'] = key
+    }
+
     try {
-      await fetch('/api/report', {
+      const res = await fetch('/api/report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, lat, lng, sessionId }),
+        headers,
+        body: JSON.stringify({ kind, lat, lng, sessionId, accuracyM: coords?.accuracyM }),
       })
-    } catch { /* best-effort */ }
+      // A rejected key is stale, not something to keep retrying with.
+      if (res.status === 403 && kind === 'helicopter') {
+        try { localStorage.removeItem(OPERATOR_KEY_STORAGE) } catch { /* ignore */ }
+      }
+      // Reported honestly: a tick that says SENT must not appear for a report that was
+      // rate-limited, refused, or never left the device.
+      return res.ok
+    } catch {
+      return false
+    }
   }, [userPosition])
 
   const [scrubT, setScrubT] = useState(0)
@@ -186,8 +222,10 @@ export default function VPOverwatch() {
   const [picking, setPicking] = useState(false)
   // Out-of-sight sighting: `sightingPick` arms the zoomed tap-to-place, and
   // `sightingPoint` holds what the operator tapped until VPSButton submits it.
-  const [sightingPick, setSightingPick] = useState<{ lat: number; lng: number; rangeM: number } | null>(null)
-  const [sightingPoint, setSightingPoint] = useState<{ lat: number; lng: number } | null>(null)
+  const [sightingPick, setSightingPick] = useState<{ lat: number; lng: number; rangeM: number; scopeAreaM2?: number } | null>(null)
+  const [sightingPoint, setSightingPoint] = useState<{ lat: number; lng: number; accuracyM?: number } | null>(null)
+  // Stealth-helicopter mode holds the map north-up for as long as it is armed.
+  const [northLock, setNorthLock] = useState(false)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lng: number } | null>(null)
   const [fitAllCounter, setFitAllCounter] = useState(0)
   const [recenterCounter, setRecenterCounter] = useState(0)
@@ -394,16 +432,36 @@ export default function VPOverwatch() {
     setSightingPick({ lat: userPosition.lat, lng: userPosition.lng, rangeM: SIGHTING_PICK_RANGE_M })
   }, [userPosition.lat, userPosition.lng])
 
+  // ── STEALTH HELICOPTER — scope half the state, hold north-up, arm the tap ──────
+  // The operator is placing a sighting of something that may not be on the map at all,
+  // so the view is set wide on purpose: wide enough to contain wherever the aircraft is,
+  // with north held up so that a direction judged against the ground stays true. Following
+  // is switched off, or the camera gets dragged back to the operator mid-placement.
+  const onHelicopterMode = useCallback(() => {
+    setSelectedAircraftId(null)
+    setSelectedReportId(null)
+    setFollowUser(false)
+    setSightingPoint(null)
+    setNorthLock(true)
+    setSightingPick({
+      lat: userPosition.lat,
+      lng: userPosition.lng,
+      rangeM: 0,
+      scopeAreaM2: HELI_SCOPE_AREA_M2,
+    })
+  }, [userPosition.lat, userPosition.lng])
+
   // A tap while armed records where the contact was seen. The pick stays armed
   // so a mis-tap is corrected by tapping again rather than starting over.
-  const onMapClickSighting = useCallback((lat: number, lng: number) => {
-    setSightingPoint({ lat, lng })
+  const onMapClickSighting = useCallback((lat: number, lng: number, accuracyM?: number) => {
+    setSightingPoint({ lat, lng, accuracyM })
   }, [])
 
   // Disarm. Called by VPSButton on cancel and after a successful submit.
   const onCancelSightingPick = useCallback(() => {
     setSightingPick(null)
     setSightingPoint(null)
+    setNorthLock(false)
   }, [])
 
   const selectedAircraft = filteredAircraft.find((a) => a.id === selectedAircraftId)
@@ -549,6 +607,7 @@ export default function VPOverwatch() {
               <VPSButton
                 onReport={onReportHazard}
                 onPickSighting={onPickSighting}
+                onHelicopterMode={onHelicopterMode}
                 pickedPoint={sightingPoint}
                 onCancelPick={onCancelSightingPick}
               />
@@ -605,6 +664,7 @@ export default function VPOverwatch() {
                       : undefined
               }
               pickTarget={sightingPick}
+              northLock={northLock}
               followMode={followUser}
               onUserPan={() => setFollowUser(false)}
               headingMode={headingMode}
@@ -983,6 +1043,7 @@ export default function VPOverwatch() {
                     : undefined
             }
             pickTarget={sightingPick}
+            northLock={northLock}
             // These two were only passed to the DESKTOP map, so on a phone the
             // map never entered follow mode. Without followMode every GPS fix
             // took the one-off "fly to" branch instead of live following, and
@@ -1017,6 +1078,7 @@ export default function VPOverwatch() {
             <VPSButton
               onReport={onReportHazard}
               onPickSighting={onPickSighting}
+              onHelicopterMode={onHelicopterMode}
               pickedPoint={sightingPoint}
               onCancelPick={onCancelSightingPick}
             />

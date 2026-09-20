@@ -4,7 +4,7 @@ import { rateLimit, rateLimitIp, clientIp } from '@/lib/auth/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
-const VALID = ['marked', 'unmarked', 'hidden'] as const
+const VALID = ['marked', 'unmarked', 'hidden', 'helicopter'] as const
 type Kind = (typeof VALID)[number]
 
 /** POST /api/report — user-submitted ("VPS") ground hazard report. */
@@ -27,8 +27,46 @@ export async function POST(req: NextRequest) {
     if (typeof lat !== 'number' || typeof lng !== 'number') {
       return NextResponse.json({ error: 'lat/lng required' }, { status: 400 })
     }
-    getStore().addUserReport(kind as Kind, lat, lng, String(body.sessionId || ''))
-    return NextResponse.json({ success: true })
+
+    // ── The privileged kind ────────────────────────────────────────────────
+    // A helicopter sighting is the one report published WITHOUT corroboration, on
+    // its own authority, because it describes something that may not be on the map
+    // at all — an aircraft that has gone dark broadcasts no ADS-B, so a person on
+    // the ground is the only sensor that can see it.
+    //
+    // That makes it a claim every other client will render as fact. Anonymous writes
+    // must not be able to make it, so the kind is gated on the admin token, and it
+    // FAILS CLOSED: with no token configured on the server, no broadcast at all.
+    // Same pattern as /api/admin/announcements.
+    let authoritative = false
+    if (kind === 'helicopter') {
+      const expected = process.env.VP_ADMIN_TOKEN
+      if (!expected) {
+        return NextResponse.json(
+          {
+            error: 'unavailable',
+            reason: 'VP_ADMIN_TOKEN is not set on the server, so a privileged broadcast is refused.',
+          },
+          { status: 503 }
+        )
+      }
+      const got = req.headers.get('x-admin-token') || ''
+      if (got !== expected) {
+        return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+      }
+      authoritative = true
+    }
+
+    const accuracyM =
+      typeof body.accuracyM === 'number' && Number.isFinite(body.accuracyM) && body.accuracyM > 0
+        ? body.accuracyM
+        : undefined
+
+    getStore().addUserReport(kind as Kind, lat, lng, String(body.sessionId || ''), {
+      authoritative,
+      accuracyM,
+    })
+    return NextResponse.json({ success: true, authoritative })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Report failed' }, { status: 500 })
   }
