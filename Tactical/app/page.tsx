@@ -17,7 +17,7 @@ import { TermsGate } from '@/components/terms-gate'
 import { VPSButton, SIGHTING_PICK_RANGE_M, type VPSKind } from '@/components/vps-button'
 import { RouteAlertPanel } from '@/components/route-alert-panel'
 import { useRealtimeData, sampleTrack, type RealtimeData } from '@/hooks/useRealtimeData'
-import { mockAircraft, mockRequested } from '@/lib/mock-flight'
+import { mockContacts, mockScenario, type MockScenario } from '@/lib/mock-flight'
 import { useClientLocation } from '@/hooks/useClientLocation'
 import { useCommunityDots } from '@/hooks/useCommunityDots'
 import { useRouteAlerts } from '@/hooks/useRouteAlerts'
@@ -101,7 +101,7 @@ export default function VPOverwatch() {
   // flag and labelled on screen: synthetic contacts that looked like real tracking would
   // break this app's rule about never implying more certainty than we have.
   const mockMode = useMemo(
-    () => (typeof window !== 'undefined' ? mockRequested(window.location.search) : false),
+    () => (typeof window !== 'undefined' ? mockScenario(window.location.search) : null),
     [],
   )
   const [mockTick, setMockTick] = useState(0)
@@ -113,7 +113,7 @@ export default function VPOverwatch() {
     return () => clearInterval(id)
   }, [mockMode])
   const liveData: RealtimeData = useMemo(
-    () => (mockMode ? { ...realtime, aircraft: mockAircraft(Date.now()) } : realtime),
+    () => (mockMode ? { ...realtime, aircraft: mockContacts(mockMode as MockScenario, Date.now()) } : realtime),
     // mockTick is the recompute trigger; it is deliberately not read in the body.
     [realtime, mockMode, mockTick],
   )

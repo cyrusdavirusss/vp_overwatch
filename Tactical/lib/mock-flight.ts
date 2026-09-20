@@ -145,3 +145,78 @@ export function mockRequested(search: string): boolean {
     return false
   }
 }
+
+// ── Named scenarios ────────────────────────────────────────────────────────────────
+//
+// A scenario is a fixed set of mock contacts at known coordinates, so a review or a
+// demonstration can be reproduced from a URL alone: ?mock=overseas-drive.
+// Still gated exactly like the flight, and still labelled MOCK on every contact — the
+// standing rule is that nothing synthetic may ever look like real tracking.
+
+/** Overseas Drive, Noble Park North 3174 — OSM way 24335407, its endpoints and midpoint. */
+export const OVERSEAS_DRIVE_UNITS: { lat: number; lng: number; label: string }[] = [
+  { lat: -37.9570155, lng: 145.1836598, label: 'Overseas Dr — west end' },
+  { lat: -37.9528686, lng: 145.1882034, label: 'Overseas Dr — middle' },
+  { lat: -37.9503919, lng: 145.1850986, label: 'Overseas Dr — east end' },
+]
+
+/**
+ * One stationary mock unit. Altitude 0 and speed 0 on purpose: these are units ON a
+ * street, so the map draws them as ground contacts and the vision-cone model correctly
+ * gives them no forward view (an aircraft on the ground has none — see pilot-vision).
+ */
+function unit(id: string, n: number, at: { lat: number; lng: number; label: string }, nowMs: number): Aircraft {
+  // A track of identical fixes: enough for the trail and dead-reckoning to run, and flat
+  // enough that the sensor-pointing estimator declines to invent a direction for it.
+  const track: TrackPoint[] = []
+  for (let k = 6; k >= 0; k--) {
+    track.push({ t: -k * 3, ts: nowMs - k * STEP_MS, lat: at.lat, lng: at.lng, alt: 0, hdg: 0, spd: 0, vs: 0 })
+  }
+  return {
+    id,
+    hex: `MOCKU${n}`,
+    registration: `MOCK-U${n}`,
+    callsign: `MOCKU${n}`,
+    label: `MOCK UNIT ${n} — ${at.label}`,
+    type: 'UNIT',
+    typeLabel: `Mock ground unit (${at.label})`,
+    role: 'rotary',
+    operator: 'MOCK — not real traffic', operatorShort: 'MOCK',
+    startTime: nowMs,
+    timeAirborneSeconds: 0,
+    historicalAverageSeconds: 0,
+    estimatedReturnSeconds: 0,
+    altitude: 0,
+    speed: 0,
+    heading: 0,
+    latitude: at.lat,
+    longitude: at.lng,
+    track,
+    isActive: true,
+    lastSeen: nowMs,
+    fuelEnduranceMinutes: 0,
+    fuelRemainingPercent: 0,
+    source: 'adsb',
+  }
+}
+
+/** Which mock was asked for, if any. Explicit flag only — never a default, never persisted. */
+export type MockScenario = 'flight' | 'overseas-drive'
+export function mockScenario(search: string): MockScenario | null {
+  try {
+    const v = new URLSearchParams(search).get('mock')
+    if (v === '1' || v === 'flight') return 'flight'
+    if (v === 'overseas-drive') return 'overseas-drive'
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** The contacts for a scenario at a given moment. */
+export function mockContacts(scenario: MockScenario, nowMs: number = Date.now()): Aircraft[] {
+  if (scenario === 'overseas-drive') {
+    return OVERSEAS_DRIVE_UNITS.map((at, i) => unit(`mock-unit-${i + 1}`, i + 1, at, nowMs))
+  }
+  return mockAircraft(nowMs)
+}
