@@ -17,7 +17,7 @@ import { TermsGate } from '@/components/terms-gate'
 import { VPSButton, SIGHTING_PICK_RANGE_M, type VPSKind } from '@/components/vps-button'
 import { RouteAlertPanel } from '@/components/route-alert-panel'
 import { useRealtimeData, sampleTrack, type RealtimeData } from '@/hooks/useRealtimeData'
-import { mockContacts, mockScenario, type MockScenario } from '@/lib/mock-flight'
+import { mockContacts, mockScenario, mockFocus, type MockScenario } from '@/lib/mock-flight'
 import { useClientLocation } from '@/hooks/useClientLocation'
 import { useCommunityDots } from '@/hooks/useCommunityDots'
 import { useRouteAlerts } from '@/hooks/useRouteAlerts'
@@ -596,6 +596,7 @@ export default function VPOverwatch() {
                 aerodromes: filters.aerodromes,
               }}
               focusTarget={focusTarget}
+              focusBounds={mockMode ? mockFocus(mockMode as MockScenario) : null}
               hasSilentAircraft={hasSilentAircraft}
               pickMode={picking || pickingDest || sightingPick !== null}
               onMapClick={
