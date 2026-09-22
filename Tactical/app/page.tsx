@@ -81,6 +81,10 @@ export default function VPOverwatch() {
     // control would otherwise be stuck on with no way to cancel it. A stalled
     // stream does get a retry path, via the hook's `denied` flag.
     if (headingMode && !heading.denied) {
+      // Head-up and the north-up hold are contradictory camera rules. Turning head-up on
+      // releases the hold, or the compass button looks dead: rotation stays refused and
+      // the map will not turn to the phone.
+      setNorthLock(false)
       heading.stop()
       setHeadingMode(false)
       return
@@ -218,6 +222,8 @@ export default function VPOverwatch() {
   const [snap, setSnap] = useState<'peek' | 'half' | 'full'>('peek')
   const [filterOpen, setFilterOpen] = useState(false)
   const [followUser, setFollowUser] = useState(true)
+  // Above this reported accuracy a fix may be drawn but must not drag the camera.
+  const FIX_CAMERA_MAX_ACCURACY_M = 5000
   const [showLocationSetter, setShowLocationSetter] = useState(false)
   const [picking, setPicking] = useState(false)
   // Out-of-sight sighting: `sightingPick` arms the zoomed tap-to-place, and
@@ -257,9 +263,16 @@ export default function VPOverwatch() {
   // map tracks the user as they move (GPS devices). Panning the map or
   // selecting a unit turns follow off; the recenter FAB turns it back on.
   useEffect(() => {
-    if (followUser && clientLocation.position) {
-      setFocusTarget({ lat: clientLocation.position.lat, lng: clientLocation.position.lng })
-    }
+    if (!followUser) return
+    const p = clientLocation.position
+    if (!p) return
+    // A fix too coarse to be the user's position must not MOVE the camera. Network/IP
+    // geolocation answers with kilometres of error and is the one case that reliably
+    // lands the map in the wrong suburb; the dot still draws that fix, the camera just
+    // waits for something real. 5 km is deliberately generous — it blocks an IP-level
+    // answer without touching a phone GPS fix (metres) or desktop WiFi (hundreds of m).
+    if (p.accuracy > FIX_CAMERA_MAX_ACCURACY_M) return
+    setFocusTarget({ lat: p.lat, lng: p.lng })
   }, [followUser, clientLocation.position])
 
   const [filters, setFilters] = useState<Filters>({

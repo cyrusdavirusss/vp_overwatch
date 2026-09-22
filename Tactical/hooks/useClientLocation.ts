@@ -109,11 +109,17 @@ export function useClientLocation(): UseClientLocationResult {
     // This gets the user a map zoom-in on first load instead of waiting for the
     // slower watchPosition initial callback (~5-30 s).
     if (navigator.geolocation) {
+      // This one-shot exists only to get a first fix on screen quickly. It used to run
+      // enableHighAccuracy:false with maximumAge:30s, which meant a phone that had moved
+      // could be answered with a coarse or CACHED position — and because that fix drove
+      // the camera, the map centred somewhere the user was not, then lurched when real
+      // GPS arrived. A stale fix reports a good accuracy figure, so no accuracy check can
+      // catch it; the only fix is not to request a stale one.
       navigator.geolocation.getCurrentPosition(handlePosition, () => {
         /* silent — watchPosition will try again */ }, {
-        enableHighAccuracy: false,
-        timeout: 5000,
-        maximumAge: 30_000, // accept a cached fix up to 30 s old
+        enableHighAccuracy: true,
+        timeout: 10_000,
+        maximumAge: 0,
       })
     }
 
