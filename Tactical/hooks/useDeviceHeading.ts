@@ -92,7 +92,19 @@ export function useDeviceHeading(): HeadingState {
     if (typeof compass === 'number' && !Number.isNaN(compass)) {
       deg = compass                      // iOS: already a compass bearing
     } else if (e.alpha != null) {
-      deg = 360 - e.alpha                // W3C alpha runs anticlockwise
+      // `alpha` is only a compass bearing when the event is ABSOLUTE.
+      //
+      // The plain `deviceorientation` event also fires on Android, and faster than the
+      // absolute one, and its alpha is measured from wherever the device happened to be
+      // when readings began — not from north. Both listeners are attached below, so the
+      // relative events were overwriting the absolute ones on every frame: the needle and
+      // the head-up bearing were simply arbitrary, and drifted as the phone turned.
+      //
+      // Absolute-only costs nothing real: a device that never reports an absolute heading
+      // now reports no heading at all, which the UI already handles, instead of a
+      // confident wrong one.
+      const absolute = (e as DeviceOrientationEvent & { absolute?: boolean }).absolute === true
+      if (absolute) deg = 360 - e.alpha
     }
     if (deg == null) return
     gotAny.current = true
@@ -130,7 +142,10 @@ export function useDeviceHeading(): HeadingState {
 
     gotAny.current = false
     running.current = true
-    // absolute is preferred (it is a true compass); plain event is the fallback
+    // The absolute event is the true compass. The plain event is still listened for,
+    // because on some Android builds only it fires — but with `absolute: true` on the
+    // event itself, which the handler now requires before trusting alpha. Listening to
+    // both without that check is what made the bearing arbitrary.
     window.addEventListener('deviceorientationabsolute', onOrient as EventListener, true)
     window.addEventListener('deviceorientation', onOrient as EventListener, true)
 
