@@ -338,6 +338,7 @@ import {
   instantFuelFlowKgH,
   maxRemainingEnduranceSec,
 } from '@/lib/fuel-model'
+import { looksLanded, LANDED_ALT_FT, LOW_ALT_SILENT_LANDED_MS } from '@/lib/landing-heuristic'
 import { currentAreaWind, refreshAreaWind } from '@/lib/wind'
 import { appendTrackPoint, TRAIL_MAX_POINTS, isSilentContact } from '@/lib/data'
 
@@ -575,8 +576,6 @@ const SILENT_MIN_GRACE_MS = 3 * 60_000
 const POLICE_SILENT_DEBOUNCE_MS = 30_000
 // Terminal-state landing heuristic at debounce expiry: low + slow ≈ on/near the
 // ground. MSL altitude is all the feed gives; Melbourne airfields sit ~280–430ft.
-const LANDED_ALT_FT = 500
-const LANDED_SPD_KT = 30
 // Keep a just-landed contact on the map (flagged LANDED) this long before it
 // goes dormant, so you can see where it put down.
 const LANDED_LINGER_MS = 2 * 60_000
@@ -657,6 +656,18 @@ function markLandedPolice(ac: Aircraft, now: number): void {
 // (registration / type / operator) ready for the next sortie, but clears the
 // last position + lastSeen so it drops off the map and out of the SILENT count.
 function resetToDormant(ac: Aircraft): void {
+  // Close any open sortie BEFORE wiping the record, and close it at the last time the
+  // aircraft was actually seen rather than at "now".
+  //
+  // This was the bug that produced a 3,803-minute King Air sortie in the store. Dormancy
+  // zeroed the aircraft — fuel back to 100%, lastSeen set to null — but left the sortie
+  // entry at status 'active'. Worse, wiping lastSeen removed the only timestamp that could
+  // have closed it correctly, AND made the silence loop skip the contact (it skips
+  // records with lastSeen == null), so nothing could ever close it. A parked aircraft
+  // therefore appeared to still be flying, indefinitely, with a fuel bar that had already
+  // been reset to full.
+  const closedAt = ac.lastSeen ?? Date.now()
+  closeOpenSorties(getState(), ac.hex, closedAt, getState().sortieMaxAlt.get(ac.hex) ?? ac.altitude)
   ac.isActive = false
   ac.lastSeen = null
   ac.startTime = 0
@@ -971,7 +982,7 @@ async function pollOpenSky(): Promise<void> {
       // On-ground gate (see pollFastPolice): a known airframe parked at base
       // transmits ADS-B but is not airborne. Low AND slow ⇒ keep it dormant and
       // off-map instead of rendering it as an active in-flight contact.
-      if (alt <= LANDED_ALT_FT && speed <= LANDED_SPD_KT) {
+      if (looksLanded(alt, speed, existing?.track)) {
         if (existing && existing.isActive) {
           existing.isActive = false
           closeOpenSorties(s, hex, now, s.sortieMaxAlt.get(hex) ?? existing.altitude)
@@ -1193,7 +1204,7 @@ async function pollFastPolice(): Promise<void> {
       // active "on air" contact. Only genuine flight (above the ground thresholds)
       // opens/keeps a sortie. This is what stopped every parked heli from looking
       // like it was in flight.
-      const onGround = alt <= LANDED_ALT_FT && speed <= LANDED_SPD_KT
+      const onGround = looksLanded(alt, speed, existing?.track)
       if (onGround) {
         if (existing) {
           if (existing.isActive) {
@@ -1364,14 +1375,30 @@ async function pollFastPolice(): Promise<void> {
         if (gap < POLICE_SILENT_DEBOUNCE_MS) continue // brief dropout: still active, hold position
         // Debounce expired. Low + slow when the signal died ⇒ it set down;
         // otherwise it's genuinely silent (lost signal while still airborne).
-        if (ac.altitude <= LANDED_ALT_FT && ac.speed <= LANDED_SPD_KT) {
+        if (
+          looksLanded(ac.altitude, ac.speed, ac.track) ||
+          (ac.altitude <= LANDED_ALT_FT && gap >= LOW_ALT_SILENT_LANDED_MS)
+        ) {
           markLandedPolice(ac, now)
         } else {
           ac.isActive = false
         }
-      } else if (pct(ac.fuelRemainingPercent, 0) <= 0 || now >= silentExpiryMs(ac)) {
-        // Silent-airborne but the tank is dry (or past its fuel-based endurance
-        // bound) — it must be on the ground now.
+      } else if (
+        looksLanded(ac.altitude, ac.speed, ac.track) ||
+        (ac.altitude <= LANDED_ALT_FT && gap >= LOW_ALT_SILENT_LANDED_MS) ||
+        pct(ac.fuelRemainingPercent, 0) <= 0 ||
+        now >= silentExpiryMs(ac)
+      ) {
+        // Silent-airborne, and one of these says it is on the ground:
+        //   • the last telemetry says low + slow, or low with a decelerating track
+        //   • it went dark at field altitude and has stayed dark past the backstop
+        //   • the tank is dry, or it is past its fuel-based endurance bound
+        //
+        // The first two are the fix for a real record in this store: a parked King Air
+        // held as a single 3,803-minute sortie with its fuel pinned at zero, because the
+        // only exit from "silent" was fuel exhaustion. An aircraft that goes dark ON TASK
+        // is at cruise, so it fails both tests and still holds here as silent — the
+        // stealth case is untouched.
         markLandedPolice(ac, now)
       }
     }
@@ -1386,6 +1413,17 @@ async function pollFastPolice(): Promise<void> {
       const ac = s.aircraftMap.get(hex)
       if (!ac || ac.isActive || ac.lastSeen == null || ac.landed) continue
       if (!validLatLng(ac.latitude, ac.longitude)) continue
+      // Same landing rule as the police contacts: silence from a contact last seen at
+      // field level means it is parked, not loitering. Previously these retired only on
+      // fuel exhaustion, so a stored airframe could sit "airborne" draining to zero for
+      // most of a day.
+      if (
+        looksLanded(ac.altitude, ac.speed, ac.track) ||
+        (ac.altitude <= LANDED_ALT_FT && now - ac.lastSeen >= LOW_ALT_SILENT_LANDED_MS)
+      ) {
+        markLandedPolice(ac, now)
+        continue
+      }
       ac.fuelRemainingPercent = integratePoliceFuelPct(
         hex, pct(ac.fuelRemainingPercent, 100), now, ac.altitude, ac.speed, ac.heading, 0, ac.fuelEnduranceMinutes, ac.timeAirborneSeconds,
       )
@@ -1407,6 +1445,22 @@ async function pollFastPolice(): Promise<void> {
 function pruneSilentOnStartup(): void {
   const now = Date.now()
   const s = getState()
+
+  // Repair sorties orphaned by the old resetToDormant: an entry still marked 'active'
+  // whose aircraft has been reset to dormant (lastSeen == null) can never be closed by
+  // the live logic, because that logic skips exactly those records. Close them at the
+  // start time when nothing better exists, and record why, so the history stops claiming
+  // an aircraft is still up hours after it landed.
+  for (const entry of s.sortieHistory) {
+    if (entry.status !== 'active') continue
+    const ac = s.aircraftMap.get(entry.hex)
+    if (ac && ac.lastSeen !== null) continue          // live or silent-but-known: leave it
+    const end = ac?.lastSeen ?? entry.startTime
+    entry.endTime = end
+    entry.durationSeconds = Math.max(0, Math.round((end - entry.startTime) / 1000))
+    entry.status = 'landed'
+    ;(entry as typeof entry & { closedReason?: string }).closedReason = 'orphaned-open-sortie'
+  }
   for (const hex of Object.keys(KNOWN_AIRCRAFT)) {
     const ac = s.aircraftMap.get(hex)
     if (!ac || ac.isActive || ac.lastSeen == null || ac.landed) continue
