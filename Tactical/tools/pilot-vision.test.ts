@@ -14,6 +14,9 @@ import {
   visionConePathPx,
   visionConeSVG,
   acuityLimitedRangeM,
+  opticsHalfFovDeg,
+  requiredZoomForRangeM,
+  SENSOR_BASE_HALF_FOV_DEG,
   coneCeilingM,
   metresPerPixel,
   MIN_VISIBLE_M,
@@ -190,4 +193,59 @@ test('an unusable scale yields no SVG at all', () => {
   const cone = visionConeForAltitude(500)!
   assert.equal(visionConeSVG(cone, 0), '')
   assert.equal(visionConeSVG(cone, Number.NaN), '')
+})
+
+
+// ── WIDTH vs REACH: one lens, and you cannot have both ─────────────────────────────────
+// These pin the fix for a real complaint: the King Air was drawn a 28-degree wedge reaching
+// 20 km, because its cone took its WIDTH from the bearing uncertainty and its RANGE from the
+// pod's acuity limit as if the two were independent. About 460 km2 of painted ground. A lens
+// that reaches 20 km is a long lens, and a long lens is narrow.
+
+test('the King Air narrows: a 28 degree along-track spread cannot reach 20 km', () => {
+  const c = visionConeForAltitude(7620, { role: 'fixedwing', sensorZoom: 50, maxRangeM: 20_000, halfFovDeg: 28 })
+  assert.ok(c, 'a cone should exist at 25,000 ft with the pod')
+  assert.equal(c!.widthLimitedBy, 'optics', 'the width should be the optics, not the spread')
+  assert.ok(c!.halfAngleDeg < 10, `expected a narrow field, got ${c!.halfAngleDeg}`)
+  assert.ok(c!.halfAngleDeg > 4, `should not collapse to a needle, got ${c!.halfAngleDeg}`)
+})
+
+test('the King Air narrows at the mock altitude too', () => {
+  const c = visionConeForAltitude(1829, { role: 'fixedwing', sensorZoom: 50, maxRangeM: 20_000, halfFovDeg: 28 })
+  assert.ok(c!.halfAngleDeg < 12)
+  assert.equal(c!.widthLimitedBy, 'optics')
+})
+
+test('THE REGRESSION GUARD: a low helicopter keeps its full uncertainty spread', () => {
+  // At 1,000 ft the range is short, the magnification needed is near 1, and the optics cap
+  // never binds — so the cone still shows the uncertainty, which is the whole point of it.
+  for (const alt of [305, 914, 1219]) {
+    const c = visionConeForAltitude(alt, { role: 'rotary', sensorZoom: 50, maxRangeM: 20_000, halfFovDeg: 16 })
+    assert.ok(c)
+    assert.equal(c!.widthLimitedBy, 'spread', `at ${alt} m the spread should stand`)
+    assert.equal(c!.halfAngleDeg, 16, `at ${alt} m the helicopter cone must be unchanged`)
+  }
+})
+
+test('an unaided eye is never capped: there is no lens to trade', () => {
+  const c = visionConeForAltitude(1829, { role: 'fixedwing', sensorZoom: 1, maxRangeM: 20_000, halfFovDeg: 28 })
+  assert.equal(c!.halfAngleDeg, 28)
+  assert.equal(c!.widthLimitedBy, undefined)
+})
+
+test('the optics rule itself: longer reach, narrower field', () => {
+  const near = opticsHalfFovDeg('fixedwing', 2_000, 50)
+  const far = opticsHalfFovDeg('fixedwing', 20_000, 50)
+  assert.ok(far < near, 'claiming a longer reach must cost field')
+  assert.equal(requiredZoomForRangeM(20_000) > requiredZoomForRangeM(2_000), true)
+  // the base field is the unaided one, so the cap can never exceed it
+  for (const role of ['rotary', 'fixedwing'] as const) {
+    assert.ok(opticsHalfFovDeg(role, 1_000, 50) <= SENSOR_BASE_HALF_FOV_DEG[role])
+  }
+})
+
+test('a helicopter claiming a long reach is capped too — the physics is not role-specific', () => {
+  const c = visionConeForAltitude(6_000, { role: 'rotary', sensorZoom: 50, maxRangeM: 20_000, halfFovDeg: 28 })
+  assert.ok(c!.halfAngleDeg < 28)
+  assert.equal(c!.widthLimitedBy, 'optics')
 })
