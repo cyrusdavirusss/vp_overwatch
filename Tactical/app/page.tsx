@@ -655,6 +655,7 @@ export default function VPOverwatch() {
               aircraft={filteredAircraft}
               reports={allGroundContacts}
               user={userPosition}
+              hasUserFix={clientLocation.position !== null}
               selectedAircraftId={selectedAircraftId}
               selectedReportId={selectedReportId}
               onSelectAircraft={onSelectAircraft}
@@ -1034,6 +1035,7 @@ export default function VPOverwatch() {
             aircraft={filteredAircraft}
             reports={allGroundContacts}
             user={userPosition}
+            hasUserFix={clientLocation.position !== null}
             selectedAircraftId={selectedAircraftId}
             selectedReportId={selectedReportId}
             onSelectAircraft={onSelectAircraft}
