@@ -1000,10 +1000,22 @@ export function VPMap({
       if (!marker) {
         const el = document.createElement('div')
         el.className = 'vp-cdot-marker'
-        el.innerHTML =
-          '<div class="vp-cdot-pulse"></div>' +
-          '<div class="vp-cdot-core"></div>' +
-          `<div class="vp-cdot-label">${dot.aircraftHex} · APPROX</div>`
+        // Built as DOM nodes with textContent, NEVER innerHTML: aircraftHex comes
+        // from a public POST /api/sighting. This label used to be a template string
+        // interpolating that value, which made a caller-supplied identifier parse as
+        // HTML in the application origin — a stored XSS reachable by anyone who
+        // viewed the map while the dot was fresh. Uppercasing on the server does not
+        // save it, because HTML character references survive case folding
+        // (`&#97;lert` decodes to `alert`). The route now also validates the
+        // identifier; this is the second layer.
+        const pulse = document.createElement('div')
+        pulse.className = 'vp-cdot-pulse'
+        const core = document.createElement('div')
+        core.className = 'vp-cdot-core'
+        const label = document.createElement('div')
+        label.className = 'vp-cdot-label'
+        label.textContent = `${dot.aircraftHex} · APPROX`
+        el.append(pulse, core, label)
         marker = new maplibregl.Marker({ element: el, anchor: 'center' })
           .setLngLat([dot.lng, dot.lat])
           .addTo(map)

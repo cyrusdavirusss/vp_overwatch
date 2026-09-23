@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Release builds do not permit Android's automatic backup of application
+         data: it would capture the WebView's session/cache and the app's stored
+         preferences with no source-defined exclusion list, which is a
+         device/host-policy-dependent exposure for a shell that shows an
+         authenticated view. If backup is ever wanted, add explicit
+         dataExtractionRules rather than re-enabling this blanket flag. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

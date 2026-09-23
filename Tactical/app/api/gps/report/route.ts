@@ -6,7 +6,9 @@ export const dynamic = 'force-dynamic'
 /** GPS relay secret for phone-to-server auth. Resolved per-request (not at
  *  module-eval) so a missing secret fails closed instead of breaking the build. */
 function gpsSecret(): string | null {
-  return process.env.GPS_RELAY_SECRET ?? (process.env.NODE_ENV !== 'production' ? 'gps-dev' : null)
+  // Fail closed everywhere: no development fallback. The old `gps-dev` default was
+  // a published constant, which is not a credential.
+  return process.env.GPS_RELAY_SECRET ?? null
 }
 
 export async function POST(request: Request) {

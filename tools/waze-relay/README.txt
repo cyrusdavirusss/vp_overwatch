@@ -32,7 +32,8 @@ CHECK STATUS
 
 CONFIG  (.env)
   API_URL        the app URL (Tailscale IP form is most reliable)
-  RELAY_SECRET   must match WAZE_RELAY_SECRET on the app (currently 'dev-secret')
+  RELAY_SECRET   must match WAZE_RELAY_SECRET on the app (set it in this
+                 directory's .env; there is no default and no dev fallback)
 
 TROUBLESHOOTING
   - "HTTP 403" from Waze  -> this IP is blocked (rare on home internet); try another network.

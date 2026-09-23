@@ -21,6 +21,8 @@ chmod +x install.sh start.sh
 3. Open http://localhost:3000 in your browser
 
 ## Environment Variables (optional)
-- `WAZE_RELAY_SECRET` — secret for Waze relay ingestion (default: `dev-secret`)
-- `GPS_RELAY_SECRET` — secret for GPS relay (default: `gps-dev`)
+- `WAZE_RELAY_SECRET` — secret for Waze relay ingestion (required; set a long
+  random value, there is no default)
+- `GPS_RELAY_SECRET` — secret for the GPS relay (required; set a long random
+  value, there is no default)
 - `PORT` — server port (default: 3000)
