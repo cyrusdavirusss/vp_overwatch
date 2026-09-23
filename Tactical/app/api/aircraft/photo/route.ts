@@ -26,6 +26,15 @@ const CACHE = new Map<string, { at: number; data: PhotoResult }>()
 const HIT_TTL_MS = 24 * 3_600_000
 const MISS_TTL_MS = 6 * 3_600_000
 
+/**
+ * Bounded. The cache key is caller-supplied (`?reg=` / `?hex=`), so an unbounded
+ * Map let anyone create entries that live for six to twenty-four hours, each miss
+ * costing an upstream lookup against a third party's rate limit. Cap the entry
+ * count, and refuse keys that are not a registration or an ICAO hex.
+ */
+const MAX_CACHE_ENTRIES = 500
+const KEY_SHAPE = /^([A-Z0-9-]{2,10}|[0-9a-f]{6})$/
+
 function userAgent(): string {
   // planespotters rejects UAs without a contact URL/email. Override with your
   // own reachable contact via PLANESPOTTERS_UA in .env.local.
@@ -66,6 +75,13 @@ export async function GET(req: Request) {
   const key = reg || hex
   if (!key) return Response.json({ src: null } as PhotoResult)
 
+  // Shape check BEFORE any cache or upstream work: a registration or a 6-digit
+  // ICAO hex. Anything else is refused, so free-form input cannot become a
+  // long-lived cache entry or a third-party lookup.
+  if (!KEY_SHAPE.test(key)) {
+    return Response.json({ src: null } as PhotoResult, { headers: { 'cache-control': 'no-store' } })
+  }
+
   const now = Date.now()
   const cached = CACHE.get(key)
   if (cached && now - cached.at < (cached.data.src ? HIT_TTL_MS : MISS_TTL_MS)) {
@@ -77,6 +93,14 @@ export async function GET(req: Request) {
   if (!result && hex) result = await lookup(`hex/${encodeURIComponent(hex)}`)
 
   const data: PhotoResult = result || { src: null }
+  // Evict oldest-first when full. Map preserves insertion order, and this cache
+  // holds only public photo metadata, so dropping the oldest entries is free.
+  if (CACHE.size >= MAX_CACHE_ENTRIES) {
+    for (const k of CACHE.keys()) {
+      CACHE.delete(k)
+      if (CACHE.size < MAX_CACHE_ENTRIES) break
+    }
+  }
   CACHE.set(key, { at: now, data })
   return Response.json(data)
 }

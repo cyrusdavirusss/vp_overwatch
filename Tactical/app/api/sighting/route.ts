@@ -21,6 +21,13 @@ const sightingRays = new Map<string, VisualSightingRay[]>()
 // Key: aircraftHex, Value: computed community dot
 const communityDots = new Map<string, CommunityDot>()
 
+// Bounds on public, unauthenticated state. The key is caller-chosen and the value
+// is an array the caller appends to, so both need a ceiling or one client can grow
+// this process's heap with junk — and every request re-triangulates the array with
+// a nested pair loop, so the work grows quadratically with the ray count.
+const MAX_RAYS_PER_KEY = 12
+const MAX_TRACKED_KEYS = 200
+
 // Prune stale rays every 2 minutes
 setInterval(() => {
   const now = Date.now()
@@ -68,6 +75,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid sighting data' }, { status: 400 })
     }
 
+    // `typeof NaN === 'number'`, and every range test below is FALSE for NaN — so
+    // without this, NaN sailed through the bounds and produced a dot at NaN, which
+    // then went to a MapLibre marker. Reject non-finite first.
+    if (
+      !Number.isFinite(observerLat) || !Number.isFinite(observerLng) ||
+      !Number.isFinite(bearingDeg) || !Number.isFinite(elevationDeg)
+    ) {
+      return NextResponse.json({ error: 'Non-finite sighting data' }, { status: 400 })
+    }
+
+    // The identifier is a 24-bit ICAO hex, and it becomes a Map KEY and a map
+    // LABEL. Anything else is either a typo or an injection attempt; it is refused
+    // here rather than sanitised, so no free text from this route ever reaches the
+    // client. (The marker now uses textContent as well — belt and braces.)
+    const hex = aircraftHex.trim().toUpperCase()
+    if (!/^[0-9A-F]{6}$/.test(hex)) {
+      return NextResponse.json({ error: 'aircraftHex must be a 6-digit ICAO hex' }, { status: 400 })
+    }
+
     // Sanity bounds
     if (
       observerLat < -90 || observerLat > 90 ||
@@ -80,7 +106,7 @@ export async function POST(req: NextRequest) {
 
     const ray: VisualSightingRay = {
       id: randomUUID(),
-      aircraftHex: aircraftHex.toUpperCase(),
+      aircraftHex: hex,
       observerLat,
       observerLng,
       bearingDeg,
@@ -89,10 +115,23 @@ export async function POST(req: NextRequest) {
       sessionId: sessionId || randomUUID(),
     }
 
-    // Store the ray
+    // Store the ray, BOUNDED. The key is attacker-chosen and the value is an
+    // unbounded array, so without caps one client could grow this process's heap
+    // with junk keys, and every request re-triangulates the whole array (nested
+    // pair loop). Keep the newest rays per key and the most recent keys overall.
     const existing = sightingRays.get(ray.aircraftHex) ?? []
     existing.push(ray)
+    if (existing.length > MAX_RAYS_PER_KEY) existing.splice(0, existing.length - MAX_RAYS_PER_KEY)
     sightingRays.set(ray.aircraftHex, existing)
+
+    if (sightingRays.size > MAX_TRACKED_KEYS) {
+      // Map preserves insertion order: drop the oldest keys first.
+      for (const key of sightingRays.keys()) {
+        if (sightingRays.size <= MAX_TRACKED_KEYS) break
+        sightingRays.delete(key)
+        communityDots.delete(key)
+      }
+    }
 
     // Re-triangulate
     const prev = communityDots.get(ray.aircraftHex) ?? null

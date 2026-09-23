@@ -67,6 +67,16 @@ export const DOT_TTL_MS = 3 * 60 * 1000 // 3 minutes
 /** Minimum number of independent sightings to show a dot */
 export const MIN_SIGHTINGS = 1 // Show immediately, confidence improves with more
 
+/**
+ * Ceiling on how many rays take part in a triangulation.
+ *
+ * The pair loop inside closestPointBetweenRays is O(n^2), and the array it walks is
+ * fed by a public, unauthenticated endpoint — so an unbounded count is a
+ * quadratic-work lever against the process. The newest rays are also the only ones
+ * worth using: an old ray describes a target that has had time to move.
+ */
+export const MAX_TRIANGULATION_RAYS = 8
+
 /** Maximum age of a sighting ray to include in triangulation (ms) */
 export const RAY_MAX_AGE_MS = 90 * 1000 // 90 seconds
 
@@ -122,14 +132,20 @@ function closestPointBetweenRays(
 ): { lat: number; lng: number; altM: number; radiusM: number } {
   if (rays.length === 0) throw new Error('No rays')
 
+  // Bounded: this runs a nested pair loop (O(n^2)) over an array that a public
+  // endpoint appends to, so an unbounded count is a quadratic-work lever. The
+  // newest rays are also the only useful ones — an older ray is a bearing on a
+  // target that has since moved.
+  const usable = rays.length > MAX_TRIANGULATION_RAYS ? rays.slice(-MAX_TRIANGULATION_RAYS) : rays
+
   // Use the centroid of observers as the local origin
-  const originLat = rays.reduce((s, r) => s + r.observerLat, 0) / rays.length
-  const originLng = rays.reduce((s, r) => s + r.observerLng, 0) / rays.length
+  const originLat = usable.reduce((s, r) => s + r.observerLat, 0) / usable.length
+  const originLng = usable.reduce((s, r) => s + r.observerLng, 0) / usable.length
   const cosLat = Math.cos(toRad(originLat))
 
   // Convert each ray to a 3D direction vector in local metres
   type Ray3D = { ox: number; oy: number; oz: number; dx: number; dy: number; dz: number }
-  const rays3d: Ray3D[] = rays.map(r => {
+  const rays3d: Ray3D[] = usable.map(r => {
     // Observer position in local metres
     const ox = (r.observerLng - originLng) * cosLat * R_EARTH * DEG
     const oy = (r.observerLat - originLat) * R_EARTH * DEG

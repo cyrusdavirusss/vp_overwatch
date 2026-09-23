@@ -29,6 +29,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'lat/lng required' }, { status: 400 })
     }
 
+    // `typeof NaN === 'number'`, and NaN is FALSE against every bound — so it used
+    // to pass straight through into the store and onto the map as a pin at NaN.
+    // Reject non-finite and out-of-range coordinates before anything else reads them.
+    if (
+      !Number.isFinite(lat) || !Number.isFinite(lng) ||
+      lat < -90 || lat > 90 || lng < -180 || lng > 180
+    ) {
+      return NextResponse.json({ error: 'lat/lng must be finite and in range' }, { status: 400 })
+    }
+
+    // Corroboration counts DISTINCT session ids, and the client supplies them, so
+    // this bounds a caller's input rather than making forgery impossible: three
+    // requests with three made-up ids still satisfy it. Recorded here so nobody
+    // reads the threshold as proof of three real people; the durable fix is a
+    // server-issued identity or moderation before publication.
+    const sessionId = String(body.sessionId || '').trim().slice(0, 64)
+
     // ── The privileged kind ────────────────────────────────────────────────
     // A helicopter sighting is the one report published WITHOUT corroboration, on
     // its own authority, because it describes something that may not be on the map
@@ -66,7 +83,7 @@ export async function POST(req: NextRequest) {
         ? body.accuracyM
         : undefined
 
-    getStore().addUserReport(kind as Kind, lat, lng, String(body.sessionId || ''), {
+    getStore().addUserReport(kind as Kind, lat, lng, sessionId, {
       authoritative,
       accuracyM,
     })

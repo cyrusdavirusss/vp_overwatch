@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  RELEASE transport policy: no cleartext, anywhere.
+
+  This file used to permit cleartext for 100.94.31.125, 192.168.1.109, localhost and
+  10.0.2.2 — and the Capacitor config loaded the whole application shell from
+  http://100.94.31.125:3100. Together that let anyone who could influence the
+  network path substitute the app's HTML and JavaScript inside the WebView: remote
+  code loading, not merely an exposed data response.
+
+  The release build now loads the shell from https://vpoverwatch.com. Local
+  development against a LAN address uses the DEBUG config, which lives in
+  android/app/src/debug/res/xml/network_security_config.xml so a release artifact
+  cannot inherit it.
+-->
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">100.94.31.125</domain>
-        <domain includeSubdomains="true">192.168.1.109</domain>
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">10.0.2.2</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
 </network-security-config>

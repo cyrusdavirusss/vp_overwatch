@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG-ONLY transport policy (android/app/src/debug/... is merged only into debug
+  builds). This is where the LAN and emulator cleartext exceptions belong.
+
+  Build a debug shell against a local dev server with:
+      VP_DEV_SERVER_URL=http://192.168.1.109:3100 npx cap sync android
+  A release build (which uses the main/ config, no cleartext) cannot pick these up.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">100.94.31.125</domain>
+        <domain includeSubdomains="true">192.168.1.109</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
