@@ -322,7 +322,9 @@ export function AROverlay({ aircraft, reports, communityDots, userLocation, onCl
     let active = true;
     const tick = async () => {
       try {
-        const r = await fetch("/api/aircraft/sky", { cache: "no-store" });
+        const u = userLocRef.current;
+        const qs = u ? `?lat=${u.lat.toFixed(5)}&lng=${u.lng.toFixed(5)}` : "";
+        const r = await fetch(`/api/aircraft/sky${qs}`, { cache: "no-store" });
         if (!r.ok) return;
         const data = (await r.json()) as Aircraft[];
         if (active && Array.isArray(data)) setContacts(data);
