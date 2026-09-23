@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStore } from '@/lib/store'
 import { rateLimit, rateLimitIp, clientIp } from '@/lib/auth/rate-limit'
+import { constantTimeEqual } from '@/lib/auth/crypto'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,7 +52,10 @@ export async function POST(req: NextRequest) {
         )
       }
       const got = req.headers.get('x-admin-token') || ''
-      if (got !== expected) {
+      // Constant-time: a plain `!==` exits at the first differing byte, which is
+      // measurable over enough attempts. /api/admin/announcements already compares
+      // this way; the two routes share one token.
+      if (!constantTimeEqual(got, expected)) {
         return NextResponse.json({ error: 'forbidden' }, { status: 403 })
       }
       authoritative = true

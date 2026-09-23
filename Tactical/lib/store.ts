@@ -23,6 +23,21 @@ const MAX_SORTIE_HISTORY = 1000
 const LAST_INGEST_TS_PATH = WATCHDOG_PATH
 
 /**
+ * Snapshot phone numbers are written encrypted (`v1.<iv>.<tag>.<ct>`, AES-256-GCM
+ * with a key derived from AUTH_SECRET — the same helper the Postgres alert
+ * settings use). Hashing is not an option: a number has to be recoverable to be
+ * dialled. A snapshot written before this change holds plaintext, which is passed
+ * through unchanged so the next save upgrades it; a value that looks encrypted but
+ * will not decrypt (a rotated AUTH_SECRET) yields '' rather than a broken number.
+ */
+function decryptStoredPhone(value: unknown): string {
+  const v = typeof value === 'string' ? value : ''
+  if (!v) return ''
+  if (!v.startsWith('v1.')) return v
+  return decryptField(v) ?? ''
+}
+
+/**
  * Throttled save of essential state to disk so data survives restarts.
  * Saves: sortieHistory, relay state, aircraft startTime/isActive (for
  * sortie continuity), and reports (Waze alerts).
@@ -52,14 +67,26 @@ function saveToDisk(): void {
       timeAirborneSeconds: ac.timeAirborneSeconds,
     })),
     reports: [...s.reportsMap.entries()].map(([uuid, r]) => ({ uuid, ...r })),
-    subscribers: s.notifState.subscribers.map(sub => ({ ...sub })),
+    subscribers: s.notifState.subscribers.map(sub => ({
+      ...sub,
+      // Encrypted at the write boundary — this file sits on the host in the clear
+      // otherwise, and it is one of only two places a subscriber's number lives.
+      phone: sub.phone ? encryptField(sub.phone) : sub.phone,
+    })),
     groundReports: s.groundReports,
   }
   try {
     if (!fs.existsSync(SNAPSHOT_DIR)) fs.mkdirSync(SNAPSHOT_DIR, { recursive: true })
-    // Async write so a growing snapshot never blocks the event loop on the hot path.
+    // ATOMIC: write a sibling temp file, then rename over the snapshot. rename(2)
+    // is atomic within a filesystem, so a crash or power cut mid-write leaves
+    // either the previous snapshot or the new one — never a half-written file.
+    // Before this, a kill during serialization truncated the JSON: the loader
+    // tolerated it (it is wrapped in try/catch), but the state was gone and every
+    // following save overwrote what was left.
+    const tmp = `${SNAPSHOT_PATH}.tmp`
     fs.promises
-      .writeFile(SNAPSHOT_PATH, JSON.stringify(snapshot), 'utf-8')
+      .writeFile(tmp, JSON.stringify(snapshot), 'utf-8')   // async so a growing snapshot never blocks the event loop
+      .then(() => fs.promises.rename(tmp, SNAPSHOT_PATH))
       .catch((e: any) => console.error('[store] async save failed:', e?.message))
   } catch (e: any) {
     console.error('[store] save failed:', e.message)
@@ -187,6 +214,9 @@ function loadFromDisk(): void {
     if (Array.isArray(snap.subscribers)) {
       s.notifState.subscribers = snap.subscribers.map((sub: any) => ({
         ...sub,
+        // Written encrypted since the atomic-snapshot change; a plaintext value
+        // from an older snapshot passes through and is upgraded on the next save.
+        phone: decryptStoredPhone(sub.phone),
         notifyOn: sub.notifyOn ?? { takeoff: true, stealth: true, land: true },
         // Fail closed: any legacy row without an explicit consent record is
         // treated as NOT consented and won't be dialed until re-confirmed.
@@ -341,6 +371,7 @@ import {
 import { looksLanded, LANDED_ALT_FT, LOW_ALT_SILENT_LANDED_MS } from '@/lib/landing-heuristic'
 import { currentAreaWind, refreshAreaWind } from '@/lib/wind'
 import { appendTrackPoint, TRAIL_MAX_POINTS, isSilentContact, clampToCoverage } from '@/lib/data'
+import { encryptField, decryptField } from '@/lib/auth/crypto'
 
 /** Project a full Aircraft record down to the telemetry Hermes briefs on. */
 function aircraftToBrief(ac: Aircraft): AircraftBrief {
