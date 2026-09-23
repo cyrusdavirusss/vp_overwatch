@@ -13,7 +13,12 @@ export const dynamic = 'force-dynamic'
  *
  *  1. UNAUTHENTICATED AND ANY-ORIGIN. Anyone could call it, from any page, at any
  *     rate. It is now same-origin only (the `Sec-Fetch-Site` pattern
- *     `/api/waze/alerts` and `/api/gps/location` use) and rate limited.
+ *     `/api/waze/alerts` uses) and rate limited. Note this gate is browser
+ *     metadata and a script can set it — it stops a third-party PAGE, not a
+ *     determined caller, so nothing here may be treated as a data boundary. When
+ *     the same reasoning was applied to `/api/gps/location`, the right answer
+ *     turned out to be deleting that route: it had no callers and served the
+ *     process-wide position slot.
  *
  *  2. THE HEADER WAS TRUSTED BLINDLY and used unvalidated as a URL component — so
  *     a caller could push a string of their choosing into the outbound request, and
