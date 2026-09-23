@@ -46,13 +46,21 @@ export async function POST(request: Request) {
     const store = getStore()
     store.setUserLocation(lat, lng, accuracy, heading)
 
+    // Echo what was STORED, not what was sent. The store clamps the position to
+    // the operating area (clampToCoverage), so a caller asking for a coordinate
+    // outside Victoria would otherwise be told its value had been accepted —
+    // a response that disagrees with the state is how a clamp gets found by
+    // surprise later.
+    const stored = store.getUserLocation()
+
     return Response.json({
       status: 'ok',
-      lat,
-      lng,
+      lat: stored ? stored.lat : lat,
+      lng: stored ? stored.lng : lng,
       accuracy,
       heading,
-      label: label || `${lat.toFixed(4)}°, ${lng.toFixed(4)}°`,
+      clamped: stored ? stored.lat !== lat || stored.lng !== lng : false,
+      label: label || `${(stored ?? { lat, lng }).lat.toFixed(4)}°, ${(stored ?? { lat, lng }).lng.toFixed(4)}°`,
     })
   } catch (err: any) {
     return Response.json({ error: err.message }, { status: 400 })

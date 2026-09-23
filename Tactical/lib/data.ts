@@ -142,6 +142,37 @@ export function formatDataAge(sec: number | undefined): string {
   return m ? `${h}h ${m}m ago` : `${h}h ago`
 }
 
+/**
+ * The area this app is ABOUT: Victoria and a margin around it.
+ *
+ * The area-wide ADS-B sweep exists to find aircraft in the operating area. A
+ * centre outside this box finds nothing the app can use, and the position that
+ * feeds it is written by an unauthenticated visitor request — so the value is
+ * clamped here rather than trusted. A visitor genuinely outside Victoria loses
+ * nothing: there is no VicPol traffic to find near them either way.
+ *
+ * Generous on purpose (state extent plus margin): the point is to refuse nonsense
+ * and spoofed coordinates, not to be a land survey.
+ */
+export const VICTORIA_COVERAGE = { south: -39.5, north: -33.5, west: 140.5, east: 150.5 } as const
+
+/** Fallback centre — Melbourne CBD, public knowledge. */
+export const DEFAULT_CENTRE = { lat: -37.8136, lng: 144.9631 } as const
+
+/**
+ * Clamp a position into the coverage box. Non-finite input returns the default
+ * centre rather than propagating NaN into the poll URL.
+ */
+export function clampToCoverage(lat: number, lng: number): { lat: number; lng: number } {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { lat: DEFAULT_CENTRE.lat, lng: DEFAULT_CENTRE.lng }
+  }
+  return {
+    lat: Math.min(VICTORIA_COVERAGE.north, Math.max(VICTORIA_COVERAGE.south, lat)),
+    lng: Math.min(VICTORIA_COVERAGE.east, Math.max(VICTORIA_COVERAGE.west, lng)),
+  }
+}
+
 // Helper functions
 // Position `scrubT` seconds in the past (0 = live/current). Track points are
 // stored chronologically (newest last). We sample on the ABSOLUTE `ts` timeline

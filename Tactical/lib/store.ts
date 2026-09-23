@@ -340,7 +340,7 @@ import {
 } from '@/lib/fuel-model'
 import { looksLanded, LANDED_ALT_FT, LOW_ALT_SILENT_LANDED_MS } from '@/lib/landing-heuristic'
 import { currentAreaWind, refreshAreaWind } from '@/lib/wind'
-import { appendTrackPoint, TRAIL_MAX_POINTS, isSilentContact } from '@/lib/data'
+import { appendTrackPoint, TRAIL_MAX_POINTS, isSilentContact, clampToCoverage } from '@/lib/data'
 
 /** Project a full Aircraft record down to the telemetry Hermes briefs on. */
 function aircraftToBrief(ac: Aircraft): AircraftBrief {
@@ -1555,11 +1555,19 @@ export function getStore() {
      * + civil traffic in range, tagged via `category` and sorted nearest-first so
      * the cap keeps the most relevant overhead aircraft.
      */
-    async getSkyContacts(limit = 80): Promise<Aircraft[]> {
+    async getSkyContacts(limit = 80, origin?: { lat: number; lng: number }): Promise<Aircraft[]> {
       if (Date.now() - s.lastOpenSkyPoll > OPENSKY_POLL_INTERVAL) {
         await pollOpenSky()
       }
-      const { lat, lng } = s.userGPS
+      // Whose sky is it? The caller's own position when it supplied one (clamped
+      // to the operating area), otherwise the stored coverage centre. Reading the
+      // shared slot here meant one visitor's push decided what another visitor's
+      // capped sky list contained.
+      const o = origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)
+        ? clampToCoverage(origin.lat, origin.lng)
+        : s.userGPS
+      const lat = o.lat
+      const lng = o.lng
       const le = [...s.aircraftMap.values()].filter(
         (a) => a.isActive && validLatLng(a.latitude, a.longitude)
       )
@@ -1731,9 +1739,18 @@ export function getStore() {
       return { ...s.relay, secondsSinceLastIngest: secondsSinceLastIngest() || 9999 }
     },
 
-    /** Set user GPS position */
+    /**
+     * Store the area-wide poll centre (ADSB.lol `/v2/point/{lat}/{lng}/100`).
+     *
+     * Clamped to the operating area. This value arrives from an unauthenticated
+     * visitor request, and it steers which part of the world the app's sweep
+     * looks at, so it is bounded here rather than trusted — a coordinate outside
+     * Victoria can only come from a spoofed push or a visitor the sweep cannot
+     * help anyway. See `clampToCoverage`.
+     */
     setGPS(lat: number, lng: number, hdg: number = 0, accuracy: number = 25): void {
-      s.userGPS = { lat, lng, hdg, accuracy }
+      const c = clampToCoverage(lat, lng)
+      s.userGPS = { lat: c.lat, lng: c.lng, hdg, accuracy }
     },
 
     /** Get user GPS position */
@@ -1744,10 +1761,14 @@ export function getStore() {
     /**
      * Store the live browser-reported position (pushed every ~10s). Also
      * updates userGPS so the area-wide ADS-B poll re-centres on the user.
+     *
+     * Clamped, and for the same reason as setGPS: this is anonymous input that
+     * ends up steering the app's sweep.
      */
     setUserLocation(lat: number, lng: number, accuracy: number = 25, heading: number = 0): void {
-      s.userLocation = { lat, lng, accuracy, heading, updatedAt: Date.now() }
-      s.userGPS = { lat, lng, hdg: heading, accuracy }
+      const c = clampToCoverage(lat, lng)
+      s.userLocation = { lat: c.lat, lng: c.lng, accuracy, heading, updatedAt: Date.now() }
+      s.userGPS = { lat: c.lat, lng: c.lng, hdg: heading, accuracy }
     },
 
     /** Get the most recent live browser position (null if never reported). */
