@@ -11,7 +11,7 @@
     "build": "next build && node scripts/copy-standalone.mjs && node scripts/sync-dist.mjs",
     "start": "node .next/standalone/server.js",
     "lint": "next lint",
-    "test": "node --experimental-strip-types --test tools/adsb-adapter.test.ts tools/geo-proximity.test.ts tools/adsb-state-machine.test.ts tools/adsb-persistence.test.ts tools/auth-crypto.test.ts tools/dead-reckoning.test.ts tools/rate-limit.test.ts tools/opensky-adapter.test.ts tools/config-interval.test.ts tools/opensky-oauth.test.ts tools/stealth-threshold.test.ts tools/pilot-vision.test.ts tools/sensor-pointing.test.ts tools/mock-flight.test.ts tools/alerts-policy.test.ts tools/alerts-providers.test.ts tools/stealth-sighting.test.ts tools/landing-heuristic.test.ts",
+    "test": "node --experimental-strip-types --test tools/adsb-adapter.test.ts tools/geo-proximity.test.ts tools/adsb-state-machine.test.ts tools/adsb-persistence.test.ts tools/auth-crypto.test.ts tools/dead-reckoning.test.ts tools/rate-limit.test.ts tools/opensky-adapter.test.ts tools/config-interval.test.ts tools/opensky-oauth.test.ts tools/stealth-threshold.test.ts tools/pilot-vision.test.ts tools/sensor-pointing.test.ts tools/mock-flight.test.ts tools/alerts-policy.test.ts tools/alerts-providers.test.ts tools/stealth-sighting.test.ts tools/landing-heuristic.test.ts tools/data-age.test.ts",
     "migrate": "node scripts/migrate.mjs",
     "announce": "node --experimental-strip-types scripts/announce.ts",
     "worker": "node --experimental-strip-types scripts/adsb-ingest.ts",

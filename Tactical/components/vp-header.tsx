@@ -29,6 +29,7 @@
 
 import { useState, useEffect } from "react";
 import { PwaInstall } from "@/components/pwa-install";
+import { formatDataAge, GROUND_STALE_AFTER_SEC } from "@/lib/data";
 
 interface VPHeaderProps {
   airCount: number;
@@ -38,6 +39,15 @@ interface VPHeaderProps {
   isConnected: boolean;
   /** Epoch ms of the last successful data refresh (useRealtimeData.lastUpdate) */
   lastUpdate: number;
+  /**
+   * Age in seconds of the newest GROUND ingest (relay.secondsSinceLastIngest).
+   *
+   * Surfaced because an empty ground layer has two very different meanings: with
+   * a fresh feed there is genuinely nothing to draw, and with a stale one the
+   * data stopped arriving. Without this the header cannot tell an operator which
+   * one they are looking at. 9999 = never ingested.
+   */
+  groundAgeSec?: number;
   onSubscribeClick: () => void;
 }
 
@@ -176,6 +186,7 @@ export function VPHeader({
   isLostSignal,
   isConnected,
   lastUpdate,
+  groundAgeSec,
   onSubscribeClick,
 }: VPHeaderProps) {
   // Three distinguishable states — red stays reserved for a genuinely lost
@@ -230,6 +241,24 @@ export function VPHeader({
               </span>
               <span className="vp-stat-sub">Active</span>
             </span>
+            {/* Freshness of the ground feed. "0 Active" with a fresh feed means
+                there is genuinely nothing to draw; with a stale one the data
+                stopped arriving and the map is empty for a different reason.
+                Amber is the app's semantic "something needs attention". */}
+            {groundAgeSec !== undefined && (
+              <span
+                className="vp-stat-sub"
+                style={
+                  groundAgeSec >= GROUND_STALE_AFTER_SEC
+                    ? { color: "var(--vp-amber)", fontWeight: 600 }
+                    : undefined
+                }
+              >
+                {groundAgeSec >= GROUND_STALE_AFTER_SEC
+                  ? "no data"
+                  : `feed ${formatDataAge(groundAgeSec)}`}
+              </span>
+            )}
           </div>
         </div>
 

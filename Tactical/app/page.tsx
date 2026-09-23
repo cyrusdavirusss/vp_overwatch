@@ -291,8 +291,6 @@ export default function VPOverwatch() {
     kind_checkpoint: true,
     kind_rbt: true,
     kind_camera: true,
-    radius: 8,
-    windowMin: 60,
   })
 
   const filteredAircraft = useMemo(() => {
@@ -571,6 +569,7 @@ export default function VPOverwatch() {
           isLostSignal={isLostSignal}
           isConnected={isOnline}
           lastUpdate={liveData.lastUpdate}
+          groundAgeSec={liveData.relay?.secondsSinceLastIngest}
           onSubscribeClick={() => setShowSubscribe(true)}
         />
 
@@ -961,6 +960,7 @@ export default function VPOverwatch() {
             isLostSignal={isLostSignal}
             isConnected={isOnline}
             lastUpdate={liveData.lastUpdate}
+            groundAgeSec={liveData.relay?.secondsSinceLastIngest}
             onSubscribeClick={() => setShowSubscribe(true)}
           />
 
