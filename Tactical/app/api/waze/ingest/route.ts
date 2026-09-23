@@ -1,4 +1,5 @@
 import { getStore } from '@/lib/store'
+import { constantTimeEqual } from '@/lib/auth/crypto'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,7 +15,9 @@ export async function POST(request: Request) {
   const RELAY_SECRET = relaySecret()
   const secret = request.headers.get('x-relay-secret')
   const src = request.headers.get('x-forwarded-for') || 'lan'
-  if (!RELAY_SECRET || secret !== RELAY_SECRET) {
+  // Constant-time compare: a plain !== leaks how many leading bytes matched,
+  // which is measurable over enough requests against a long shared secret.
+  if (!RELAY_SECRET || !constantTimeEqual(String(secret ?? ''), RELAY_SECRET)) {
     console.warn(`[ingest] 401 unauthorized from=${src}`)
     return Response.json({ error: 'unauthorized' }, { status: 401 })
   }

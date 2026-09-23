@@ -1,4 +1,5 @@
 import { getStore } from '@/lib/store'
+import { constantTimeEqual } from '@/lib/auth/crypto'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +12,7 @@ function gpsSecret(): string | null {
 export async function POST(request: Request) {
   const GPS_SECRET = gpsSecret()
   const secret = request.headers.get('x-gps-secret')
-  if (!GPS_SECRET || secret !== GPS_SECRET) {
+  if (!GPS_SECRET || !constantTimeEqual(String(secret ?? ''), GPS_SECRET)) {
     return Response.json({ error: 'unauthorized' }, { status: 401 })
   }
 
