@@ -34,6 +34,17 @@ export interface VPMapProps {
   aircraft: Aircraft[]
   reports: Report[]
   user: User
+  /**
+   * Whether `user` is a REAL fix from this visitor's own device.
+   *
+   * `user` always carries a point, because the caller falls back to the default
+   * map centre when there is no fix — so the map cannot tell a real position from
+   * a placeholder by looking at it. It used to draw a pulsing "you are here" dot
+   * and an accuracy disc at that fallback for every visitor whose browser gave no
+   * position, i.e. it asserted a location it did not have. The marker is gated on
+   * this flag instead. Defaults to true: a caller that omits it keeps the dot.
+   */
+  hasUserFix?: boolean
   selectedAircraftId: string | null
   selectedReportId: string | null
   onSelectAircraft: (id: string | null) => void
@@ -244,6 +255,7 @@ export function VPMap({
   aircraft,
   reports,
   user,
+  hasUserFix = true,
   selectedAircraftId,
   selectedReportId,
   onSelectAircraft,
@@ -481,6 +493,10 @@ export function VPMap({
       uel.className = 'user-marker'
       uel.innerHTML =
         '<div class="user-marker-dot"></div><div class="user-marker-pulse"></div>'
+      // Hidden on creation when this visitor has no position of their own, so the
+      // placeholder centre is never drawn as a marker even for one frame. The
+      // marker effect shows it as soon as a real fix arrives.
+      if (!hasUserFix) uel.style.display = 'none'
       userMarker.current = new maplibregl.Marker({ element: uel, anchor: 'center' })
         .setLngLat([user.lng, user.lat])
         .addTo(map)
@@ -666,12 +682,19 @@ export function VPMap({
     const map = mapRef.current
     if (!ready || !map) return
     userMarker.current?.setLngLat([user.lng, user.lat])
+    // No fix means no dot. `user` is a fallback centre when this visitor's device
+    // has not given a position, and drawing a pulsing "you are here" marker at a
+    // fallback asserts a location the app does not have.
+    const el = userMarker.current?.getElement()
+    if (el) el.style.display = hasUserFix ? '' : 'none'
     const src = map.getSource('vp-acc') as maplibregl.GeoJSONSource | undefined
     src?.setData({
       type: 'FeatureCollection',
-      features: user.accuracy > 0 ? [circlePolygon(user.lng, user.lat, user.accuracy)] : [],
+      features: hasUserFix && user.accuracy > 0
+        ? [circlePolygon(user.lng, user.lat, user.accuracy)]
+        : [],
     })
-  }, [ready, user.lat, user.lng, user.accuracy])
+  }, [ready, hasUserFix, user.lat, user.lng, user.accuracy])
 
   // ── Aircraft markers, trails, predictive vector, connections, density ──
   useEffect(() => {
