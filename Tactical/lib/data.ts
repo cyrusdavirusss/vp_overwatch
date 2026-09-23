@@ -110,6 +110,36 @@ export interface Relay {
   lastIngested: number
   lastRaw: number
   coverageRegions: number
+  /** Seconds since the newest GROUND (Waze) alert was ingested. 9999 is the
+   *  store's "never ingested" sentinel. Optional so a pre-change payload from a
+   *  cached client cannot read as stale. */
+  secondsSinceLastIngest?: number
+}
+
+/**
+ * An hour with no ground ingest means at least one relay tick was missed — the
+ * relay polls every 30 min (tools/waze-relay POLL_SECONDS), so the legitimate
+ * range between ticks is 0-30 min. Retune this WITH the cadence, or a healthy
+ * relay reads as dead (the watchdog's WD_SILENT_LIMIT has the same coupling).
+ */
+export const GROUND_STALE_AFTER_SEC = 3600
+
+/**
+ * Human age of the newest ground ingest.
+ *
+ * This is the difference between "no data" and "nothing to show": an empty map
+ * with a fresh feed means there are genuinely no units to draw, while an empty
+ * map with a stale feed means the data stopped arriving. Say "never" for the
+ * sentinel rather than printing 9999.
+ */
+export function formatDataAge(sec: number | undefined): string {
+  if (sec === undefined) return '—'
+  if (sec >= 9999) return 'never'
+  if (sec < 90) return 'now'
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`
+  const h = Math.floor(sec / 3600)
+  const m = Math.round((sec % 3600) / 60)
+  return m ? `${h}h ${m}m ago` : `${h}h ago`
 }
 
 // Helper functions

@@ -1,7 +1,7 @@
 'use client'
 
 import { Icon } from './icon'
-import { Switch, Slider } from './ui'
+import { Switch } from './ui'
 
 export interface Filters {
   aircraft: boolean
@@ -19,8 +19,6 @@ export interface Filters {
   kind_checkpoint: boolean
   kind_rbt: boolean
   kind_camera: boolean
-  radius: number
-  windowMin: number
 }
 
 interface FilterPanelProps {
@@ -166,32 +164,16 @@ export function FilterPanel({ filters, onFilterChange, onClose, embedded = false
         </ChipRow>
       </Section>
 
-      {/* Radius */}
-      <Section label="Radius">
-        <Slider
-          value={filters.radius}
-          min={1}
-          max={25}
-          step={1}
-          onChange={(v) => setKey('radius', v)}
-          label={`${filters.radius}nm`}
-        />
-      </Section>
-
-      {/* Time window */}
-      <Section label="Time window">
-        <ChipRow>
-          {[15, 30, 60, 120].map((m) => (
-            <ChipToggle
-              key={m}
-              active={filters.windowMin === m}
-              onClick={() => setKey('windowMin', m)}
-            >
-              {m}m
-            </ChipToggle>
-          ))}
-        </ChipRow>
-      </Section>
+      {/* No Radius and no Time-window control here, deliberately.
+          Both existed, both were wired to state that NOTHING read, so neither
+          changed anything on the map — a control that lies about what it does is
+          worse than no control. Report age is already bounded per kind (police
+          40 min, camera 90 min, counted from PUBLICATION — see
+          maxAgeMsForReport in lib/store.ts), and a radius filter would be
+          actively harmful: the map is statewide and its centre falls back to a
+          public default when a visitor has no GPS fix, so a radius anchored there
+          would hide most contacts and read as "the map is empty". If a radius is
+          ever wanted it belongs to an area the user explicitly picked. */}
     </div>
   )
 }
