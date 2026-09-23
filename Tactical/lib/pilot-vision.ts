@@ -120,6 +120,54 @@ export const SENSOR_ZOOM = 1
 export const EOIR_ZOOM_ESTIMATE = 50
 
 /**
+ * FIELD OF VIEW AND REACH ARE THE SAME LENS, AND YOU CANNOT HAVE BOTH.
+ *
+ * The width of the drawn cone came from the bearing UNCERTAINTY (sensor-pointing's
+ * spreadDeg) while its range came from the pod's acuity limit. Those are different
+ * quantities and were being used as if independent. A lens that resolves a 1 m target at
+ * 20 km is a long lens, and a long lens has a NARROW field — you do not get the widest
+ * field and the longest reach out of one objective. Holding both at once drew a fixed
+ * wing a 28-30 degree wedge 20 km long: about 460 km2 of painted ground, which is not how
+ * the crew sees and not how the instrument works.
+ *
+ * So the width is now capped by what the optics can hold while still reaching as far as
+ * the cone claims. The magnification needed for a range R is the inverse of
+ * acuityLimitedRangeM, and the field a zoom lens holds falls as the SQUARE ROOT of its
+ * magnification — the modelled middle, not a linear 1/zoom, because a real turret's wide
+ * field is 25-35 degrees and its narrow field 2-4, which spans about a factor of ten
+ * across a zoom range near fifty, and sqrt(50) ~ 7.
+ *
+ * WHAT THIS DOES NOT TOUCH, deliberately: a helicopter working low has a SHORT range, so
+ * the magnification it needs is near 1, the optics cap never binds, and its cone keeps the
+ * full uncertainty spread. At 1,000 ft a 16 degree orbit estimate stays exactly 16 degrees.
+ * The cap only starts biting when an aircraft claims a long reach — which is the case that
+ * was wrong.
+ */
+export const SENSOR_BASE_HALF_FOV_DEG: Record<VisionRole, number> = {
+  rotary: 35,
+  fixedwing: 25,
+}
+
+/** The magnification a given range requires, i.e. acuityLimitedRangeM solved for zoom. */
+export function requiredZoomForRangeM(
+  rangeM: number,
+  widthM: number = TARGET_WIDTH_M,
+  linePairs: number = LINE_PAIRS_FOR_TASK,
+): number {
+  if (!(rangeM > 0) || widthM <= 0 || linePairs <= 0) return 1
+  return (rangeM * linePairs * ELEMENTS_PER_LINE_PAIR * MAR_RAD) / widthM
+}
+
+/** The half-field a lens can hold while still resolving at that range. */
+export function opticsHalfFovDeg(role: VisionRole, rangeM: number, zoom: number): number {
+  const base = SENSOR_BASE_HALF_FOV_DEG[role]
+  // An unaided eye has no lens to trade, so nothing is capped.
+  if (!(zoom > 1)) return base
+  const needed = requiredZoomForRangeM(rangeM)
+  return base / Math.sqrt(Math.max(1, needed))
+}
+
+/**
  * Range cap when modelling the sensor rather than the eye. The 8 km default exists so a
  * high aircraft cannot paint a cone across the viewport; a pod's acuity-limited reach is
  * tens of km and is really bounded by haze and the horizon, so the pod gets a larger cap.
@@ -168,6 +216,9 @@ export interface VisionCone {
   halfAngleDeg: number
   /** Why the far edge stopped where it did — useful for tooltips and for arguing with it. */
   limitedBy: 'geometry' | 'acuity' | 'haze' | 'range-cap'
+  /** Why the WIDTH is what it is: the bearing uncertainty, or the optics that cannot hold
+   *  that field while reaching that far. Absent means the spread was used as given. */
+  widthLimitedBy?: 'spread' | 'optics'
 }
 
 export interface VisionOverrides {
@@ -240,7 +291,25 @@ export function visionConeForAltitude(
   // Band closed: whatever is visible starts beyond where anything can be made out.
   if (farM <= nearM) return null
 
-  return { nearM, farM, halfAngleDeg: o.halfFovDeg ?? profile?.halfFovDeg ?? HALF_FOV_DEG, limitedBy }
+  // Width. The requested angle is the bearing uncertainty; it is capped by what the optics
+  // can hold while still reaching this far (see SENSOR_BASE_HALF_FOV_DEG). With zoom = 1
+  // there is no lens to trade and the requested angle stands unchanged.
+  const requestedHalFov = o.halfFovDeg ?? profile?.halfFovDeg ?? HALF_FOV_DEG
+  const zoom = o.sensorZoom ?? SENSOR_ZOOM
+  const role: VisionRole = o.role ?? 'rotary'
+  let halfAngleDeg = requestedHalFov
+  let widthLimitedBy: VisionCone['widthLimitedBy']
+  if (zoom > 1) {
+    const optics = opticsHalfFovDeg(role, farM, zoom)
+    if (optics < requestedHalFov) {
+      halfAngleDeg = optics
+      widthLimitedBy = 'optics'
+    } else {
+      widthLimitedBy = 'spread'
+    }
+  }
+
+  return { nearM, farM, halfAngleDeg, limitedBy, widthLimitedBy }
 }
 
 /**
