@@ -312,7 +312,6 @@ export function VPMap({
     if (!headingMode) {
       map.dragRotate.disable()
       map.touchZoomRotate.disableRotation()
-      map.touchPitch?.disable?.()
       const pinNorth = () => {
         if (Math.abs(map.getBearing()) > 0.2) map.setBearing(0)
       }

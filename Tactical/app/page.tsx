@@ -235,6 +235,8 @@ export default function VPOverwatch() {
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lng: number } | null>(null)
   const [fitAllCounter, setFitAllCounter] = useState(0)
   const [recenterCounter, setRecenterCounter] = useState(0)
+  /** Set by an explicit location press so the next fix is used even if it is coarse. */
+  const forceFocusRef = useRef(false)
   const [relayTick, setRelayTick] = useState(liveData.relay.lastTickAgo)
   const [systemClock, setSystemClock] = useState(Date.now())
 
@@ -271,7 +273,11 @@ export default function VPOverwatch() {
     // lands the map in the wrong suburb; the dot still draws that fix, the camera just
     // waits for something real. 5 km is deliberately generous — it blocks an IP-level
     // answer without touching a phone GPS fix (metres) or desktop WiFi (hundreds of m).
-    if (p.accuracy > FIX_CAMERA_MAX_ACCURACY_M) return
+    // ...unless the operator just pressed the location control. A press is a direct request
+    // for their own position, so the next fix centres the map whatever its accuracy — a
+    // coarse fix that is honestly labelled beats a button that appears to do nothing.
+    if (p.accuracy > FIX_CAMERA_MAX_ACCURACY_M && !forceFocusRef.current) return
+    forceFocusRef.current = false
     setFocusTarget({ lat: p.lat, lng: p.lng })
   }, [followUser, clientLocation.position])
 
@@ -383,14 +389,32 @@ export default function VPOverwatch() {
     // Bump the recenter trigger so the map flies to the user on every press, even
     // when the GPS fix is unchanged (otherwise the focus dedup swallows it).
     setRecenterCounter((c) => c + 1)
+    forceFocusRef.current = true
     if (clientLocation.position) {
       setFocusTarget({ lat: clientLocation.position.lat, lng: clientLocation.position.lng })
+      forceFocusRef.current = false
     } else {
-      // No precise fix yet — re-arm geolocation and center on home meanwhile.
+      // No fix yet — ASK THE BROWSER. This used to centre on the home point "meanwhile",
+      // which is worse than doing nothing: the map flies somewhere plausible and the
+      // operator reads that as a successful fix. A request here is a user gesture, which is
+      // exactly when the browser will show its permission prompt.
       clientLocation.requestLocation()
-      setFocusTarget({ lat: HOME_LAT, lng: HOME_LNG })
     }
-  }, [clientLocation, HOME_LAT, HOME_LNG])
+  }, [clientLocation])
+
+  /**
+   * Pressing the location control means "show me where I am" — not "let me type my
+   * coordinates in". So it asks the browser first, and only falls back to manual entry when
+   * the browser genuinely cannot answer: permission denied, no geolocation at all (insecure
+   * origin, desktop with location services off). The manual path stays available, it just
+   * stops being the first thing an operator is shown when all they wanted was their position.
+   */
+  const onSetLocationPressed = useCallback(() => {
+    onRecenter()
+    if (clientLocation.permissionState === 'denied' || clientLocation.permissionState === 'unavailable') {
+      setShowLocationSetter(true)
+    }
+  }, [onRecenter, clientLocation.permissionState])
 
   const onFitAll = useCallback(() => {
     setFitAllCounter((c) => c + 1)
@@ -707,7 +731,7 @@ export default function VPOverwatch() {
               onLayers={cycleMapView}
               onFilters={() => { railTouched.current = true; setRailLeftOpen((v) => !v) }}
               onRecenter={onRecenter}
-              onSetLocation={gpsLive ? undefined : () => setShowLocationSetter(true)}
+              onSetLocation={gpsLive ? undefined : onSetLocationPressed}
               followUser={followUser}
               onFitAll={onFitAll}
               onRoute={() => setPickingDest(true)}
@@ -1121,7 +1145,7 @@ export default function VPOverwatch() {
             onLayers={cycleMapView}
             onFilters={() => setFilterOpen((v) => !v)}
             onRecenter={onRecenter}
-            onSetLocation={gpsLive ? undefined : () => setShowLocationSetter(true)}
+            onSetLocation={gpsLive ? undefined : onSetLocationPressed}
             followUser={followUser}
             onFitAll={onFitAll}
             onHeading={heading.supported ? onToggleHeading : undefined}

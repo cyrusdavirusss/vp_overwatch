@@ -39,7 +39,7 @@ export function FabCluster({
         </FabBtn>
       )}
       {onSetLocation && (
-        <FabBtn onClick={onSetLocation} label="Set Location">
+        <FabBtn onClick={onSetLocation} label="My Location">
           <Icon name="pin" size={18} />
         </FabBtn>
       )}
