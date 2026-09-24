@@ -302,15 +302,28 @@ export function VPMap({
       return
     }
 
+    // North-up, full stop — this is the DEFAULT state, and it used to be the one state
+    // where the gesture was left enabled. A two-finger twist turned the map and left it
+    // turned, taking every aircraft icon and its forward-vision cone with it: an operator
+    // who pinched to zoom with a thumb resting on the glass got a rotated tactical picture
+    // and no way to tell it had happened, because the HUD carries no bearing read-out.
+    // Rotation is now refused here for the same reason head-up refuses it, and the bearing
+    // is HELD rather than reset once, so nothing can leave it off north.
     if (!headingMode) {
-      if (!map.dragRotate.isEnabled()) map.dragRotate.enable()
-      map.touchZoomRotate.enableRotation()
-      map.setBearing(0)
-      return
+      map.dragRotate.disable()
+      map.touchZoomRotate.disableRotation()
+      map.touchPitch?.disable?.()
+      const pinNorth = () => {
+        if (Math.abs(map.getBearing()) > 0.2) map.setBearing(0)
+      }
+      pinNorth()
+      map.on('rotate', pinNorth)
+      return () => map.off('rotate', pinNorth)
     }
 
     map.dragRotate.disable()
     map.touchZoomRotate.disableRotation()
+    map.touchPitch?.disable?.()
 
     let raf = 0
     let applied = map.getBearing()
@@ -332,8 +345,8 @@ export function VPMap({
 
     return () => {
       cancelAnimationFrame(raf)
-      if (!map.dragRotate.isEnabled()) map.dragRotate.enable()
-      map.touchZoomRotate.enableRotation()
+      // Deliberately no re-enable: leaving head-up returns to north-up, it does not return
+      // to a map the user can twist by accident.
     }
   }, [headingMode, headingRef, northLock, ready])
   // Set when the map cannot be created at all — no WebGL context, or a context
