@@ -30,3 +30,7 @@ Tactical/scripts/__pycache__/
 
 # Claude Code tooling (skills/agents/config) — not app code
 .claude/
+
+# Secrets in tool env files (never commit) — added 2026-09-28 after a security pass
+tools/**/.env
+Tactical/assets/relay/.env
