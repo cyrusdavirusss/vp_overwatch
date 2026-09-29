@@ -539,6 +539,22 @@ const POLICE_CALLSIGNS: Record<string, string> = {
 }
 const FAST_POLICE_INTERVAL = 3_000
 
+/**
+ * The fast loop's cadence is ADAPTIVE, because ADSB.lol's limits are not fixed: their own
+ * docs say rate limits "are dynamic based on the environment load", and measured from this
+ * box the ceiling has ranged from about one request a second down to a refusal at one
+ * request every five seconds. A fixed 3s cadence is therefore the fastest the feed allows
+ * when it is quiet and is simply refused when it is busy — and since every refused poll
+ * costs the map a fix, the honest behaviour is to keep asking at the rate the upstream is
+ * actually granting: start at the 3s the map wants, back off while being refused, and creep
+ * back toward 3s once a clean run of polls says the limiter has relaxed.
+ */
+const FAST_POLL_MAX_MS = 24_000
+const FAST_POLL_CLEAN_BEFORE_RAMP = 4
+let fastPollIntervalMs = FAST_POLICE_INTERVAL
+let fastPollCleanPolls = 0
+let lastFastPollAt = 0
+
 // ── Pre-populate known airframes on startup ─────────────────────────────
 // Silent (not seen on ADSB) aircraft stay in the map with isActive=false —
 // frontend renders them as amber.
@@ -1209,11 +1225,11 @@ const pointPollStats = { adds: 0, slides: 0 }
  *
  * The first stand-down is SHORT on purpose. A refused tick costs one missed position, while
  * a long blackout costs every position in it — and a map with no fixes is the freezing,
- * jumping display the breaker was introduced to reduce. It doubles up to
- * ADSB_BACKOFF_MAX_MS, so a sustained refusal still backs right off rather than hammering.
+ * jumping display the breaker was introduced to reduce. The sustained request rate is the
+ * adaptive cadence's job (FAST_POLL_MAX_MS); this only absorbs the tick we just lost.
  */
-const ADSB_BACKOFF_START_MS = 20_000
-const ADSB_BACKOFF_MAX_MS = 2 * 60_000
+const ADSB_BACKOFF_START_MS = 8_000
+const ADSB_BACKOFF_MAX_MS = 8_000
 let adsbCooldownUntil = 0
 let adsbBackoffMs = ADSB_BACKOFF_START_MS
 
@@ -1242,7 +1258,7 @@ function reportFastLoop(): void {
   s.polls = s.ok = s.nofix = s.adds = s.slides = s.fetchFail = s.onGroundSkip = s.reachedAppend = 0
 }
 
-async function fetchPoliceAdsb(): Promise<{ aircraft: any[]; providerNow: number | null }> {
+async function fetchPoliceAdsb(): Promise<{ aircraft: any[]; providerNow: number | null; refused: boolean }> {
   const hexes = POLICE_HEXES.map((h) => h.toLowerCase()).join(',')
   // api.adsb.lol/v2/hex is the live, working endpoint. The old adsb.lol/v3 path
   // now 404s, so it's last-resort only (kept in case it returns one day).
@@ -1262,7 +1278,7 @@ async function fetchPoliceAdsb(): Promise<{ aircraft: any[]; providerNow: number
         adsbCooldownUntil = 0
         // The feed's own clock dates the positions in this payload, so the caller can
         // stamp each fix with when it was OBSERVED — see lib/adsb/observed-time.ts.
-        return { aircraft: data.ac, providerNow: num(data.now, 0) || null }
+        return { aircraft: data.ac, providerNow: num(data.now, 0) || null, refused: false }
       }
       fastLoopStats.fetchFail++
       fastLoopStats.lastErr = 'no ac array'
@@ -1273,21 +1289,45 @@ async function fetchPoliceAdsb(): Promise<{ aircraft: any[]; providerNow: number
         adsbCooldownUntil = Date.now() + adsbBackoffMs
         console.warn(`[ADSB.lol] rate limited — standing the fast loop down for ${Math.round(adsbBackoffMs / 1000)}s`)
         adsbBackoffMs = Math.min(adsbBackoffMs * 2, ADSB_BACKOFF_MAX_MS)
-        return { aircraft: [], providerNow: null }
+        return { aircraft: [], providerNow: null, refused: true }
       }
       // try next candidate
     }
   }
-  return { aircraft: [], providerNow: null }
+  return { aircraft: [], providerNow: null, refused: false }
 }
 
 async function pollFastPolice(): Promise<void> {
   // Refused recently: asking again immediately is what turns a 30-second limiter into a
   // ten-minute outage.
   if (Date.now() < adsbCooldownUntil) return
+  // ...and pace the loop at whatever the limiter is currently granting (see
+  // FAST_POLL_MAX_MS). The ticks skipped here are the difference between asking 20 times a
+  // minute and being refused, and asking at a rate that is actually served.
+  if (Date.now() - lastFastPollAt < fastPollIntervalMs) return
+  lastFastPollAt = Date.now()
   try {
     const s = getState()
-    const { aircraft, providerNow } = await fetchPoliceAdsb()
+    const { aircraft, providerNow, refused } = await fetchPoliceAdsb()
+    if (refused) {
+      fastPollCleanPolls = 0
+      const before = fastPollIntervalMs
+      fastPollIntervalMs = Math.min(fastPollIntervalMs * 2, FAST_POLL_MAX_MS)
+      if (fastPollIntervalMs !== before) {
+        console.log(`[ADSB.lol] refused — fast poll paced to every ${fastPollIntervalMs / 1000}s`)
+      }
+    } else {
+      // A served poll — even an empty one, which is what a parked fleet returns — means the
+      // endpoint is granting us requests, so climb back toward the map's preferred 3s.
+      fastPollCleanPolls++
+      if (fastPollCleanPolls >= FAST_POLL_CLEAN_BEFORE_RAMP) {
+        const before = fastPollIntervalMs
+        fastPollIntervalMs = Math.max(FAST_POLICE_INTERVAL, Math.round(fastPollIntervalMs / 2))
+        if (fastPollIntervalMs !== before) {
+          console.log(`[ADSB.lol] served again — fast poll back to every ${fastPollIntervalMs / 1000}s`)
+        }
+      }
+    }
     const now = Date.now()
 
     // Hexes that got a real POSITION fix this poll. The API often returns a hex
