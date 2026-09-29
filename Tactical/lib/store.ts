@@ -371,6 +371,7 @@ import {
 import { looksLanded, LANDED_ALT_FT, LOW_ALT_SILENT_LANDED_MS } from '@/lib/landing-heuristic'
 import { currentAreaWind, refreshAreaWind } from '@/lib/wind'
 import { appendTrackPoint, TRAIL_MAX_POINTS, isSilentContact, clampToCoverage } from '@/lib/data'
+import { observedFixMs } from '@/lib/adsb/observed-time'
 import { encryptField, decryptField } from '@/lib/auth/crypto'
 
 /** Project a full Aircraft record down to the telemetry Hermes briefs on. */
@@ -877,10 +878,15 @@ function httpGetOnce(url: string, timeout: number): Promise<{ status: number; bo
 
 /**
  * Fetch + parse JSON with rate-limit resilience. adsb.lol returns HTTP 429 with
- * an HTML body when throttled (~1 req/s); the old code JSON.parse'd that and
- * surfaced a misleading "Invalid JSON". We now inspect the status, honour
- * Retry-After, and retry 429/5xx a couple times with backoff before giving up
- * with a descriptive error (e.g. "HTTP 429 (rate limited)").
+ * an HTML body when throttled; the old code JSON.parse'd that and surfaced a
+ * misleading "Invalid JSON". We now inspect the status, honour Retry-After, and
+ * give transient 5xx a couple of attempts before giving up with a descriptive
+ * error (e.g. "HTTP 429 (rate limited)").
+ *
+ * A 429 is deliberately NOT retried here. Three attempts inside one tick is three times
+ * the load at exactly the moment we are being refused, which lengthens the refusal — and
+ * the caller has a cooldown that decides when the loop comes back. One refused tick costs
+ * one missed fix; it does not need three requests to establish.
  */
 async function fetchJsonHttps(url: string, timeout: number): Promise<any> {
   const maxAttempts = 3
@@ -898,12 +904,16 @@ async function fetchJsonHttps(url: string, timeout: number): Promise<any> {
       try { return JSON.parse(res.body) }
       catch { throw new Error('Invalid JSON (HTTP 200, non-JSON body)') }
     }
-    // Retryable: rate limit or transient upstream error.
-    if (res.status === 429 || res.status >= 500) {
-      lastErr = new Error(`HTTP ${res.status}${res.status === 429 ? ' (rate limited)' : ''}`)
+    // A 429 is the limiter answering our rate: report it and let the caller's cooldown
+    // decide when the loop returns. Transient 5xx is still worth a retry.
+    if (res.status === 429) {
+      const wait = res.retryAfter ? ` (retry after ${res.retryAfter}s)` : ''
+      throw new Error(`HTTP 429 (rate limited)${wait}`)
+    }
+    if (res.status >= 500) {
+      lastErr = new Error(`HTTP ${res.status}`)
       if (attempt < maxAttempts) {
-        const backoffMs = res.retryAfter ? Math.min(res.retryAfter * 1000, 5000) : 500 * attempt
-        await sleep(backoffMs)
+        await sleep(500 * attempt)
         continue
       }
     }
@@ -924,6 +934,10 @@ async function pollOpenSky(): Promise<void> {
 
     const data = await fetchJsonHttps(url, 15_000)
     const aircraft: any[] = data?.ac ?? []
+    // The feed's own clock dates the positions in this payload — see
+    // lib/adsb/observed-time.ts. Using our receive time instead would date every
+    // fix "now", which is how a 26-second-old position came to be drawn as current.
+    const providerNow = num(data?.now, 0) || null
 
     const now = Date.now()
     let count = 0
@@ -1033,7 +1047,8 @@ async function pollOpenSky(): Promise<void> {
 
       const tp: TrackPoint = {
         t: -timeAirborne,
-        ts: now,
+        // Observed, not received — see the fast loop's note and lib/adsb/observed-time.ts.
+        ts: observedFixMs(providerNow, ac.seen_pos, now),
         lat: latitude,
         lng: longitude,
         alt,
@@ -1055,6 +1070,8 @@ async function pollOpenSky(): Promise<void> {
       // Append (or slide) the breadcrumb point. The buffer covers a whole sortie
       // and is sampled on a minimum spacing — see appendTrackPoint().
       const track = appendTrackPoint(existing?.track, tp)
+      if (track.length > (existing?.track?.length ?? 0)) pointPollStats.adds++
+      else pointPollStats.slides++
 
       const aircraftObj: Aircraft = {
         id: hex,
@@ -1172,30 +1189,105 @@ async function pollOpenSky(): Promise<void> {
 // Try the ADSB.lol hex endpoints in order until one returns a usable payload.
 // Different deployments expose v3 (adsb.lol) or v2 (api.adsb.lol); we accept
 // whichever responds with an { ac: [...] } shape.
-async function fetchPoliceAdsb(): Promise<any[]> {
+/**
+ * Diagnostic for the fast police loop. The trail was measured advancing once every
+ * ~31 s while this loop is meant to poll every 3 s and cut a vertex every 5 s. Rather
+ * than guess which part of the path is losing, the loop counts its own behaviour and
+ * reports every 30 s: polls, fetches that returned usable positions, vertices added,
+ * vertices slid, and the last fetch error.
+ */
+const pointPollStats = { adds: 0, slides: 0 }
+/**
+ * Circuit breaker for ADSB.lol.
+ *
+ * The fast loop's whole job is freshness, so the instinct is to poll harder when the data
+ * looks stale — which is exactly the wrong move against a rate limit: the harder we ask,
+ * the longer we are refused. When the feed answers 429 the loop now stands down, backing
+ * off further each time, and says so in the log rather than silently reporting an empty
+ * sky. An empty feed and a refused feed look identical on the map; only one of them means
+ * "nothing is flying".
+ *
+ * The first stand-down is SHORT on purpose. A refused tick costs one missed position, while
+ * a long blackout costs every position in it — and a map with no fixes is the freezing,
+ * jumping display the breaker was introduced to reduce. It doubles up to
+ * ADSB_BACKOFF_MAX_MS, so a sustained refusal still backs right off rather than hammering.
+ */
+const ADSB_BACKOFF_START_MS = 20_000
+const ADSB_BACKOFF_MAX_MS = 2 * 60_000
+let adsbCooldownUntil = 0
+let adsbBackoffMs = ADSB_BACKOFF_START_MS
+
+function adsbRateLimited(err: unknown): boolean {
+  const m = err instanceof Error ? err.message : String(err)
+  return /429|rate limited/i.test(m)
+}
+
+const fastLoopStats = {
+  polls: 0, ok: 0, nofix: 0, adds: 0, slides: 0, fetchFail: 0,
+  onGroundSkip: 0, reachedAppend: 0, bodyErr: '',
+  lastErr: '', lastReport: 0,
+}
+const FAST_LOOP_REPORT_MS = 30_000
+
+function reportFastLoop(): void {
+  const s = fastLoopStats
+  if (!s.lastReport) { s.lastReport = Date.now(); return }
+  if (Date.now() - s.lastReport < FAST_LOOP_REPORT_MS) return
+  s.lastReport = Date.now()
+  console.log(
+    `[fast-loop] polls=${s.polls} positioned=${s.ok} nofix=${s.nofix} ` +
+    `onGround_skips=${s.onGroundSkip} reached_append=${s.reachedAppend} ` +
+    `vertices_added=${s.adds} slid=${s.slides} fetchFail=${s.fetchFail} lastErr=${s.lastErr || 'none'} bodyErr=${s.bodyErr || 'none'}`,
+  )
+  s.polls = s.ok = s.nofix = s.adds = s.slides = s.fetchFail = s.onGroundSkip = s.reachedAppend = 0
+}
+
+async function fetchPoliceAdsb(): Promise<{ aircraft: any[]; providerNow: number | null }> {
   const hexes = POLICE_HEXES.map((h) => h.toLowerCase()).join(',')
   // api.adsb.lol/v2/hex is the live, working endpoint. The old adsb.lol/v3 path
   // now 404s, so it's last-resort only (kept in case it returns one day).
+  // ONE endpoint. This used to try three in order, and two of them (v2/icao, and the v3
+  // path the comment below already records as dead) 404 on every single poll — three
+  // requests every 3 seconds, two of them guaranteed wasted. Against a free community feed
+  // that shares one rate limit per IP, the wasted two thirds is what pushed us into 429s
+  // and left an airborne helicopter with no position at all.
   const candidates = [
     `https://api.adsb.lol/v2/hex/${hexes}`,
-    `https://api.adsb.lol/v2/icao/${hexes}`,
-    `https://adsb.lol/v3/ac/hex/${hexes}`,
   ]
   for (const url of candidates) {
     try {
       const data = await fetchJsonHttps(url, 5_000)
-      if (Array.isArray(data?.ac)) return data.ac
-    } catch {
+      if (Array.isArray(data?.ac)) {
+        adsbBackoffMs = ADSB_BACKOFF_START_MS   // recovered: reset the ladder
+        adsbCooldownUntil = 0
+        // The feed's own clock dates the positions in this payload, so the caller can
+        // stamp each fix with when it was OBSERVED — see lib/adsb/observed-time.ts.
+        return { aircraft: data.ac, providerNow: num(data.now, 0) || null }
+      }
+      fastLoopStats.fetchFail++
+      fastLoopStats.lastErr = 'no ac array'
+    } catch (err) {
+      fastLoopStats.fetchFail++
+      fastLoopStats.lastErr = err instanceof Error ? err.message : String(err)
+      if (adsbRateLimited(err)) {
+        adsbCooldownUntil = Date.now() + adsbBackoffMs
+        console.warn(`[ADSB.lol] rate limited — standing the fast loop down for ${Math.round(adsbBackoffMs / 1000)}s`)
+        adsbBackoffMs = Math.min(adsbBackoffMs * 2, ADSB_BACKOFF_MAX_MS)
+        return { aircraft: [], providerNow: null }
+      }
       // try next candidate
     }
   }
-  return []
+  return { aircraft: [], providerNow: null }
 }
 
 async function pollFastPolice(): Promise<void> {
+  // Refused recently: asking again immediately is what turns a 30-second limiter into a
+  // ten-minute outage.
+  if (Date.now() < adsbCooldownUntil) return
   try {
     const s = getState()
-    const aircraft = await fetchPoliceAdsb()
+    const { aircraft, providerNow } = await fetchPoliceAdsb()
     const now = Date.now()
 
     // Hexes that got a real POSITION fix this poll. The API often returns a hex
@@ -1204,6 +1296,8 @@ async function pollFastPolice(): Promise<void> {
     // loop skips it (no valid position) AND the silent loop skips it (thinks it's
     // fresh), so it never updates and never drains/retires on fuel.
     const seenWithPos = new Set<string>()
+    fastLoopStats.polls++
+    if (!aircraft.length) fastLoopStats.nofix++
 
     for (const ac of aircraft) {
       const hex = (ac.hex as string)?.toUpperCase()
@@ -1213,6 +1307,7 @@ async function pollFastPolice(): Promise<void> {
       const longitude = ac.lon
       if (!validLatLng(latitude, longitude)) continue
       seenWithPos.add(hex)
+      fastLoopStats.ok++
 
       // alt_baro is the string "ground" when the contact is on the deck; num()
       // maps that (and any other non-numeric sentinel) to 0 so it can never
@@ -1236,6 +1331,7 @@ async function pollFastPolice(): Promise<void> {
       // opens/keeps a sortie. This is what stopped every parked heli from looking
       // like it was in flight.
       const onGround = looksLanded(alt, speed, existing?.track)
+      if (onGround) fastLoopStats.onGroundSkip++
       if (onGround) {
         if (existing) {
           if (existing.isActive) {
@@ -1311,7 +1407,12 @@ async function pollFastPolice(): Promise<void> {
 
       const tp: TrackPoint = {
         t: -effectiveTimeAirborne,
-        ts: now,
+        // When the POSITION was observed, not when this poll arrived. The feed re-serves its
+        // latest known position on every poll, so a 26-second-old fix stamped "now" told the
+        // map the aircraft was still 26 seconds back along its track — the marker then sat
+        // still and jumped when the next genuine position landed. See
+        // lib/adsb/observed-time.ts.
+        ts: observedFixMs(providerNow, ac.seen_pos, now),
         lat: latitude,
         lng: longitude,
         alt,
@@ -1330,7 +1431,9 @@ async function pollFastPolice(): Promise<void> {
       const historicalAvg = computeHistoricalAverage(hex, 42 * 60)
 
       // Append (or slide) the breadcrumb point — see appendTrackPoint().
-      const track = appendTrackPoint(existing?.track, tp)
+      fastLoopStats.reachedAppend++
+      const _ft = appendTrackPoint(existing?.track, tp)
+      const track = _ft
 
       s.aircraftMap.set(hex, {
         id: hex,
@@ -1463,8 +1566,10 @@ async function pollFastPolice(): Promise<void> {
     // Backstop for any non-fast known airframes (fast-police are handled above).
     pruneSilentKnown(now)
   } catch (err: any) {
+    fastLoopStats.bodyErr = 'CATCH: ' + (err instanceof Error ? err.message : String(err))
     console.warn(`[ADSB.lol fast-police] error: ${err.message}`)
   }
+  reportFastLoop()
 }
 
 // ── Startup: drain offline fuel and purge stale silents ──────────────────

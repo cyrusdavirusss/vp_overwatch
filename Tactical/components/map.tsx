@@ -116,6 +116,27 @@ const FOCUS_ZOOM = 10
 const AIRCRAFT_TWEEN_MS = 900
 
 /**
+ * How long a marker takes to absorb the difference between where it was being predicted
+ * and a fix that has just arrived.
+ *
+ * Markers used to SNAP to every new fix, which is where "it sits still and then jumps all
+ * over the place" came from: each fix carries an error — the aircraft turned while the
+ * position was in flight, and the feed's own position is often seconds old even when it
+ * arrives (seen_pos medians 0.3 s but a 90th percentile of 26 s in the live feed) — and a
+ * snap draws every one of those errors as a discontinuity. Gliding over this window keeps
+ * the drawn path continuous and still lands exactly on the fix.
+ */
+const FIX_SETTLE_MS = 1_200
+
+/**
+ * A correction larger than this is a genuine discontinuity — a bad fix, or a contact
+ * reappearing after a long gap — not prediction error. Gliding across it would draw a
+ * streak, so it snaps and the app's own stale/silent styling says what happened.
+ * 0.05° is about 5.5 km of latitude.
+ */
+const FIX_SETTLE_MAX_DEG = 0.05
+
+/**
  * How long a marker may keep being predicted forward from its last fix.
  *
  * The poll gap is 3s and polls do occasionally fail, so a marker needs some room — but
@@ -233,6 +254,14 @@ interface AircraftMarkerEntry {
   fix: { lat: number; lng: number; headingDeg: number | null; groundSpeedKt: number | null; ts: number } | null
   /** Live contacts are predicted forward; a silent ghost stays where it was last seen. */
   live: boolean
+  /**
+   * Where the marker was DRAWN when the current fix arrived, and when it arrived. The gap
+   * between that and the new fix glides away over FIX_SETTLE_MS instead of being snapped.
+   */
+  settle: { lat: number; lng: number; atMs: number; glide: boolean } | null
+  /** Heading as DRAWN, and where its glide started, so the body turns instead of twitching. */
+  hdgShown: number
+  hdgFrom: number
   /** The forward-visibility cone: rotated with heading, sized from altitude and zoom. */
   vision: HTMLDivElement | null
   /** Key of the cone currently drawn, so an unchanged cone is not rebuilt every frame. */
@@ -668,9 +697,24 @@ export function VPMap({
   // North-up and flat, so a tap lands where the operator expects: the two
   // sighting paths differ only in WHERE the pin lands, never in which way the
   // map happens to be facing while they place it.
+  const lastPickKeyRef = useRef<string | null>(null)
   useEffect(() => {
     const map = mapRef.current
-    if (!ready || !map || !pickTarget) return
+    if (!ready || !map || !pickTarget) { lastPickKeyRef.current = null; return }
+    // A target with neither an area nor a radius asks for NO framing: the operator places
+    // the sighting from the view they already have. Returning here is the difference
+    // between "zoom in and place it" and being pulled out to a state-wide view.
+    if (!pickTarget.scopeAreaM2 && !(pickTarget.rangeM > 0)) return
+    // Fly ONCE per placement target. Callers used to hand down a fresh object every GPS
+    // tick, which re-ran this effect and pulled the operator back to the wide view while
+    // they were trying to zoom in and place the sighting. Keyed on the target's meaning,
+    // so an identical re-arm is ignored and a genuinely new one still flies.
+    const key = [
+      pickTarget.lat.toFixed(6), pickTarget.lng.toFixed(6),
+      pickTarget.rangeM, pickTarget.scopeAreaM2 ?? '',
+    ].join(':')
+    if (lastPickKeyRef.current === key) return
+    lastPickKeyRef.current = key
     // Two framings, because they answer different questions. A unit is placed against a
     // radius ("show me 70 m"), which zoomForRadius clamps to a street-scale band so a
     // mis-tap costs a street number rather than a suburb. The helicopter sighting asks a
@@ -751,9 +795,12 @@ export function VPMap({
           const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
             .setLngLat(target)
             .addTo(map)
+          const hdg0 = Number.isFinite(pos.hdg) ? pos.hdg : 0
+          rot.style.transform = `rotate(${hdg0}deg)`
           entry = {
             marker, rot, callout, cur: target, raf: null, fix: null, live: false,
-            vision, coneKey: '', pointing: null, altM: null, hdg: 0, role: a.role, markerId: a.id,
+            settle: null, hdgShown: hdg0, hdgFrom: hdg0,
+            vision, coneKey: '', pointing: null, altM: null, hdg: hdg0, role: a.role, markerId: a.id,
           }
           aircraftMarkers.current.set(a.id, entry)
         }
@@ -774,7 +821,20 @@ export function VPMap({
         // snapped 30-90 degrees at a time. It now turns continuously, so the body can
         // follow the track without the jump, and the rotor spins inside this rotating
         // wrapper so the blades still read as spinning independently of the body.
-        entry.rot.style.transform = `rotate(${pos.hdg}deg)`
+        // The body follows the heading — but through the same glide as the position.
+        // A fix can honestly carry a heading 30–90° away from the previous one after a
+        // gap, and assigning it directly turns that into a twitch. Scrubbed and silent
+        // contacts are set outright: the glide only runs while the prediction loop is
+        // running, so a scrubbed view must never be left mid-turn.
+        const isLive = a.isActive === true
+        if (isLive && !scrubbing) {
+          entry.hdgFrom = entry.hdgShown
+        } else {
+          const shown = Number.isFinite(pos.hdg) ? pos.hdg : entry.hdgShown
+          entry.hdgShown = shown
+          entry.hdgFrom = shown
+          entry.rot.style.transform = `rotate(${shown}deg)`
+        }
         const markerEl = entry.marker.getElement() as HTMLDivElement
         markerEl.classList.toggle('selected', isSel)
         // Silent (off-ADS-B) aircraft read as a last-known/maybe-landed ghost,
@@ -808,13 +868,27 @@ export function VPMap({
           // fallback (it underestimates the age slightly, which is the safe direction).
           ts: pos.ts ?? Date.now(),
         }
-        entry.live = a.isActive === true
+        entry.live = isLive
         if (entry.live && !scrubbing) {
-          // Prediction owns the position now — a tween on top would fight it.
+          // Prediction owns the position now — a tween on top would fight it. So hand the
+          // marker a CORRECTION rather than teleporting it. This is the line that used to
+          // SNAP the marker to every fix, which is what made a late or slightly-wrong fix
+          // land as a visible jump; the gap between where the prediction had drawn the
+          // aircraft and the fix itself is now glided away by the frame loop.
           if (entry.raf) { cancelAnimationFrame(entry.raf); entry.raf = null }
-          entry.cur = target
-          entry.marker.setLngLat(target)
+          const dLat = entry.cur[1] - target[1]
+          const dLng = entry.cur[0] - target[0]
+          entry.settle = {
+            lat: entry.cur[1],
+            lng: entry.cur[0],
+            atMs: Date.now(),
+            // A bigger correction than this is a genuine discontinuity (a bad fix, or a
+            // contact back after a long gap), not prediction error: gliding across it
+            // would draw a streak, so it snaps and the stale/silent styling says why.
+            glide: Math.abs(dLat) <= FIX_SETTLE_MAX_DEG && Math.abs(dLng) <= FIX_SETTLE_MAX_DEG,
+          }
         } else {
+          entry.settle = null
           moveMarker(entry, target, !scrubbing)
         }
 
@@ -1069,6 +1143,8 @@ export function VPMap({
       const now = Date.now()
       for (const entry of aircraftMarkers.current.values()) {
         updateVision(entry, map)
+        // The body's turn runs here so it finishes even if the contact goes quiet mid-glide.
+        glideHeading(entry, now)
         if (!entry.live || !entry.fix) continue
         const ageSec = (now - entry.fix.ts) / 1000
         if (!(ageSec >= 0) || ageSec > AIRCRAFT_PREDICT_MAX_SEC) continue
@@ -1081,10 +1157,23 @@ export function VPMap({
           },
           ageSec,
         )
+        // Absorb the correction that came with the last fix. At k=1 the marker is still
+        // drawing where it was, so the first frame after a fix is continuous; by k=0 the
+        // offset has decayed to nothing and the marker sits exactly on the prediction.
+        let drawLat = p.lat
+        let drawLng = p.lng
+        if (entry.settle) {
+          const k = 1 - (now - entry.settle.atMs) / FIX_SETTLE_MS
+          if (k <= 0) entry.settle = null
+          else if (entry.settle.glide) {
+            drawLat += (entry.settle.lat - drawLat) * k
+            drawLng += (entry.settle.lng - drawLng) * k
+          }
+        }
         // Skip sub-pixel churn: MapLibre re-projects on every setLngLat, and a parked
         // aircraft would otherwise be pushed through that 60 times a second for nothing.
-        if (Math.abs(p.lng - entry.cur[0]) < 1e-6 && Math.abs(p.lat - entry.cur[1]) < 1e-6) continue
-        entry.cur = [p.lng, p.lat]
+        if (Math.abs(drawLng - entry.cur[0]) < 1e-6 && Math.abs(drawLat - entry.cur[1]) < 1e-6) continue
+        entry.cur = [drawLng, drawLat]
         entry.marker.setLngLat(entry.cur)
       }
     }
@@ -1398,6 +1487,24 @@ function updateVision(entry: AircraftMarkerEntry, map: maplibregl.Map) {
     idSuffix: entry.markerId,
     colour: inferred ? '45, 212, 191' : '148, 163, 184',
   })
+}
+
+/**
+ * Turn the body toward the fix's heading over the same window as the position glide.
+ *
+ * A heading arrives per fix and can honestly differ from the previous one by 30–90° after a
+ * gap; assigning it directly made the airframe twitch. Silent and scrubbed contacts never
+ * reach here — the data pass sets their rotation outright.
+ */
+function glideHeading(entry: AircraftMarkerEntry, now: number): void {
+  const target = entry.hdg
+  const remaining = ((target - entry.hdgShown + 540) % 360) - 180
+  if (Math.abs(remaining) < 0.1) return
+  const k = entry.settle ? Math.max(0, Math.min(1, (now - entry.settle.atMs) / FIX_SETTLE_MS)) : 1
+  const delta = ((target - entry.hdgFrom + 540) % 360) - 180
+  entry.hdgShown = k >= 1 ? target : (entry.hdgFrom + delta * k + 360) % 360
+  if (k >= 1) entry.hdgFrom = target
+  entry.rot.style.transform = `rotate(${entry.hdgShown}deg)`
 }
 
 // Move an aircraft marker, optionally tweening from its current visual
