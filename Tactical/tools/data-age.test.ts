@@ -6,7 +6,7 @@
 // the watchdog's WD_SILENT_LIMIT, which is why it gets a test.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatDataAge, GROUND_STALE_AFTER_SEC } from '../lib/data.ts'
+import { formatDataAge, GROUND_STALE_AFTER_SEC, groundFeedConnected } from '../lib/data.ts'
 
 // Deployed relay cadence (tools/waze-relay POLL_SECONDS).
 const RELAY_POLL_SECONDS = 1800
@@ -46,4 +46,16 @@ test('the stale threshold clears the relay cadence, so a healthy relay never rea
   }
   // One missed tick is exactly the condition the indicator exists to show.
   assert.ok(RELAY_POLL_SECONDS * 2 >= GROUND_STALE_AFTER_SEC, 'one missed tick must trip the indicator')
+})
+
+test('the feed still reads CONNECTED across a full relay cadence, and not past two', () => {
+  // Regression: the connected flag used to drop at 300s, so a healthy 30-minute feed spent
+  // 25 of every 30 minutes telling the visitor the map was OFFLINE.
+  assert.equal(groundFeedConnected(0), true)
+  assert.equal(groundFeedConnected(300), true)
+  assert.equal(groundFeedConnected(RELAY_POLL_SECONDS), true)
+  assert.equal(groundFeedConnected(GROUND_STALE_AFTER_SEC - 1), true)
+  // One missed tick is exactly what the flag exists to show.
+  assert.equal(groundFeedConnected(GROUND_STALE_AFTER_SEC), false)
+  assert.equal(groundFeedConnected(GROUND_STALE_AFTER_SEC + 1), false)
 })
