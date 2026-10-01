@@ -125,6 +125,20 @@ export interface Relay {
 export const GROUND_STALE_AFTER_SEC = 3600
 
 /**
+ * Whether the ground feed counts as CONNECTED at this ingest age.
+ *
+ * Same threshold, same reason, as the "feed Xm ago" chip: the relay polls every 30 min
+ * (tools/waze-relay POLL_SECONDS), so anything inside two ticks means the relay is doing
+ * its job. This used to be a bare 300s inside the store's ticker, which meant a perfectly
+ * healthy 30-minute feed read OFFLINE for 25 minutes out of every 30 — and because the
+ * site's own badge is `airborne OR connected`, every visitor was told the map was dead
+ * while it was serving fresh ground units. One predicate, one constant, no second copy.
+ */
+export function groundFeedConnected(ageSec: number): boolean {
+  return ageSec < GROUND_STALE_AFTER_SEC
+}
+
+/**
  * Human age of the newest ground ingest.
  *
  * This is the difference between "no data" and "nothing to show": an empty map

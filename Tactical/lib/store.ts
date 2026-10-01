@@ -370,7 +370,7 @@ import {
 } from '@/lib/fuel-model'
 import { looksLanded, LANDED_ALT_FT, LOW_ALT_SILENT_LANDED_MS } from '@/lib/landing-heuristic'
 import { currentAreaWind, refreshAreaWind } from '@/lib/wind'
-import { appendTrackPoint, TRAIL_MAX_POINTS, isSilentContact, clampToCoverage } from '@/lib/data'
+import { appendTrackPoint, TRAIL_MAX_POINTS, isSilentContact, clampToCoverage, groundFeedConnected } from '@/lib/data'
 import { observedFixMs } from '@/lib/adsb/observed-time'
 import { encryptField, decryptField } from '@/lib/auth/crypto'
 
@@ -1721,7 +1721,11 @@ function ensureTicker(): void {
   setInterval(() => {
     const s = getState()
     s.relay.lastTickAgo++
-    if (s.relay.lastTickAgo > 300) s.relay.connected = false
+    // Cadence-aware, NOT a bare 300s: the relay polls every 30 minutes, so a five-minute
+    // drop-off marked a healthy feed disconnected for 25 minutes out of every 30 and left
+    // the site's badge (airborne OR connected) reading OFFLINE while ground units were
+    // arriving. Ground freshness has ONE threshold — see groundFeedConnected.
+    if (!groundFeedConnected(s.relay.lastTickAgo)) s.relay.connected = false
   }, 1000)
 
   // Periodic disk snapshot (every 30s) — catches any state we didn't save inline
