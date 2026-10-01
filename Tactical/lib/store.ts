@@ -555,6 +555,26 @@ let fastPollIntervalMs = FAST_POLICE_INTERVAL
 let fastPollCleanPolls = 0
 let lastFastPollAt = 0
 
+/**
+ * Cadence floor while the fleet is on the deck.
+ *
+ * 3s is only worth paying for when there is something to track. Measured on this box, the
+ * parked hours were spent ramping 3s -> 6s -> 12s -> 24s and back with roughly half of every
+ * attempt refused, because a loop with nothing to look at was draining the shared per-IP
+ * budget the sortie an hour later would need. Parking at this cadence leaves the bucket
+ * full, so the 3s ramp is actually SERVED the moment a tracked airframe goes active.
+ * Worst-case takeoff detection latency is this value, and it applies only while every
+ * tracked contact is on the ground.
+ */
+const FAST_POLL_PARKED_MS = 8_000
+
+/** The fast loop's cadence floor: 3s with a tracked aircraft airborne, parked otherwise. */
+function fastPollFloorMs(): number {
+  const s = getState()
+  for (const ac of s.aircraftMap.values()) if (ac.isActive) return FAST_POLICE_INTERVAL
+  return FAST_POLL_PARKED_MS
+}
+
 // ── Pre-populate known airframes on startup ─────────────────────────────
 // Silent (not seen on ADSB) aircraft stay in the map with isActive=false —
 // frontend renders them as amber.
@@ -1312,7 +1332,8 @@ async function pollFastPolice(): Promise<void> {
     if (refused) {
       fastPollCleanPolls = 0
       const before = fastPollIntervalMs
-      fastPollIntervalMs = Math.min(fastPollIntervalMs * 2, FAST_POLL_MAX_MS)
+      const floor = fastPollFloorMs()
+      fastPollIntervalMs = Math.max(floor, Math.min(fastPollIntervalMs * 2, FAST_POLL_MAX_MS))
       if (fastPollIntervalMs !== before) {
         console.log(`[ADSB.lol] refused — fast poll paced to every ${fastPollIntervalMs / 1000}s`)
       }
@@ -1322,9 +1343,19 @@ async function pollFastPolice(): Promise<void> {
       fastPollCleanPolls++
       if (fastPollCleanPolls >= FAST_POLL_CLEAN_BEFORE_RAMP) {
         const before = fastPollIntervalMs
-        fastPollIntervalMs = Math.max(FAST_POLICE_INTERVAL, Math.round(fastPollIntervalMs / 2))
+        const floor = fastPollFloorMs()
+        const parked = floor === FAST_POLL_PARKED_MS
+        // Nothing airborne: PARK it rather than ramp back to 3s. This is the case that drained
+        // the shared budget all day — a 3s loop whose four police hexes returned nothing, paid
+        // for out of the requests a live sortie wants ten minutes later. Anything airborne
+        // goes straight to 3s; a refusal widens it again on the very next poll.
+        fastPollIntervalMs = parked ? FAST_POLL_PARKED_MS : floor
         if (fastPollIntervalMs !== before) {
-          console.log(`[ADSB.lol] served again — fast poll back to every ${fastPollIntervalMs / 1000}s`)
+          console.log(
+            parked
+              ? `[ADSB.lol] nothing airborne — fast poll parked at ${fastPollIntervalMs / 1000}s`
+              : `[ADSB.lol] airborne contact — fast poll back to every ${fastPollIntervalMs / 1000}s`,
+          )
         }
       }
     }
