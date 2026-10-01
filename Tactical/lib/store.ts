@@ -1947,7 +1947,11 @@ export function getStore() {
 
     /** Get relay status (includes watchdog seconds-since-last-ingest) */
     getRelay(): Relay & { secondsSinceLastIngest: number } {
-      return { ...s.relay, secondsSinceLastIngest: secondsSinceLastIngest() || 9999 }
+      // NOT `|| 9999`: 0 is falsy, so a FRESH ingest (0 seconds ago) was reported as the
+      // 9999 "never ingested" sentinel — for the first second after every tick the header
+      // read "no data" instead of "feed now". Only a non-finite age means never.
+      const age = secondsSinceLastIngest()
+      return { ...s.relay, secondsSinceLastIngest: Number.isFinite(age) ? age : 9999 }
     },
 
     /**
