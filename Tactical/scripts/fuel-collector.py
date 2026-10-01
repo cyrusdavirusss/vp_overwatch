@@ -73,8 +73,14 @@ GROUND_SPEED_KT = 20
 CONFIRM_OBS = 2
 
 # ── cadence / collection ────────────────────────────────────────────────────
-IDLE_POLL_SEC = 60
-FAST_POLL_SEC = 15
+# Both cadences are slower than the collection target needs, because this collector shares ONE
+# per-IP budget with the app's own fast loop and the MAP is what has to stay live. A 250nm
+# /v2/point sweep is the single most expensive request this box makes to adsb.lol, and at
+# once a minute (every 15s while airborne) it was spending budget the 3s police loop then had
+# to go without. 30s while airborne still yields hundreds of samples per flight — TARGET_FLIGHTS
+# is per aircraft, not per sample.
+IDLE_POLL_SEC = 120
+FAST_POLL_SEC = 30
 LOST_TIMEOUT_SEC = 180          # airborne + no update this long ⇒ close flight
 TARGET_FLIGHTS = 20             # per aircraft
 
