@@ -329,7 +329,7 @@ async function tick() {
     if (ONCE) process.exitCode = 1;
     return;
   }
-  if (!ok) { console.error(`[${when}] all ${TILES.length} tiles failed`); if (ONCE) process.exitCode = 1; return; }
+  if (!ok) { console.error(`[${when}] all ${TILES.length} tiles failed`); if (ONCE) process.exitCode = 1; return false; }
   if (sawAny) { quotaNoted = false; quotaPauseAnnouncedAt = 0; }
 
   const police = [...merged.values()];
@@ -342,15 +342,39 @@ async function tick() {
 
   if (!police.length) {
     console.log(`[${when}] no police alerts (${ok}/${TILES.length} tiles ok) | types: ${breakdown} | ${filterNote} | ${quotaSummary()}${creditSummary()}${truncated ? ` | ${truncated} tile(s) truncated` : ''}`);
-    return;
+    return true;
   }
   try {
     const res = await pushAlerts(police);
     console.log(`[${when}] ingested ${res.ingested ?? '?'}/${police.length} police (${ok}/${TILES.length} tiles, ${Date.now()-t0}ms) | types: ${breakdown} | ${filterNote} | ${quotaSummary()}${creditSummary()}${truncated ? ` | ${truncated} tile(s) truncated` : ''}`);
   } catch (e) { console.error(`[push] ${e.message}`); if (ONCE) process.exitCode = 1; }
+  return true;
 }
 
 console.log(`WazeAPI POLICE relay → ${API_URL} | country=${WAZEAPI_COUNTRY} | ${TILES.length} VIC tiles${ONCE?' (--once)':`, every ${POLL_SECONDS}s`}`);
 console.log(`  limit=${WAZEAPI_LIMIT} | filter=${FILTER.length ? JSON.stringify(FILTER) : 'off'} | tiles: ${TILES.map(t=>t[0]).join(', ')}`);
-await tick();
-if (!ONCE) setInterval(tick, POLL_SECONDS*1000);
+// A tick that fetched NOTHING is the VENDOR failing, not a quiet night: every box was
+// refused while this service stayed perfectly healthy. Waiting a whole cadence for the next
+// attempt can leave the map with no ground units for an hour, and in the Sep/Oct 2026
+// outage — WazeAPI's own /v1/alerts answering 502 to all 17 boxes for ~40 hours — the
+// failure was NOT uniform: single requests from a shell were being served in the middle of
+// it, so a second attempt five minutes later is worth the ~$0.03 it costs. Exactly ONE fast
+// follow-up, then back to the normal cadence, so a sustained outage cannot become a request
+// storm: the vendor bills per request.
+const DEAD_TICK_RETRY_MS = 5 * 60 * 1000;
+let deadTickRetried = false;
+
+async function loop() {
+  const fetched = await tick().catch((e) => { console.error(`[tick] ${e.message}`); return false; });
+  if (ONCE) return;
+  const dead = fetched === false;
+  if (!dead) deadTickRetried = false;
+  const fastRetry = dead && !deadTickRetried;
+  if (fastRetry) {
+    deadTickRetried = true;
+    console.error(`[retry] no box answered — retrying in ${DEAD_TICK_RETRY_MS / 60000} min instead of ${POLL_SECONDS / 60} min`);
+  }
+  setTimeout(loop, fastRetry ? DEAD_TICK_RETRY_MS : POLL_SECONDS * 1000);
+}
+
+loop();
