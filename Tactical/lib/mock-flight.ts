@@ -10,7 +10,9 @@
  * reason.
  *
  * Two airframes on purpose, because the two roles render AND model differently:
- *   rotary     a helicopter orbiting a point — steep look-down, wide scan, low altitude
+ *   rotary     a helicopter on a straight transit across the state, western border to the
+ *              far east — level flight over a long leg, which is the clearest way to
+ *              confirm that a rotary contact holds its orientation while it travels
  *   fixedwing  a King Air crossing the metro — forward flight, shallower look-down
  *
  * Positions are a pure function of the clock, so a refresh resumes where it left off and
@@ -27,10 +29,42 @@ const STEP_MS = 3_000
 const TRACK_SECONDS = 180
 
 const METRES_PER_DEG_LAT = 111_320
-const ORBIT_CENTRE = { lat: -37.8136, lng: 144.9631 } // Melbourne CBD
-const ORBIT_RADIUS_M = 2_000
-const ORBIT_PERIOD_S = 300 // 5 minutes per lap — a plausible surveillance orbit
-const ORBIT_ALT_FT = 1_200
+
+/**
+ * ── The helicopter's cross-state transit ────────────────────────────────────────────────
+ * The rotary fixture used to orbit a 2 km circle over the CBD, which meant it barely moved
+ * on screen — a measured 45-second trace covered **5px**. That made it useless for the one
+ * thing a rotary contact most needs reviewing on: how it behaves IN FLIGHT, above all that
+ * its orientation stays fixed while it travels.
+ *
+ * It now flies a straight transit across Victoria, from the western border to the far east.
+ *
+ * Speed and altitude are deliberately REAL-WORLD PLAUSIBLE rather than tuned for the eye.
+ * 150 kt (a realistic transit cruise for an AW139) over ~790 km is a ~2h50m crossing, which
+ * at the app's default state-wide zoom is roughly 11 px a minute — visible without being
+ * absurd, and plainly moving once you zoom in. An earlier draft sped the fixture up to make
+ * the crossing watchable in minutes; that was rejected because the callout reads the
+ * fixture's own speed, so a compressed clock would display a helicopter doing jet speeds.
+ * A labelled mock is allowed to be synthetic, but it should not read as a nonsense airframe.
+ */
+const TRANSIT_FROM = { lat: -37.20, lng: 141.00 } // western border
+const TRANSIT_TO = { lat: -37.80, lng: 149.90 }   // far east, past Orbost
+const TRANSIT_SPEED_KT = 150
+const TRANSIT_ALT_FT = 1_500
+
+/**
+ * Derived rather than chosen: the period is however long the leg takes at that speed, so the
+ * heading, the speed the callout shows, and the ground actually covered all agree with one
+ * another instead of drifting apart.
+ */
+const TRANSIT_PERIOD_S = (() => {
+  const dLat = (TRANSIT_TO.lat - TRANSIT_FROM.lat) * METRES_PER_DEG_LAT
+  const dLng =
+    (TRANSIT_TO.lng - TRANSIT_FROM.lng) *
+    METRES_PER_DEG_LAT *
+    Math.cos((((TRANSIT_FROM.lat + TRANSIT_TO.lat) / 2) * Math.PI) / 180)
+  return Math.hypot(dLat, dLng) / ((TRANSIT_SPEED_KT * 1852) / 3600)
+})()
 
 const LEG_FROM = { lat: -37.72, lng: 144.72 }
 const LEG_TO = { lat: -38.05, lng: 145.24 }
@@ -40,9 +74,6 @@ const LEG_PERIOD_S = 600 // time to fly the leg once, then it repeats
 // the model but show nothing. At 6,000 ft both airframes render a cone, so the two
 // profiles can actually be compared side by side.
 const LEG_ALT_FT = 6_000
-
-const mToLat = (m: number) => m / METRES_PER_DEG_LAT
-const mToLng = (m: number, lat: number) => m / (METRES_PER_DEG_LAT * Math.cos((lat * Math.PI) / 180))
 
 /** Bearing from A to B, degrees clockwise from north. */
 function bearingDeg(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -54,15 +85,21 @@ function bearingDeg(a: { lat: number; lng: number }, b: { lat: number; lng: numb
   return (Math.atan2(y, x) * 180) / Math.PI
 }
 
-/** The helicopter's position on its orbit at a given moment. */
-function orbitAt(nowMs: number) {
-  const t = (nowMs / 1000) % ORBIT_PERIOD_S
-  const θ = (t / ORBIT_PERIOD_S) * 2 * Math.PI
-  const lat = ORBIT_CENTRE.lat + mToLat(ORBIT_RADIUS_M * Math.cos(θ))
-  const lng = ORBIT_CENTRE.lng + mToLng(ORBIT_RADIUS_M * Math.sin(θ), ORBIT_CENTRE.lat)
-  // Tangent to the circle: the aircraft flies across its own radius.
-  const heading = ((((θ * 180) / Math.PI) + 90) % 360 + 360) % 360
-  return { lat, lng, heading, speedKt: 90, altFt: ORBIT_ALT_FT }
+/** The helicopter's position along its cross-state transit at a given moment. */
+function transitAt(nowMs: number) {
+  const frac = ((nowMs / 1000) % TRANSIT_PERIOD_S) / TRANSIT_PERIOD_S
+  const lat = TRANSIT_FROM.lat + (TRANSIT_TO.lat - TRANSIT_FROM.lat) * frac
+  const lng = TRANSIT_FROM.lng + (TRANSIT_TO.lng - TRANSIT_FROM.lng) * frac
+  // A straight leg has ONE heading for its whole length, which is exactly what makes this
+  // useful for reviewing a fixed orientation: if the glyph ever turns, it turned for some
+  // other reason and that is a bug, not the track.
+  return {
+    lat,
+    lng,
+    heading: bearingDeg(TRANSIT_FROM, TRANSIT_TO),
+    speedKt: TRANSIT_SPEED_KT,
+    altFt: TRANSIT_ALT_FT,
+  }
 }
 
 /** The fixed wing's position along its leg at a given moment. */
@@ -125,12 +162,12 @@ function base(id: string, hex: string, registration: string, callsign: string, l
  * The two mock aircraft at a given moment. Pure: same `nowMs` in, same aircraft out.
  */
 export function mockAircraft(nowMs: number = Date.now()): Aircraft[] {
-  const heliPos = orbitAt(nowMs)
+  const heliPos = transitAt(nowMs)
   const wingPos = legAt(nowMs)
   return [
     base('mock-rotary', 'MOCK01', 'MOCK-01', 'MOCK1', 'MOCK AW139 (review only)',
       'rotary', 'AW139', 'Leonardo AW139 (mock)', nowMs, heliPos,
-      trackFor(nowMs, orbitAt), 274, 62),
+      trackFor(nowMs, transitAt), 274, 62),
     base('mock-fixedwing', 'MOCK02', 'MOCK-02', 'MOCK2', 'MOCK King Air (review only)',
       'fixedwing', 'B350', 'Beechcraft King Air 350ER (mock)', nowMs, wingPos,
       trackFor(nowMs, legAt), 690, 78),

@@ -123,6 +123,16 @@ independently, but the airframe itself stays put: at a three-second poll the hea
 and a helicopter that wheeled around on every refresh read as twitchy rather than
 informative. Position and the sensor cone are what you actually read.
 
+**The review fixture now crosses the state.** The `?mock=1` helicopter used to orbit a 2 km
+circle over the CBD, which meant it barely moved: a measured 45-second trace covered 5px, so
+it could not demonstrate anything about in-flight behaviour. It now flies a straight transit
+from the western border to the far east — ~790 km at a real-world-plausible 150 kt and
+1,500 ft, roughly a 2h50m crossing. The fixture is opt-in behind the query flag and labelled
+`MOCK … (review only)` with the operator shown as `MOCK — not real traffic`, exactly as
+before; nothing about this reaches a normal visitor. Speed and altitude were deliberately NOT
+tuned for the eye, because the callout displays the fixture's own speed and a compressed clock
+would show a helicopter doing jet speeds.
+
 **One header on every platform.** The header used to shed groups at a breakpoint, so a phone
 and a desktop rendered genuinely different headers — blown out on one, too small on the other.
 It now renders the SAME row everywhere and measures itself against the width it is given, so
@@ -181,13 +191,20 @@ unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only res
 - **Header readability at the small end is a judgement call.** Base text is 15px and the fit
   scale lands around 0.47–0.61 on a 320–412px phone, so effective text is roughly 7–9px
   there. Deliberate and consistent, but it is the tightest constraint in the layout.
-- **The helicopter fix is verified by construction, not by watching one move.** A rotary
-  contact's rotation is pinned before any heading is applied, so it cannot turn by
-  definition, and a 23-sample/45-second trace of the mock rotary contact held exactly one
-  rotation value (identity). But that contact travelled only **5px** in the window, so the
-  "no rotation WHILE MOVING" half of the claim is NOT demonstrated against real motion. An
-  earlier commit message states it as verified against a moving contact; that overstates the
-  evidence. Re-check against a live sighting that actually crosses the map.
+- **OpenSky is returning no Victorian traffic at all right now.** Measured with the app's own
+  credentials: the configured Melbourne box AND a whole-of-Victoria box both returned **0**
+  aircraft, while all of Australia returned 18 — not one of them in Victoria. The app is
+  polling correctly; the source is simply empty here. Worth knowing before diagnosing an empty
+  map as a fault. Separately, the configured box is Melbourne metro
+  (`144.0–145.8 / -38.6–-37.2`), not the state, so traffic outside it would not appear even if
+  it existed.
+- **The helicopter fix is verified against the fixture, not against real traffic.** A rotary
+  contact's rotation is pinned before any heading is applied, so it cannot turn by definition.
+  The review fixture now flies a straight cross-state leg, and a 19-sample / 90-second trace
+  moved 15.8px along that line (net drift 15.0px, so it did not loop back) while holding
+  exactly one rotation value — so "no rotation WHILE MOVING" now has real displacement behind
+  it, which the old 2 km orbit could not provide (5px in 45s). What is still unverified is the
+  same behaviour on live ADS-B traffic, and there is none to test against.
 - **A sighting published without coordinates still falls back to the home point.** The
   publisher uses `coords?.lat ?? userPosition.lat`, and `userPosition` resolves to the home
   point when there is no fix. In practice the operator taps the map so coordinates exist, but
