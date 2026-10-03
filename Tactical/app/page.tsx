@@ -71,6 +71,44 @@ export default function VPOverwatch() {
   // gesture-triggered rather than pure orientation-driven.
   const immersion = useImmersiveLandscape()
 
+  /**
+   * The chrome's REAL rendered height, measured rather than assumed.
+   *
+   * The map sits below the chrome, and that offset used to be the constant
+   * MOBILE_STRIP_H + MOBILE_ONAIR_H. That was only correct while both were fixed. Now
+   * the header scales itself to the width it is given (--vp-header-fit) and in
+   * landscape the whole chrome is scaled to half (--vp-chrome-scale), so the stack's
+   * height varies with the device and the orientation. A stale constant would either
+   * leave a band of map hidden behind the chrome or a gap below it.
+   *
+   * Declared HERE, above the desktop early-return, because it is a hook: the app
+   * switches between the desktop and mobile layouts on resize, and a hook placed after
+   * that return would change the hook order between renders.
+   *
+   * getBoundingClientRect, not offsetHeight — it reports the RENDERED height, which is
+   * what the map has to clear once zoom is in play.
+   */
+  const chromeRef = useRef<HTMLDivElement | null>(null)
+  const [chromeHeight, setChromeHeight] = useState(76)
+  useEffect(() => {
+    const el = chromeRef.current
+    if (!el) return
+    const measure = () => setChromeHeight(el.getBoundingClientRect().height)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  // The header's fit scale settles in its own layout pass, which can change the
+  // stack's height without any resize event; one frame later keeps the map in step.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      const el = chromeRef.current
+      if (el) setChromeHeight(el.getBoundingClientRect().height)
+    })
+    return () => cancelAnimationFrame(id)
+  }, [immersion.immersive])
+
   // ── Head-up mode ────────────────────────────────────────────────────────────
   // Rotate the map to the direction the phone is facing. The compass has to be
   // started from a tap: iOS refuses motion permission requested outside a user
@@ -670,6 +708,7 @@ export default function VPOverwatch() {
   const overwatchLive = overwatchOn || overwatchAvailable
   const arLaunch = (
     <button
+      className="vp-chrome50"
       onClick={toggleOverwatch}
       disabled={!overwatchLive}
       aria-label={
@@ -1106,7 +1145,10 @@ export default function VPOverwatch() {
   const MOBILE_SCRUB_H = 96
   const MAP_H = screenDims.h - MOBILE_STRIP_H - MOBILE_ONAIR_H - MOBILE_SCRUB_H
   // Collapsed, the chrome leaves the viewport entirely and the map starts at 0.
-  const chromeH = chromeCollapsed ? 0 : MOBILE_STRIP_H + MOBILE_ONAIR_H
+  // Otherwise the map starts at the chrome's MEASURED height rather than a constant —
+  // the header fits itself to the width and landscape halves the whole stack, so the
+  // offset moves with the device. See chromeHeight above.
+  const chromeH = chromeCollapsed ? 0 : Math.round(chromeHeight)
 
   return (
     <div className={immersion.immersive
@@ -1127,10 +1169,11 @@ export default function VPOverwatch() {
             away and the map takes the space back — it resizes itself through the
             ResizeObserver in components/map.tsx. */}
         <div
+          ref={chromeRef}
           className="vp-chrome absolute left-0 right-0 top-0 z-20"
           style={{
             transform: chromeCollapsed
-              ? `translateY(-${MOBILE_STRIP_H + MOBILE_ONAIR_H}px)`
+              ? `translateY(-${Math.round(chromeHeight)}px)`
               : 'none',
           }}
         >
@@ -1171,36 +1214,11 @@ export default function VPOverwatch() {
           </svg>
         </button>
 
-        {/* Landscape immersion control — the only chrome left once the phone is
-            sideways. Everything else is hidden by CSS. The fullscreen button
-            rides along with the reveal because the Fullscreen API requires a
-            gesture: it cannot be triggered by the rotation itself. */}
-        {immersion.immersive && (
-          <div className="vp-imm-handle">
-            <button
-              onClick={immersion.toggleReveal}
-              aria-label={immersion.revealed ? 'Hide controls' : 'Show controls'}
-              title={immersion.revealed ? 'Hide controls' : 'Show controls'}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                {immersion.revealed ? <path d="M6 15l6-6 6 6" /> : <path d="M6 9l6 6 6-6" />}
-              </svg>
-            </button>
-            {immersion.revealed && (
-              <button
-                onClick={immersion.toggleFullscreen}
-                aria-label={immersion.fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-                title={immersion.fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  {immersion.fullscreen
-                    ? <path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M15 21h4a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4" />
-                    : <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />}
-                </svg>
-              </button>
-            )}
-          </div>
-        )}
+        {/* The landscape immersion TAB used to live here. It existed only to bring
+            back chrome that landscape HID; landscape now scales the chrome to half
+            instead of hiding any of it, so there is nothing to bring back and the
+            tab is gone. `immersion.immersive` still drives that scale — through the
+            data-vp-immersive attribute and the CSS in vp-theme.css. */}
 
         <div
           className="vp-map-area absolute left-0 right-0"

@@ -27,7 +27,7 @@
  * Requires vp-theme.css to be imported in layout.tsx.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { PwaInstall } from "@/components/pwa-install";
 import { formatDataAge, GROUND_STALE_AFTER_SEC } from "@/lib/data";
 
@@ -49,6 +49,14 @@ interface VPHeaderProps {
    */
   groundAgeSec?: number;
   onSubscribeClick: () => void;
+  /**
+   * Fly the map to the closest aircraft. The Aircraft tile is the natural place for it:
+   * the tile already reports how many are tracked, so tapping it to go to the nearest one
+   * is the obvious reading of the control.
+   */
+  onNearestAircraft?: () => void;
+  /** Fly the map to the closest ground contact — the same behaviour on the GROUND tile. */
+  onNearestGround?: () => void;
 }
 
 /** Melbourne wall clock. */
@@ -188,15 +196,64 @@ export function VPHeader({
   lastUpdate,
   groundAgeSec,
   onSubscribeClick,
+  onNearestAircraft,
+  onNearestGround,
 }: VPHeaderProps) {
   // Three distinguishable states — red stays reserved for a genuinely lost
   // signal, so an overnight lull ("no aircraft up") reads as amber, not alarm.
   const liveState = isLostSignal ? "lost" : isConnected ? "online" : "standby";
   const liveLabel = isLostSignal ? "LOST SIGNAL" : isConnected ? "ONLINE" : "OFFLINE";
 
+  /**
+   * Fit the whole header into the width it is given, whatever device that is.
+   *
+   * The header is a single row of fixed-size groups, and the same groups are
+   * rendered everywhere (the responsive rules that used to hide some of them below
+   * 900px are gone). What changes per device is only the SCALE, so every platform
+   * shows the same header with the same content, always in full — which is the
+   * thing that was wrong before: on a narrow phone the row overflowed and read as
+   * "blown out", and on a wide one the media query stripped groups out, so it read
+   * as a different, smaller header.
+   *
+   * Measured at scale 1 every time, because reading the natural width while a
+   * scale is already applied would measure the scaled result and ratchet down on
+   * each pass.
+   */
+  const headerRef = useRef<HTMLElement | null>(null);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    const inner = innerRef.current;
+    if (!header || !inner) return;
+
+    const fit = () => {
+      header.style.setProperty("--vp-header-fit", "1");
+      // Force layout so the measurement below reads the unscaled row.
+      void inner.offsetWidth;
+      const natural = inner.scrollWidth;
+      const available = inner.clientWidth;
+      if (!natural || !available) return;
+      const scale = natural > available ? available / natural : 1;
+      header.style.setProperty("--vp-header-fit", String(scale));
+    };
+
+    fit();
+    // ResizeObserver rather than window.resize: this also has to react to the
+    // rails changing width and to the browser's own chrome sliding in and out,
+    // and Android fires no window resize for the latter.
+    const ro = new ResizeObserver(fit);
+    ro.observe(header);
+    window.addEventListener("orientationchange", fit);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("orientationchange", fit);
+    };
+  }, []);
+
   return (
-    <header className={`vp-header ${isLostSignal ? "vp-lost" : ""}`}>
-      <div className="vp-header-inner">
+    <header ref={headerRef} className={`vp-header ${isLostSignal ? "vp-lost" : ""}`}>
+      <div ref={innerRef} className="vp-header-inner">
         {/* Brand */}
         <div className="vp-brand">
           <div className="vp-wordmark">VP·OVERWATCH</div>
@@ -217,7 +274,16 @@ export function VPHeader({
         <span className="vp-header-div" />
 
         {/* Aircraft */}
-        <div className="vp-stat">
+        <div
+          className="vp-stat"
+          onClick={onNearestAircraft}
+          role={onNearestAircraft ? "button" : undefined}
+          tabIndex={onNearestAircraft ? 0 : undefined}
+          onKeyDown={(e) => { if (onNearestAircraft && e.key === "Enter") onNearestAircraft(); }}
+          title={onNearestAircraft ? "Show the closest aircraft" : undefined}
+          aria-label={onNearestAircraft ? "Aircraft tracked — tap for the closest" : undefined}
+          style={onNearestAircraft ? { cursor: "pointer" } : undefined}
+        >
           <PlaneIcon />
           <div className="vp-stat-body">
             <span className="vp-stat-label">Aircraft</span>
@@ -231,7 +297,16 @@ export function VPHeader({
         </div>
 
         {/* Ground */}
-        <div className="vp-stat">
+        <div
+          className="vp-stat"
+          onClick={onNearestGround}
+          role={onNearestGround ? "button" : undefined}
+          tabIndex={onNearestGround ? 0 : undefined}
+          onKeyDown={(e) => { if (onNearestGround && e.key === "Enter") onNearestGround(); }}
+          title={onNearestGround ? "Show the closest ground contact" : undefined}
+          aria-label={onNearestGround ? "Ground contacts — tap for the closest" : undefined}
+          style={onNearestGround ? { cursor: "pointer" } : undefined}
+        >
           <GroundIcon />
           <div className="vp-stat-body">
             <span className="vp-stat-label">Ground</span>
