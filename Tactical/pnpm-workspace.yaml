@@ -6,3 +6,12 @@ allowBuilds:
   # (Next 16 renders with @next/swc, not this). Explicitly deny it rather than
   # leave it unlisted, which pnpm treats as a hard error.
   '@swc/core': false
+  # unrs-resolver is a dev-only dependency of eslint-config-next, pulled in when eslint
+  # was added to fix `npm run lint` (Next 16 removed the `next lint` subcommand). Its
+  # postinstall fetches a prebuilt native binary; it is only ever a lint-time module
+  # resolver — nothing in the build or the server runtime touches it — and ESLint runs
+  # correctly with the script denied, verified by running the full lint afterwards.
+  # Denied explicitly for the same reason as @swc/core above: a package left unlisted here
+  # is a hard install error (ERR_PNPM_IGNORED_BUILDS), which is what failed the deploy
+  # that first tried to add eslint.
+  unrs-resolver: false
