@@ -54,7 +54,7 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3
       twilio:
-        specifier: ^6.1.2
+        specifier: ^6.0.2
         version: 6.1.2
       web-push:
         specifier: ^3.6.7
