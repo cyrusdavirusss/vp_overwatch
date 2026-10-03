@@ -55,6 +55,12 @@ export interface VPMapProps {
    * own `kind` — a caller cannot silently stand a police car on a speed camera.
    */
   overwatchReportId?: string | null
+  /**
+   * Overwatch targeting an AIRCRAFT instead of a ground report. Same satellite basemap and
+   * pitch, but the camera holds a FIXED bearing and follows the contact as it travels — there
+   * is no orbit, because the subject is already moving.
+   */
+  overwatchAircraftId?: string | null
   onSelectAircraft: (id: string | null) => void
   onSelectReport: (id: string | null) => void
   scrubT: number
@@ -309,6 +315,7 @@ export function VPMap({
   selectedAircraftId,
   selectedReportId,
   overwatchReportId = null,
+  overwatchAircraftId = null,
   onSelectAircraft,
   onSelectReport,
   scrubT,
@@ -361,7 +368,7 @@ export function VPMap({
     // Overwatch easeTo: the centre arrived while the pitch stalled at 1.2° instead
     // of the intended 58° and the zoom never moved. Rotation is therefore handed to
     // the orbit for as long as Overwatch is up, and the hold returns when it closes.
-    if (overwatchReportId && !northLock && !headingMode) {
+    if ((overwatchReportId || overwatchAircraftId) && !northLock && !headingMode) {
       map.dragRotate.enable()
       map.touchZoomRotate.enableRotation()
       return
@@ -412,7 +419,7 @@ export function VPMap({
       // Deliberately no re-enable: leaving head-up returns to north-up, it does not return
       // to a map the user can twist by accident.
     }
-  }, [headingMode, headingRef, northLock, ready, overwatchReportId])
+  }, [headingMode, headingRef, northLock, ready, overwatchReportId, overwatchAircraftId])
   // Set when the map cannot be created at all — no WebGL context, or a context
   // lost mid-session. Without this the throw escapes to the page-level error
   // boundary and the entire app becomes "This page couldn't load", so a client
@@ -1236,6 +1243,56 @@ export function VPMap({
       map.setPitch(0)
     }
   }, [ready, overwatchReportId, northLock])
+
+  /**
+   * ── Overwatch on an AIRCRAFT: a FIXED view that follows the contact ─────────────────────
+   *
+   * Deliberately NOT an orbit. A ground report is stationary, so sweeping a circle around it
+   * shows it from every side. An aircraft is already travelling, and orbiting something that is
+   * itself moving is two motions fighting each other — the operator ends up chasing a subject
+   * that never stays framed. So the bearing is pinned north and the camera simply keeps the
+   * contact centred, which is what makes the satellite ground beneath it readable.
+   *
+   * Position comes from the marker's own `cur` — the same interpolated point the prediction loop
+   * draws the icon at — so the camera moves as smoothly as the aircraft does instead of stepping
+   * once per poll.
+   *
+   * The camera does not hand control back while this is open: a follow view that also let you
+   * pan would drift off the subject and stop meaning anything. Exiting returns it.
+   */
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map || !overwatchAircraftId) return
+
+    // Set rather than eased, so an in-flight camera animation cannot fight the follow — the
+    // same reasoning as the orbit's exit flatten and the orbit's own start.
+    map.setBearing(0)
+    map.setPitch(OVERWATCH_PITCH)
+
+    let raf: number | null = null
+    const tick = () => {
+      const entry = aircraftMarkers.current.get(overwatchAircraftId)
+      const pos = entry?.cur
+      if (pos && Number.isFinite(pos[0]) && Number.isFinite(pos[1])) {
+        // Only issue a camera command when the contact has actually drifted. A stationary one
+        // would otherwise cancel an unrelated animation every single frame.
+        const c = map.getCenter()
+        if (Math.abs(c.lng - pos[0]) > 1e-6 || Math.abs(c.lat - pos[1]) > 1e-6) {
+          map.setCenter([pos[0], pos[1]])
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf)
+      // Flatten immediately on the way out, for the same reason the orbit does: an eased
+      // flatten gets cancelled by the next camera command, an instant one cannot be.
+      map.setPitch(0)
+      map.setBearing(0)
+    }
+  }, [ready, overwatchAircraftId])
 
   useEffect(() => {
     const map = mapRef.current

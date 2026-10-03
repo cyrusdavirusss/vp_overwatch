@@ -402,6 +402,19 @@ export default function VPOverwatch() {
    * right hollow model from the report's own kind.
    */
   const [overwatchReportId, setOverwatchReportId] = useState<string | null>(null)
+  /**
+   * Overwatch can also target an AIRCRAFT.
+   *
+   * It used to accept a ground report only. Launching it with a helicopter selected therefore
+   * fell through to `filteredReports[0]` and silently orbited the top-ranked speed camera — the
+   * view opened on something the operator had not chosen, and there was no way to put the
+   * rotational satellite view on an aircraft at all.
+   *
+   * An aircraft target behaves differently ON PURPOSE: no orbit. The camera holds a fixed
+   * bearing and follows the contact, because the subject is already moving — sweeping a circle
+   * around something that is itself travelling is two motions fighting each other.
+   */
+  const [overwatchAircraftId, setOverwatchAircraftId] = useState<string | null>(null)
 
   // ── What's New ──────────────────────────────────────────────────────────────
   // The release FLAG is device-local and read on the client only: it lives in
@@ -439,7 +452,9 @@ export default function VPOverwatch() {
    */
   const preOverwatchView = useRef<MapViewType | null>(null)
   useEffect(() => {
-    if (overwatchReportId) {
+    // Either target forces the satellite basemap: the vector views flatten exactly the ground
+    // the view exists to read, and that is as true of a helicopter as of a camera.
+    if (overwatchReportId || overwatchAircraftId) {
       // Captured ONCE. Re-reading mapView on a later run would capture 'satellite'
       // itself and we would "restore" the operator to satellite.
       if (preOverwatchView.current === null) preOverwatchView.current = mapView
@@ -452,7 +467,7 @@ export default function VPOverwatch() {
     // rather than tracked — so a basemap the operator changes mid-Overwatch is
     // still restored on exit, instead of overwriting what was remembered.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overwatchReportId])
+  }, [overwatchReportId, overwatchAircraftId])
 
   const onSelectAircraft = useCallback((id: string | null) => {
     setSelectedAircraftId(id)
@@ -723,34 +738,52 @@ export default function VPOverwatch() {
   // reported position. Anchored bottom-right of the UI, not bundled into the
   // map-control FAB cluster.
   const toggleOverwatch = useCallback(() => {
-    setOverwatchReportId((cur) => {
-      if (cur) return null
-      // Prefer the operator's own selection, then the top-ranked report.
-      return selectedReportId ?? filteredReports[0]?.id ?? null
-    })
-  }, [selectedReportId, filteredReports])
+    // Leaving is always allowed, from either kind of target.
+    if (overwatchReportId || overwatchAircraftId) {
+      setOverwatchReportId(null)
+      setOverwatchAircraftId(null)
+      return
+    }
+    // The operator's OWN selection decides the target, and an aircraft is a legitimate one.
+    // This accepted ground reports only: with a helicopter selected it fell through to
+    // filteredReports[0] and silently orbited the top-ranked speed camera instead, so the view
+    // opened on something the operator had not chosen.
+    if (selectedAircraftId) {
+      setOverwatchAircraftId(selectedAircraftId)
+      setOverwatchReportId(null)
+      return
+    }
+    // No aircraft selected — the selected ground unit, else the top-ranked report.
+    setOverwatchReportId(selectedReportId ?? filteredReports[0]?.id ?? null)
+  }, [overwatchReportId, overwatchAircraftId, selectedAircraftId, selectedReportId, filteredReports])
 
-  const overwatchOn = overwatchReportId !== null
+  const overwatchOn = overwatchReportId !== null || overwatchAircraftId !== null
   // An independent review measured that with no ground contacts this control simply
   // did nothing while looking live — the earlier comment here claimed the fallback
   // meant it "always does something", which is not true when the list is empty. It
   // is now disabled and says why. Exiting is always allowed.
-  const overwatchAvailable = filteredReports.length > 0
+  //
+  // A selected AIRCRAFT is a target in its own right and needs no ground contact, so the
+  // control is live when either exists.
+  const overwatchAvailable = selectedAircraftId !== null || filteredReports.length > 0
   const overwatchLive = overwatchOn || overwatchAvailable
+  // The label names the thing that will actually be opened on, because the two targets
+  // behave differently — an aircraft is tracked on a fixed bearing, a ground unit is orbited.
+  const overwatchLabel = overwatchOn
+    ? 'Exit Overwatch'
+    : selectedAircraftId
+      ? 'Overwatch — track the selected aircraft'
+      : overwatchAvailable
+        ? 'Overwatch — orbit the selected ground unit'
+        : 'Overwatch — nothing to open on'
   const arLaunch = (
     <button
       className="vp-chrome50"
       onClick={toggleOverwatch}
       disabled={!overwatchLive}
-      aria-label={
-        overwatchOn
-          ? 'Exit Overwatch'
-          : overwatchAvailable
-            ? 'Overwatch — orbit the selected ground unit'
-            : 'Overwatch — no ground contacts to orbit'
-      }
+      aria-label={overwatchLabel}
       aria-pressed={overwatchOn}
-      title={overwatchAvailable || overwatchOn ? 'Overwatch' : 'Overwatch — no ground contacts'}
+      title={overwatchAvailable || overwatchOn ? 'Overwatch' : 'Overwatch — nothing to open on'}
       style={{
         position: 'fixed', bottom: 20, right: 16, zIndex: 30,
         display: 'flex', alignItems: 'center', gap: 8,
@@ -901,6 +934,7 @@ export default function VPOverwatch() {
               selectedAircraftId={selectedAircraftId}
               selectedReportId={selectedReportId}
               overwatchReportId={overwatchReportId}
+              overwatchAircraftId={overwatchAircraftId}
               onSelectAircraft={onSelectAircraft}
               onSelectReport={onSelectReport}
               scrubT={scrubT}
@@ -1272,6 +1306,7 @@ export default function VPOverwatch() {
             selectedAircraftId={selectedAircraftId}
             selectedReportId={selectedReportId}
             overwatchReportId={overwatchReportId}
+            overwatchAircraftId={overwatchAircraftId}
             onSelectAircraft={onSelectAircraft}
             onSelectReport={onSelectReport}
             scrubT={scrubT}

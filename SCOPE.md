@@ -109,8 +109,12 @@ You can pan and zoom while it runs; the orbit only drives the bearing, so it nev
 for the camera. It forces satellite imagery for as long as it is open, because the vector
 basemaps flatten exactly the ground the view exists to inspect, and it restores whichever
 basemap you were on when you close it. Closing also flattens the camera and returns it to
-north, leaving you looking at where you were. With no ground contacts to orbit the control is
-disabled and says so rather than silently doing nothing.
+north, leaving you looking at where you were. An aircraft is a valid target too, and behaves
+differently ON PURPOSE: no orbit. A helicopter is already travelling, and sweeping a circle
+around something in motion is two motions fighting each other — so the bearing is pinned north
+and the camera simply tracks the contact, which is what makes the satellite ground beneath it
+readable. The launch control names which of the two it will open on, and is disabled only when
+there is neither a selected aircraft nor a ground contact.
 
 **Hollow ghost models.** While the view is open, a translucent outline of the unit stands on
 its mark — a patrol car for a police unit, a camera badge for a speed camera, a helicopter

@@ -12,7 +12,7 @@
  */
 
 /** Bump this whenever WHATS_NEW gains an entry. */
-export const WHATS_NEW_VERSION = '2026-10-rotational-view'
+export const WHATS_NEW_VERSION = '2026-10-rotational-view-2'
 
 export interface WhatsNewEntry {
   /** Short label, rendered in mono caps. */
@@ -66,6 +66,11 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     title: 'LANDSCAPE KEEPS THE CONTROLS',
     body:
       'Turning your phone sideways no longer clears the interface away. The header, the ON AIR strip, the control cluster and the status bar all stay on screen at half size, so the map still gets its room while everything else stays within reach. The map itself, and the units sitting on it, keep their full size.',
+  },
+  {
+    title: 'OVERWATCH ON AIRCRAFT',
+    body:
+      'Overwatch can now open on an aircraft as well as a ground unit. Pick a contact, launch it, and the view holds a fixed bearing and tracks the aircraft as it travels, on the same satellite ground. It deliberately does not rotate: a helicopter is already moving, and circling something in motion just means chasing it. The button tells you which of the two it will do.',
   },
 ]
 
