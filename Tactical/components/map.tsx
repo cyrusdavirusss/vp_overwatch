@@ -462,8 +462,13 @@ export function VPMap({
       map = new maplibregl.Map({
         container: containerRef.current,
         style: buildMapStyle(viewType),
+        // With NO client fix, `user` is the configured home point — NOT the operator.
+        // Opening there at street zoom put the map on a place the operator never was and
+        // let them read it as their own position, which is the confusion this app must not
+        // create. With no fix, open wide over the coverage area instead; the "you are here"
+        // dot is already hidden when hasUserFix is false, so nothing claims to know.
         center: [user.lng, user.lat],
-        zoom: 9,
+        zoom: hasUserFix ? 9 : 7,
         pitch: 0, // pitch/bearing enabled but default flat, north up
         bearing: 0,
         attributionControl: false,
@@ -863,7 +868,22 @@ export function VPMap({
         // contacts are set outright: the glide only runs while the prediction loop is
         // running, so a scrubbed view must never be left mid-turn.
         const isLive = a.isActive === true
-        if (isLive && !scrubbing) {
+        if (entry.role === 'rotary') {
+          // HELICOPTERS HOLD A FIXED ORIENTATION.
+          //
+          // The rotor still spins — its animation lives inside this wrapper — and the
+          // vision cone still slews with the sensor, because the cone is a sibling element
+          // driven by `pointing`, not by this rotation. Only the AIRFRAME stops turning.
+          //
+          // A helicopter that wheels around on every heading change reads as twitchy rather
+          // than informative, and at a 3s poll a rotorcraft's exact nose angle is not what
+          // an operator is reading anyway: the POSITION and the sensor cone are. Pinned to
+          // 0deg rather than left at its last heading so the glyph is the same on every
+          // client, which is the same reason the header is now one row everywhere.
+          entry.hdgShown = 0
+          entry.hdgFrom = 0
+          entry.rot.style.transform = 'rotate(0deg)'
+        } else if (isLive && !scrubbing) {
           entry.hdgFrom = entry.hdgShown
         } else {
           const shown = Number.isFinite(pos.hdg) ? pos.hdg : entry.hdgShown
@@ -1710,8 +1730,12 @@ function updateVision(entry: AircraftMarkerEntry, map: maplibregl.Map) {
  * A heading arrives per fix and can honestly differ from the previous one by 30–90° after a
  * gap; assigning it directly made the airframe twitch. Silent and scrubbed contacts never
  * reach here — the data pass sets their rotation outright.
+ *
+ * Helicopters are excluded outright: the data pass pins them at 0deg, and without this
+ * guard the glide would put the nose back on the next predicted frame.
  */
 function glideHeading(entry: AircraftMarkerEntry, now: number): void {
+  if (entry.role === 'rotary') return
   const target = entry.hdg
   const remaining = ((target - entry.hdgShown + 540) % 360) - 180
   if (Math.abs(remaining) < 0.1) return
