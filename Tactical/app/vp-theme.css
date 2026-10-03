@@ -105,7 +105,21 @@
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .vp-header {
   position: relative;
-  height: 60px;
+  /* ONE base height for every platform. What varies per device is only the fit
+     scale, so the header is the same object everywhere rather than a different
+     layout per breakpoint. --vp-header-fit is set from JS in components/vp-header.tsx
+     by measuring the row's natural width against the width available to it.
+
+     The zoom is applied HERE, on the header box, not on the inner row: a header that
+     is zoomed has its WIDTH and HEIGHT follow the scale automatically (zoom changes
+     layout), so nothing needs a compensating calc and the height the map offsets
+     against is simply whatever this box ends up being. The width is pre-divided
+     because a zoomed box would otherwise span only `fit` of the viewport. */
+  --vp-header-base: 60px;
+  --vp-header-fit: 1;
+  height: var(--vp-header-base);
+  zoom: var(--vp-header-fit);
+  width: calc(100% / var(--vp-header-fit));
   flex-shrink: 0;
   z-index: 50;
   background: var(--ink-1);
@@ -128,10 +142,47 @@
   z-index: 1;
   display: flex;
   align-items: center;
+  /* No compensation needed here: the fit zoom is applied to .vp-header itself, so
+     this row is laid out inside an already-scaled box and an unqualified 100% is
+     correct. */
   height: 100%;
-  padding: 0 18px;
-  gap: 16px;
+  padding: 0 16px;
+  gap: 12px;
+  white-space: nowrap;
 }
+
+/* The header renders the SAME row on every platform.
+   These groups used to be dropped below 900px, so a phone and a desktop showed
+   different headers — part of why it read as "blown out" on one device and "too
+   small" on another. They are now dropped EVERYWHERE instead: the subtitle is
+   decoration repeating the wordmark, the wide divider only spaced it, and the
+   last-update age is carried by the status bar at the foot of the app as well, so
+   removing it from the top row loses nothing. What remains is one row, rendered
+   identically everywhere and scaled to fit by --vp-header-fit.
+
+   Scoped to .vp-header because `.vp-stat { display: flex }` is declared later in
+   this file: at equal specificity the later rule wins, so an unscoped
+   `.vp-stat--update { display: none }` silently did nothing and the widest group in
+   the header (198px, the single biggest consumer) stayed on screen. */
+.vp-header .vp-subtitle,
+.vp-header .vp-stat--update,
+.vp-header .vp-header-div--wide,
+.vp-header .vp-header-actions > .vp-header-div {
+  display: none;
+}
+
+/* The action LABELS are the widest part of the row, and they are the only part that
+   can be dropped without losing anything: both buttons keep their icon and their
+   aria-label, so they are still identifiable and still announce themselves. Trading
+   them away is what lets the row fit a phone at a readable scale while remaining the
+   SAME row on every platform — which is the whole point of the fit. */
+.vp-header .vp-header-actions .vp-btn > span {
+  display: none;
+}
+.vp-header .vp-header-actions .vp-btn {
+  padding: 5px 9px;
+}
+
 .vp-header.vp-lost {
   background: linear-gradient(180deg, rgba(255,45,45,0.10), transparent 70%), var(--ink-1);
   border-bottom-color: rgba(255,45,45,0.5);
@@ -1204,22 +1255,11 @@
    must stay exactly 48px: page.tsx positions the ON AIR bar and map against
    MOBILE_STRIP_H = 48, so a taller header would push the map down over it. */
 @media (max-width: 899px) {
-  .vp-header   { height: 48px; }
-  .vp-header-inner { padding: 0 12px; gap: 10px; }
-  .vp-wordmark { font-size: 13px; }
-  /* Drop the least-urgent groups first so the map keeps the screen. */
-  .vp-stat--update,
-  .vp-stat--clock,
-  .vp-header-div--wide,
-  .vp-header-actions > .vp-header-div,
-  .vp-subtitle { display: none; }
-  .vp-stat--silent { display: none; }
-  .vp-stat-value--mono { font-size: 10px; }
-  /* Two actions share a 48px bar with the wordmark and the live counters, so
-     the install button keeps its glyph and drops the label — the label is what
-     costs width, and the glyph is unambiguous next to it. */
-  .vp-btn--install > span { display: none; }
-  .vp-btn.vp-btn--install { padding: 5px 9px; }
+  /* The header has NO breakpoint rules of its own any more. It renders the same row
+     at every width and scales itself to fit the space it is given (see .vp-header /
+     --vp-header-fit), which is what makes it identical on every platform. Anything
+     that used to be tuned or dropped here is now either universal or handled by
+     that scale. */
 
   /* The aircraft/report panel is a bottom sheet on the mobile layout — the same
      <900px breakpoint page.tsx uses. Its height is set by the component through
@@ -1288,75 +1328,58 @@
   }
 }
 
-/* ── Landscape immersion ──────────────────────────────────────────────────────
-   Phone or tablet turned sideways: the map is the entire screen and every piece
-   of chrome is gone — header, ON AIR strip, rails, view tabs, status chips.
+/* ── Landscape phones: the chrome halves, the map does not ─────────────────────
+   This REPLACES an immersion mode that HID the chrome outright. That mode took the
+   header, the ON AIR strip, the FAB cluster, the status bar and the pills off the
+   screen and left a bare map behind a reveal tab — which is what the reviews
+   complained about. Nothing is hidden any more: the same chrome stays on screen in
+   landscape, scaled to half so the map still gets its room.
 
-   `data-vp-immersive` is set on <html> by hooks/useImmersiveLandscape.ts and has
-   three values:
-     off       portrait or desktop — nothing in this block applies
-     on        immersed — map only
-     revealed  the operator tapped the tab that brings the chrome back
+   `zoom`, not `transform: scale()`, because zoom changes LAYOUT — the boxes really
+   do take less space, and the map's top offset follows them. page.tsx measures the
+   chrome height rather than assuming a constant, precisely so this works.
 
-   Selection-driven surfaces are deliberately NOT hidden: an aircraft detail, a
-   report detail or the filter sheet is the "appropriate bar comes out" case.
-   The mock-flight label also stays — it is a data-integrity warning, and hiding
-   it in a screenshot would imply synthetic traffic was real tracking.
+   Deliberately NOT applied to .vp-map-area, the map canvas, or any marker element:
+   the map and the aircraft / ground / heli icons keep their full size. That is the
+   one thing that must not shrink.
+
+   `data-vp-immersive` is set on <html> by hooks/useImmersiveLandscape.ts and is
+   ALWAYS present once that hook mounts — it holds 'on', 'off' or 'revealed', so
+   every selector here must test the VALUE. Testing the bare attribute matched in
+   portrait and on desktop too, which scaled the whole chrome to half everywhere.
    ──────────────────────────────────────────────────────────────────────────── */
 
+html[data-vp-immersive='on'] {
+  --vp-chrome-scale: 0.5;
+}
 html[data-vp-immersive='on'] .vp-chrome,
-html[data-vp-immersive='on'] .vp-imm-hide,
-html[data-vp-immersive='on'] .vp-map-pill,
+html[data-vp-immersive='on'] .vp-status-bar,
 html[data-vp-immersive='on'] .vp-fab-cluster,
-html[data-vp-immersive='on'] .vp-mlat-banner,
-html[data-vp-immersive='on'] .vp-announce,
-html[data-vp-immersive='on'] .vp-vps-button {
-  display: none !important;
-}
-
-/* When revealed, the header and the control cluster come back. The map-view pill
-   does not: switching views lives on the FAB's layers button, and tabs are
-   precisely what immersion exists to remove. */
-html[data-vp-immersive='revealed'] .vp-chrome { display: block !important; }
-html[data-vp-immersive='revealed'] .vp-fab-cluster { display: flex !important; }
-html[data-vp-immersive='revealed'] .vp-mlat-banner { display: block !important; }
-html[data-vp-immersive='revealed'] .vp-announce { display: flex !important; }
-
-/* The immersion tab. Low opacity so it reads as a seam in the map rather than a
-   control sitting on it, and it brightens on touch. */
-.vp-imm-handle {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 60;
-  display: flex;
-  gap: 4px;
-}
-.vp-imm-handle button {
-  width: 34px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(11, 18, 26, 0.55);
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 8px 8px;
-  color: var(--fg-4);
-  cursor: pointer;
-  opacity: 0.45;
-  transition: opacity 160ms ease, color 160ms ease;
-}
-.vp-imm-handle button:hover,
-.vp-imm-handle button:active,
-.vp-imm-handle:focus-within button { opacity: 1; color: var(--fg-1); }
-
-/* Selection-driven panels become right-hand bars. Landscape viewports are short:
-   a bottom sheet covers the horizon the operator is watching, which is the one
-   thing the map is there for. */
+html[data-vp-immersive='on'] .vp-map-pill,
+html[data-vp-immersive='on'] .vp-vps-button,
 html[data-vp-immersive='on'] .vp-detail-panel,
-html[data-vp-immersive='revealed'] .vp-detail-panel {
+html[data-vp-immersive='on'] .vp-report-sheet,
+html[data-vp-immersive='on'] .vp-chrome50 {
+  zoom: var(--vp-chrome-scale);
+}
+
+/* A full-width box would span only half the viewport once zoomed, so its width is
+   pre-divided and its right edge released. Its children scale WITH it, which is why
+   the header and the ON AIR bar are scaled as one box rather than separately. */
+html[data-vp-immersive='on'] .vp-chrome,
+html[data-vp-immersive='on'] .vp-status-bar {
+  width: calc(100% / var(--vp-chrome-scale));
+  right: auto;
+}
+
+/* The immersion TAB (.vp-imm-handle) was deleted along with the mode it belonged to:
+   it existed only to bring back chrome that mode had hidden, and nothing is hidden
+   now. Its markup is gone from page.tsx as well, so no dead selector is left here. */
+
+/* Selection-driven panels still become right-hand bars. Landscape viewports are
+   short: a bottom sheet covers the horizon the operator is watching, which is the
+   one thing the map is there for. */
+html[data-vp-immersive='on'] .vp-detail-panel {
   top: 0 !important;
   bottom: 0 !important;
   left: auto !important;
@@ -1368,8 +1391,7 @@ html[data-vp-immersive='revealed'] .vp-detail-panel {
   border-radius: 0 !important;
   z-index: 45;
 }
-html[data-vp-immersive='on'] .vp-report-sheet,
-html[data-vp-immersive='revealed'] .vp-report-sheet {
+html[data-vp-immersive='on'] .vp-report-sheet {
   top: 0 !important;
   bottom: 0 !important;
   left: auto !important;
@@ -1382,5 +1404,4 @@ html[data-vp-immersive='revealed'] .vp-report-sheet {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .vp-imm-handle button { transition: none; }
 }
