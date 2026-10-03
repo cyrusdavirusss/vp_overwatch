@@ -21,8 +21,8 @@ The three rules that have already cost downtime:
   `ExecStartPre=pnpm build` then fails its dependency check and the live app goes down.
 - **Gate on `pnpm build` BEFORE restarting `vp-overwatch.service`.** Build-script approval is
   `allowBuilds` in `pnpm-workspace.yaml` — a package left unlisted there is a hard error.
-- **`main` is frozen on purpose** (its history exposes secrets). Never merge into it; the
-  deployed branch is `modern-vp-theme`.
+- **`main` is frozen on purpose.** It is deliberately far behind and not maintained; never
+  merge into it or rewrite its history. The deployed branch is `modern-vp-theme`.
 
 <!-- END:vp-overwatch-rules -->
 

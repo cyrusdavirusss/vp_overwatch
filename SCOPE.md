@@ -7,6 +7,11 @@ picking this project up, read section 0 before you run anything.
 Legend: `[DONE]` shipped and verified · `[WIP]` partly built · `[NEXT]` planned ·
 `[BLOCKED]` waiting on something · `[FROZEN]` deliberately not touched
 
+> **This file is published.** It is read by anyone who finds the repository. Keep it to
+> features, layout and operating rules — never credentials, never a named file or commit
+> that holds one, never a vulnerable package or the shape of a defect. Anything of that kind
+> belongs in a private channel, not here.
+
 ---
 
 ## 0. Rules that break the app if ignored
@@ -21,9 +26,9 @@ These are not style preferences. Each one has already cost real downtime once.
   package left unlisted there is a hard install error. So always run `pnpm build` and see it
   finish green **before** `systemctl --user restart vp-overwatch.service`. Restarting first
   turns a bad dependency change into an outage.
-- **`main` is FROZEN. Do not merge into it, do not make it the default-facing branch.**
-  It is deliberately 96 commits behind because its history contains secrets that a merge or
-  a history rewrite would re-expose. Leave it alone.
+- **`main` is FROZEN. Do not merge into it, do not make it the default-facing branch, and do
+  not rewrite its history.** It is deliberately far behind and is not maintained. Leave it
+  alone; work on the deployed branch.
 - **The deployed branch is `modern-vp-theme`.** That is what the local working tree and the
   live service build from.
 - **Design tokens are not negotiable** (see the `vp-overwatch-design` skill / README):
@@ -46,7 +51,7 @@ These are not style preferences. Each one has already cost real downtime once.
 | Fuel collector | `vp-fuel-collector.service` |
 | Waze relay | `vp-waze-wazeapi.service` (reads `tools/waze-relay/.env`) |
 | Standalone output | `Tactical/.next/standalone` (what the service runs) |
-| App secret | `Tactical/.env.local` (`WAZE_RELAY_SECRET`) — must match the relay's |
+| App config | `Tactical/.env.local` (relay secret and API keys — see DEPLOY.md) |
 
 ---
 
@@ -54,20 +59,22 @@ These are not style preferences. Each one has already cost real downtime once.
 
 ```
 VP-Overwatch
-├── Ground view
-│   ├── [DONE] Overwatch orbit view  (button, orbit, satellite, clean exit)
-│   ├── [DONE] Hollow ghost models   (police car · speed camera · helicopter)
+├── Rotational satellite view  ("Overwatch")
+│   ├── [DONE] Orbit a ground unit on satellite imagery, clean exit
+│   ├── [DONE] Hollow ghost models  (police car · speed camera · helicopter)
 │   └── [WIP ] Helicopter ghost not exercised end-to-end — no live sighting data
+├── Aircraft tracking
+│   ├── [DONE] Dead-reckoned position + heading glide + sensor cone
+│   └── [DONE] Helicopters hold a FIXED orientation while moving
+├── Layout
+│   ├── [DONE] One header on every platform — same row, fitted to the width
+│   └── [DONE] Landscape scales the chrome to 50% instead of hiding it
 ├── Release communication
-│   └── [DONE] What's New release flag + panel (dot on the FAB, device-local seen flag)
+│   └── [DONE] What's New release flag + panel (dot on the cluster, device-local seen flag)
 ├── Security
-│   ├── [DONE] Headers, poweredByHeader off, history no-store, secret removed from tree
-│   ├── [DONE] next 16.3.8 — Next advisories cleared
-│   ├── [BLOCKED] maplibre-gl critical advisory — sink never called; fix needs maplibre 6
-│   └── [FROZEN] Secret in git history — not rewritten (see section 5)
+│   └── [DONE] Response headers and hardening — details held privately, not in this file
 ├── Dependency health
-│   ├── [DONE] Production advisories 41 → 2
-│   └── [NEXT] The remaining 2 (1 moderate + the maplibre-gl above)
+│   └── [NEXT] maplibre-gl major upgrade (see section 4)
 ├── Tooling
 │   ├── [DONE] `npm run lint` works again (Next 16 removed `next lint`)
 │   └── [NEXT] 50 pre-existing lint findings, overwhelmingly React 19 set-state-in-effect
@@ -84,39 +91,51 @@ VP-Overwatch
 
 ## 3. Shipped this cycle
 
-**Overwatch** — the ground-unit orbit view.
-Select a police unit or a speed camera and launch it: the map centres on the reported
-position, tilts to 58°, and sweeps the bearing at ~6°/s (a circle a minute). It forces the
-satellite basemap while open (the vector views flatten the ground the view exists to read)
-and restores your previous basemap on exit. Closing it flattens the pitch and returns the
-bearing to north. With no ground contacts the control is disabled and says why.
+**The rotational satellite view (Overwatch).**
 
-Two defects were found by an independent adversarial review and fixed:
-- exit left the map **stuck at pitch 58°** — the exit `easeTo` was cancelled by the north-up
-  hold's `setBearing(0)`. Fixed with an immediate `setPitch(0)`, which has no animation to
-  cancel.
-- the ghost's markup was rebuilt on **every feed poll**, restarting its CSS animations and
-  making it stutter. Now rebuilt only when the model or colour changes.
+This is the headline feature. Pick a ground unit — a police car or a speed camera — and launch
+Overwatch from the map cluster. The map drops onto satellite imagery, tilts down to a shallow
+angle so you are looking ACROSS the ground rather than straight down at it, and then slowly
+sweeps a circle around the unit's reported position. A full revolution takes about a minute.
 
-**Hollow ghost models** — a translucent outline stands on the mark: patrol car for
-`marked`/`unmarked`/`rbt`, camera badge for `camera`, and an inline helicopter for
-`helicopter`. The helicopter is inline rather than from an asset because the only rotary art
-in the repo is aviation amber, which is reserved for active aircraft.
+The point of the rotation is that a flat, top-down map hides everything that explains a
+position: which side of a road a camera actually faces, what is between a car and the road,
+which way the ground falls away. Turning the view through 360° at a low angle lets you read
+the unit's surroundings from every direction in turn, so you can work out what it can see and
+what it cannot. It is deliberately slow — fast enough to cover the circle, slow enough to
+actually look at what is going past.
 
-**What's New** — a release flag in the map cluster, carrying a dot until the notes are
-opened once on that device, opening a dismissible (non-modal) panel. Notes live as data in
+You can pan and zoom while it runs; the orbit only drives the bearing, so it never fights you
+for the camera. It forces satellite imagery for as long as it is open, because the vector
+basemaps flatten exactly the ground the view exists to inspect, and it restores whichever
+basemap you were on when you close it. Closing also flattens the camera and returns it to
+north, leaving you looking at where you were. With no ground contacts to orbit the control is
+disabled and says so rather than silently doing nothing.
+
+**Hollow ghost models.** While the view is open, a translucent outline of the unit stands on
+its mark — a patrol car for a police unit, a camera badge for a speed camera, a helicopter
+for a helicopter sighting. They are drawn as outlines rather than solids so the ground stays
+readable straight through them.
+
+**Helicopters hold a fixed orientation.** A rotary aircraft no longer turns its nose to follow
+its track while it moves. The rotor keeps spinning and the sensor cone keeps slewing
+independently, but the airframe itself stays put: at a three-second poll the heading is noisy,
+and a helicopter that wheeled around on every refresh read as twitchy rather than
+informative. Position and the sensor cone are what you actually read.
+
+**One header on every platform.** The header used to shed groups at a breakpoint, so a phone
+and a desktop rendered genuinely different headers — blown out on one, too small on the other.
+It now renders the SAME row everywhere and measures itself against the width it is given, so
+the whole thing always fits whatever it is running on.
+
+**Landscape no longer hides the interface.** Turning a phone sideways used to remove the
+header, the ON AIR strip, the control cluster and the status bar, leaving a bare map behind a
+small tab. It now keeps every one of those on screen at half scale instead — the map, and the
+aircraft and ground icons on it, stay full size.
+
+**What's New** — a release flag in the map cluster, carrying a dot until the notes are opened
+once on that device, opening a dismissible (non-modal) panel. Notes live as data in
 `lib/whats-new.ts`; bump `WHATS_NEW_VERSION` and the flag reappears for everyone.
-
-**Security pass** — CSP gained `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`
-(deliberately still no `script-src`: that needs nonces through Next and the MapLibre worker).
-`x-powered-by` removed. `/api/vicpol/history` now `no-store`. A 26-character credential that
-was tracked in `Tactical/uploads/waze-relay/.env-36167e4a.example` removed from the tree.
-
-**Dependency health** — production advisories **41 → 2**. The blocker was that
-`@maplibre/geojson-vt` 6.x stopped supplying `@types/geojson`, so the `GeoJSON` UMD global
-only ever arrived transitively and stopped resolving. Fixed by making the types package a
-direct devDependency plus an explicit `types/geojson.d.ts` reference. Note: pinning
-`geojson-vt` back is **not** an option — maplibre-gl 5.24.0 declares `^6.1.0` itself.
 
 **Tooling** — `npm run lint` fixed (Next 16 removed `next lint`); eslint + flat config added;
 unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only resolver.
@@ -128,10 +147,10 @@ unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only res
 1. **Subscription button** — the next big update. The backend is largely there (`lib/alerts/`
    with a Sinch provider covering SMS, voice and email; consent, quiet hours, unsubscribe;
    settings and subscribe routes). What is missing is the operator-facing button and the
-   remaining provider/plan work. **Before touching this, note that the dependency update
-   moved `twilio` 6.0.2 → 6.1.2 and its `axios` 1.18.0 → 1.20.0** (that is what cleared the
-   axios advisories). No Twilio or subscription *code* was modified.
-2. **maplibre-gl 6 migration** — the route to zero critical advisories. It is ESM-only and
+   remaining provider/plan work. **Before touching this, note the dependency update moved
+   `twilio` 6.0.2 → 6.1.2 and its `axios` 1.18.0 → 1.20.0.** No Twilio or subscription *code*
+   was modified.
+2. **maplibre-gl major upgrade** — outstanding dependency maintenance. It is ESM-only and
    drops the global `GeoJSON` namespace, so it is a migration (~100 type errors across
    `map.tsx`, `map.NEW.tsx`, `page.tsx`) plus style-spec and icon-scaling render changes, not
    a version bump.
@@ -140,19 +159,14 @@ unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only res
 
 ---
 
-## 5. Known residuals and deliberate non-actions
+## 5. Known residuals
 
-- **`main` stays behind on purpose** — old history exposes secrets, so it is never merged or
-  rewritten. This is a decision, not debt.
-- **The leaked 26-character relay secret is dead.** It was never the live value; both the app
-  and the relay hold a matching 64-character secret that does not match it. Nothing needed
-  rotating. It remains in git history.
-- **Git history was NOT rewritten.** The credential is dead, so a rewrite would buy no
-  security while changing every hash and breaking every clone of a public repo.
-- **The maplibre-gl advisory is not reachable.** It is an XSS sanitiser bypass in
-  `DOM.sanitize()`; this app never calls that — it builds `innerHTML` itself, which was
-  audited.
 - **The helicopter ghost has not been exercised end-to-end** because `helicopter` is not in
   the Waze subtype mapping at all (it arises only from community sightings) and there were no
   such sightings. The model itself was verified directly; its orbit path is the same one
   verified live for the other two kinds.
+- **The landscape chrome scale (0.5) has no automated regression test.** It was verified by
+  measuring computed zoom values at several viewports; nothing fails the build if it changes.
+- **Header readability at the small end is a judgement call.** Base text is 15px and the fit
+  scale lands around 0.47–0.61 on a 320–412px phone, so effective text is roughly 7–9px
+  there. Deliberate and consistent, but it is the tightest constraint in the layout.

@@ -16,9 +16,9 @@ notes plus the same project rules.
    left unlisted there is a hard install error. Restart first and a bad dependency change
    becomes an outage:
    `systemctl --user restart vp-overwatch.service`
-3. **`main` is frozen deliberately.** Its history contains exposed secrets that a merge or a
-   history rewrite would re-expose. Never merge into it, never make it the public-facing
-   branch. The deployed branch is **`modern-vp-theme`**.
+3. **`main` is frozen deliberately.** It is deliberately far behind and is not maintained.
+   Never merge into it, never make it the public-facing branch, and never rewrite its history.
+   The deployed branch is **`modern-vp-theme`**.
 
 ## Live surfaces
 
