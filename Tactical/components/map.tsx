@@ -1199,10 +1199,21 @@ export function VPMap({
     return () => {
       window.clearTimeout(startTimer)
       stopOrbit()
-      // Leave the map as Overwatch found it. Closing the view would otherwise strand
-      // the operator on a tilted map, and the north-up hold above only pins the
-      // BEARING — nothing else flattens the pitch.
-      map.easeTo({ pitch: 0, duration: 500, essential: true })
+      // Flatten the pitch INSTANTLY — not with an easeTo.
+      //
+      // This was `easeTo({ pitch: 0, duration: 500 })`, and it did not work. Closing
+      // Overwatch re-runs the north-up hold above, which fires setBearing(0) because
+      // the sweep left the bearing non-zero — and a camera command CANCELS a running
+      // camera animation. An independent review measured the result: the map stayed
+      // stuck at pitch 58° indefinitely, with the pin's setBearing landing 3 ms after
+      // the exit and killing the flatten. setPitch applies immediately, so there is
+      // no animation for the pin to cancel and the pitch cannot survive the exit.
+      //
+      // The bearing returns to north via that same hold. Centre and zoom are
+      // deliberately LEFT where they are: the operator has just left a view of this
+      // mark, so leaving them looking at it is the useful place to be, and snapping
+      // the camera back would also undo a pan they may have made while orbiting.
+      map.setPitch(0)
     }
   }, [ready, overwatchReportId, northLock])
 
@@ -1263,7 +1274,18 @@ export function VPMap({
     // colour a camera is.
     const color = model === 'police' ? RED : BLUE
     el.style.setProperty('--ghost-c', color)
-    el.innerHTML = ghostMarkerSVG(model, color, 96)
+    // Rebuild the markup ONLY when the model or colour actually changed.
+    //
+    // This effect re-runs on every feed poll, and an unconditional innerHTML
+    // reassignment re-parses the SVG and RESTARTS the 6.5s hover / 18s orbit CSS
+    // animations each time — an independent review measured the ghost visibly
+    // stuttering at the poll cadence. Keyed rather than compared by string so the
+    // check is O(1) and cannot be fooled by markup drift.
+    const ghostKey = `${model}:${color}`
+    if (el.dataset.ghostKey !== ghostKey) {
+      el.dataset.ghostKey = ghostKey
+      el.innerHTML = ghostMarkerSVG(model, color, 96)
+    }
     ghostMarker.current.setLngLat([report.lng, report.lat])
   }, [ready, overwatchReportId, reports, northLock])
 

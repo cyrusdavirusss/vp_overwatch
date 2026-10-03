@@ -2,6 +2,9 @@
 const nextConfig = {
   allowedDevOrigins: ['100.94.31.125'],
   output: 'standalone',
+  // Don't advertise the framework in a response header. Free, and it removes the
+  // easiest version-fingerprint a scanner uses to pick a payload.
+  poweredByHeader: false,
   // Override the build output dir (used for a verify build so the live
   // .next served by the systemd unit is never disturbed). Defaults to .next.
   distDir: process.env.NEXT_DIST_DIR || '.next',
@@ -39,12 +42,23 @@ const nextConfig = {
       // wired through Next and the MapLibre worker, and a half-written one either
       // breaks the map or gives false assurance. frame-ancestors is the containment
       // that matters for this app; the XSS class is fixed at the sink instead.
+      //
+      // The three directives added here are additive to that decision precisely
+      // because they CANNOT break a working page: none of them governs scripts,
+      // styles, images, fonts, workers or connections, so nothing the map loads can
+      // be blocked by them. object-src closes plugin embedding, base-uri stops an
+      // injected <base> retargeting every relative URL, and form-action stops an
+      // injected form posting this page's data to somewhere else.
       {
         source: '/(.*)',
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+          {
+            key: 'Content-Security-Policy',
+            value:
+              "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'",
+          },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'geolocation=(self), camera=(self), microphone=(), payment=(), usb=()' },
           { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
