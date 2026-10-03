@@ -181,6 +181,13 @@ unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only res
 - **Header readability at the small end is a judgement call.** Base text is 15px and the fit
   scale lands around 0.47–0.61 on a 320–412px phone, so effective text is roughly 7–9px
   there. Deliberate and consistent, but it is the tightest constraint in the layout.
+- **The helicopter fix is verified by construction, not by watching one move.** A rotary
+  contact's rotation is pinned before any heading is applied, so it cannot turn by
+  definition, and a 23-sample/45-second trace of the mock rotary contact held exactly one
+  rotation value (identity). But that contact travelled only **5px** in the window, so the
+  "no rotation WHILE MOVING" half of the claim is NOT demonstrated against real motion. An
+  earlier commit message states it as verified against a moving contact; that overstates the
+  evidence. Re-check against a live sighting that actually crosses the map.
 - **A sighting published without coordinates still falls back to the home point.** The
   publisher uses `coords?.lat ?? userPosition.lat`, and `userPosition` resolves to the home
   point when there is no fix. In practice the operator taps the map so coordinates exist, but
