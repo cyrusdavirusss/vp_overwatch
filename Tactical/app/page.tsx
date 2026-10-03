@@ -634,21 +634,31 @@ export default function VPOverwatch() {
   const toggleOverwatch = useCallback(() => {
     setOverwatchReportId((cur) => {
       if (cur) return null
-      // Prefer the operator's own selection; fall back to the top-ranked report
-      // so the control always does something rather than silently no-op-ing.
+      // Prefer the operator's own selection, then the top-ranked report.
       return selectedReportId ?? filteredReports[0]?.id ?? null
     })
   }, [selectedReportId, filteredReports])
 
   const overwatchOn = overwatchReportId !== null
+  // An independent review measured that with no ground contacts this control simply
+  // did nothing while looking live — the earlier comment here claimed the fallback
+  // meant it "always does something", which is not true when the list is empty. It
+  // is now disabled and says why. Exiting is always allowed.
+  const overwatchAvailable = filteredReports.length > 0
+  const overwatchLive = overwatchOn || overwatchAvailable
   const arLaunch = (
     <button
       onClick={toggleOverwatch}
+      disabled={!overwatchLive}
       aria-label={
-        overwatchOn ? 'Exit Overwatch' : 'Overwatch — orbit the selected ground unit'
+        overwatchOn
+          ? 'Exit Overwatch'
+          : overwatchAvailable
+            ? 'Overwatch — orbit the selected ground unit'
+            : 'Overwatch — no ground contacts to orbit'
       }
       aria-pressed={overwatchOn}
-      title="Overwatch"
+      title={overwatchAvailable || overwatchOn ? 'Overwatch' : 'Overwatch — no ground contacts'}
       style={{
         position: 'fixed', bottom: 20, right: 16, zIndex: 30,
         display: 'flex', alignItems: 'center', gap: 8,
@@ -657,7 +667,9 @@ export default function VPOverwatch() {
         border: `1px solid rgba(45,140,255,${overwatchOn ? '0.90' : '0.55'})`,
         color: 'var(--blue-hi)', backdropFilter: 'blur(8px)',
         fontFamily: 'var(--font-mono, monospace)', fontSize: 12, fontWeight: 700, letterSpacing: '0.14em',
-        boxShadow: '0 4px 18px rgba(0,0,0,0.45), 0 0 14px rgba(45,140,255,0.22)', cursor: 'pointer',
+        boxShadow: '0 4px 18px rgba(0,0,0,0.45), 0 0 14px rgba(45,140,255,0.22)',
+        cursor: overwatchLive ? 'pointer' : 'not-allowed',
+        opacity: overwatchLive ? 1 : 0.45,
       }}
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1018,6 +1030,8 @@ export default function VPOverwatch() {
                 style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
                 onClick={toggleOverwatch}
                 aria-pressed={overwatchOn}
+                disabled={!overwatchLive}
+                title={overwatchAvailable || overwatchOn ? 'Overwatch' : 'Overwatch — no ground contacts'}
               >
                 {overwatchOn ? 'Exit Overwatch' : 'Launch Overwatch'}
               </button>
