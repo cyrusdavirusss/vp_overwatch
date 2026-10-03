@@ -12,7 +12,7 @@
  */
 
 /** Bump this whenever WHATS_NEW gains an entry. */
-export const WHATS_NEW_VERSION = '2026-10-overwatch'
+export const WHATS_NEW_VERSION = '2026-10-rotational-view'
 
 export interface WhatsNewEntry {
   /** Short label, rendered in mono caps. */
@@ -23,9 +23,14 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
-    title: 'OVERWATCH',
+    title: 'ROTATIONAL SATELLITE VIEW',
     body:
-      'A new orbit view for a ground unit. Select a police unit or a speed camera, then launch Overwatch: the map centres on its reported position, tilts to a low angle and sweeps a slow circle around it, so you can read the ground it is sitting on from every direction. A full circle takes about a minute, and you can still pan and zoom while it runs.',
+      'A new way to see where a ground unit actually is. Select a police unit or a speed camera and launch Overwatch: the map switches to satellite imagery, tilts down to a shallow angle so you are looking ACROSS the ground instead of straight down at it, and slowly sweeps a full circle around the unit — about a minute per revolution.',
+  },
+  {
+    title: 'WHY IT TURNS',
+    body:
+      'A flat, top-down map hides everything that explains a position: which way a camera actually faces, what stands between a car and the road, how the ground falls away around it. Turning the view through a full circle at a low angle shows you each of those in turn, so you can work out what the unit can see and what it cannot. It only drives the bearing, so you can pan and zoom the whole time without fighting it for the camera.',
   },
   {
     title: 'HOLLOW MODELS',
@@ -48,9 +53,19 @@ export const WHATS_NEW: WhatsNewEntry[] = [
       'Closing Overwatch flattens the camera and returns it to north, leaving you where you were looking. If there are no ground contacts to orbit, the launch control is disabled and says so rather than doing nothing.',
   },
   {
-    title: 'HARDENING',
+    title: 'HELICOPTERS HOLD STEADY',
     body:
-      'Stricter security headers, a newer framework release with its known advisories cleared, and a published credential removed from the repository.',
+      'A helicopter no longer turns its nose to follow its track while it moves. The rotor keeps spinning and its sensor cone keeps sweeping, but the airframe itself stays put — at a three-second refresh the heading is noisy, and a contact that wheeled around on every update read as twitchy rather than informative. Position and the sensor cone are the things worth watching.',
+  },
+  {
+    title: 'THE SAME BAR EVERYWHERE',
+    body:
+      'The top bar is now identical on every device and every screen size. It no longer drops counters on a small screen or crowds them on a large one, and it always fits the width it is given, so the same information is in the same place whether you are on a phone, a tablet or a desktop.',
+  },
+  {
+    title: 'LANDSCAPE KEEPS THE CONTROLS',
+    body:
+      'Turning your phone sideways no longer clears the interface away. The header, the ON AIR strip, the control cluster and the status bar all stay on screen at half size, so the map still gets its room while everything else stays within reach. The map itself, and the units sitting on it, keep their full size.',
   },
 ]
 
