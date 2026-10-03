@@ -140,6 +140,15 @@ const OVERWATCH_ORBIT_DPS = 6
 const OVERWATCH_PITCH = 58
 /** Close enough that the ghost is the subject of the frame, not a detail on it. */
 const OVERWATCH_ZOOM = 16.5
+/**
+ * Zoom for the AIRCRAFT tracking view — closer than the ground orbit's, but not street-level.
+ *
+ * Without this the view kept whatever zoom the operator was already using, often a whole-state
+ * overview, and at that scale a 58-degree tilt barely reads: the map looked like it had done
+ * nothing but switch the basemap. A moving subject needs to be close enough to see where it is
+ * going, and 16.5 would be too tight to see anything approach.
+ */
+const OVERWATCH_AIRCRAFT_ZOOM = 14
 const AIRCRAFT_TWEEN_MS = 900
 
 /**
@@ -875,22 +884,16 @@ export function VPMap({
         // contacts are set outright: the glide only runs while the prediction loop is
         // running, so a scrubbed view must never be left mid-turn.
         const isLive = a.isActive === true
-        if (entry.role === 'rotary') {
-          // HELICOPTERS HOLD A FIXED ORIENTATION.
-          //
-          // The rotor still spins — its animation lives inside this wrapper — and the
-          // vision cone still slews with the sensor, because the cone is a sibling element
-          // driven by `pointing`, not by this rotation. Only the AIRFRAME stops turning.
-          //
-          // A helicopter that wheels around on every heading change reads as twitchy rather
-          // than informative, and at a 3s poll a rotorcraft's exact nose angle is not what
-          // an operator is reading anyway: the POSITION and the sensor cone are. Pinned to
-          // 0deg rather than left at its last heading so the glyph is the same on every
-          // client, which is the same reason the header is now one row everywhere.
-          entry.hdgShown = 0
-          entry.hdgFrom = 0
-          entry.rot.style.transform = 'rotate(0deg)'
-        } else if (isLive && !scrubbing) {
+        // EVERY airframe's nose follows its heading, rotary included.
+        //
+        // An earlier pass pinned helicopters upright, reading "no rotation" in the rotational
+        // view as being about the ICON. It was not — that meant the CAMERA must not orbit. The
+        // pin left a helicopter flying east with its nose locked north, which reads as broken:
+        // which way a contact is pointing is the first thing an operator checks.
+        //
+        // The glide below is what stops it twitching, and that is now sufficient: heading arrives
+        // dead-reckoned and continuous, so following it no longer jumps 30-90 degrees per poll.
+        if (isLive && !scrubbing) {
           entry.hdgFrom = entry.hdgShown
         } else {
           const shown = Number.isFinite(pos.hdg) ? pos.hdg : entry.hdgShown
@@ -1268,6 +1271,9 @@ export function VPMap({
     // same reasoning as the orbit's exit flatten and the orbit's own start.
     map.setBearing(0)
     map.setPitch(OVERWATCH_PITCH)
+    // Zoom IN to a chase level. See OVERWATCH_AIRCRAFT_ZOOM: without this the view stayed at
+    // whatever scale the operator was already on, where the tilt is barely visible.
+    map.setZoom(Math.max(map.getZoom(), OVERWATCH_AIRCRAFT_ZOOM))
 
     let raf: number | null = null
     const tick = () => {
@@ -1788,11 +1794,11 @@ function updateVision(entry: AircraftMarkerEntry, map: maplibregl.Map) {
  * gap; assigning it directly made the airframe twitch. Silent and scrubbed contacts never
  * reach here — the data pass sets their rotation outright.
  *
- * Helicopters are excluded outright: the data pass pins them at 0deg, and without this
- * guard the glide would put the nose back on the next predicted frame.
+ * There is no per-role exception: every airframe's nose follows its heading (see the data pass).
+ * An earlier pass skipped rotary here because it pinned them upright — that pin is gone, because
+ * it left helicopters flying with their nose locked north.
  */
 function glideHeading(entry: AircraftMarkerEntry, now: number): void {
-  if (entry.role === 'rotary') return
   const target = entry.hdg
   const remaining = ((target - entry.hdgShown + 540) % 360) - 180
   if (Math.abs(remaining) < 0.1) return

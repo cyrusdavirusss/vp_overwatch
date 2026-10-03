@@ -878,6 +878,29 @@ export default function VPOverwatch() {
             </div>
 
             <div className="vp-rail-section">
+              <div className="vp-rail-title">Rotational view</div>
+              {/* The desktop layout never had this control — it only ever existed as the
+                  floating pill in the phone layout. So on a desktop there was no way to open
+                  Overwatch at all, and the nearest-looking thing was the SAT basemap tab in the
+                  section above, which does nothing but switch the basemap. */}
+              <button
+                className="vp-btn"
+                onClick={toggleOverwatch}
+                disabled={!overwatchLive}
+                aria-label={overwatchLabel}
+                aria-pressed={overwatchOn}
+                title={
+                  overwatchOn
+                    ? 'Close the rotational view'
+                    : 'Open the rotational view on the selected unit — a ground unit is orbited, an aircraft is tracked'
+                }
+                style={{ width: '100%', justifyContent: 'center' }}
+              >
+                {overwatchOn ? 'EXIT OVERWATCH' : 'OVERWATCH'}
+              </button>
+            </div>
+
+            <div className="vp-rail-section">
               <div className="vp-rail-title">Layers &amp; filters</div>
               <FilterPanel
                 embedded
