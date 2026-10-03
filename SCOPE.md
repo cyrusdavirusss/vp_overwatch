@@ -128,6 +128,17 @@ and a desktop rendered genuinely different headers — blown out on one, too sma
 It now renders the SAME row everywhere and measures itself against the width it is given, so
 the whole thing always fits whatever it is running on.
 
+**The location control tells the truth about where the operator is.** Three things used the
+configured home point as if it were the operator's position whenever the device had no GPS
+fix, and they are all fixed. The map's opening camera no longer opens zoomed in on the home
+point — with no fix it opens wide over the coverage area, and the "you are here" dot stays
+hidden, so nothing claims to know. "Nearest aircraft" and "nearest ground contact" no longer
+rank by distance from the home point; they require a real fix and ask for one otherwise,
+because ranking from somewhere the operator is not at produces a confident wrong answer.
+A location press inside the rotational view now leaves the view first and waits a frame
+before moving, so the view's own teardown cannot cancel the flight — measured after the fix:
+0.00 km from the device's own position, 64.6 km from the home point.
+
 **Landscape no longer hides the interface.** Turning a phone sideways used to remove the
 header, the ON AIR strip, the control cluster and the status bar, leaving a bare map behind a
 small tab. It now keeps every one of those on screen at half scale instead — the map, and the
@@ -170,3 +181,11 @@ unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only res
 - **Header readability at the small end is a judgement call.** Base text is 15px and the fit
   scale lands around 0.47–0.61 on a 320–412px phone, so effective text is roughly 7–9px
   there. Deliberate and consistent, but it is the tightest constraint in the layout.
+- **A sighting published without coordinates still falls back to the home point.** The
+  publisher uses `coords?.lat ?? userPosition.lat`, and `userPosition` resolves to the home
+  point when there is no fix. In practice the operator taps the map so coordinates exist, but
+  the fallback should not be a real place at all. Left alone here because it is the publish
+  path and deserves its own decision.
+- **In landscape the map's measured top offset reads 0** rather than the chrome height,
+  meaning the map may start underneath the chrome there. Unexplained; worth checking on a real
+  device before trusting the landscape layout.

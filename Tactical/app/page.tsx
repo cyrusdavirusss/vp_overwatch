@@ -483,9 +483,17 @@ export default function VPOverwatch() {
    * operator has hidden would be its own bug.
    */
   const onNearestAircraft = useCallback(() => {
-    const from = clientLocation.position
-      ? { lat: clientLocation.position.lat, lng: clientLocation.position.lng }
-      : { lat: HOME_LAT, lng: HOME_LNG }
+    // "Nearest to me" needs to know where "me" is. This used to fall back to the HOME
+    // POINT when there was no fix, which silently answered a different question: it flew
+    // the operator to whichever aircraft happened to be closest to the configured home
+    // location, and on a machine whose owner lives there that reads as working correctly.
+    // Ask instead — a press is a user gesture, so the browser will actually prompt.
+    const fix = clientLocation.position
+    if (!fix) {
+      clientLocation.requestLocation()
+      return
+    }
+    const from = { lat: fix.lat, lng: fix.lng }
     const ranked = filteredAircraft
       .map((a) => {
         const p = sampleTrack(a.track, 0)
@@ -518,22 +526,40 @@ export default function VPOverwatch() {
   }, [])
 
   const onRecenter = useCallback(() => {
-    setFollowUser(true)
-    // Bump the recenter trigger so the map flies to the user on every press, even
-    // when the GPS fix is unchanged (otherwise the focus dedup swallows it).
-    setRecenterCounter((c) => c + 1)
-    forceFocusRef.current = true
-    if (clientLocation.position) {
-      setFocusTarget({ lat: clientLocation.position.lat, lng: clientLocation.position.lng })
-      forceFocusRef.current = false
-    } else {
-      // No fix yet — ASK THE BROWSER. This used to centre on the home point "meanwhile",
-      // which is worse than doing nothing: the map flies somewhere plausible and the
-      // operator reads that as a successful fix. A request here is a user gesture, which is
-      // exactly when the browser will show its permission prompt.
-      clientLocation.requestLocation()
+    // A location press inside Overwatch has to LEAVE Overwatch first — and it has to do
+    // that a FRAME before it moves the camera.
+    //
+    // Leaving Overwatch runs its teardown, and that teardown issues camera commands of its
+    // own: setPitch(0) to flatten the view, and the north-up pin's setBearing(0). A camera
+    // command CANCELS a running camera animation, so issuing the fly in the SAME commit let
+    // the teardown kill it — measured live: the view flattened and stayed on the reported
+    // mark, 72 km from the operator, never going to them at all.
+    //
+    // Deferring by one frame lets the teardown land first, so the fly is the last word.
+    const leavingOverwatch = overwatchReportId !== null
+    if (leavingOverwatch) setOverwatchReportId(null)
+
+    const flyToOperator = () => {
+      setFollowUser(true)
+      // Bump the recenter trigger so the map flies to the operator on EVERY press, even
+      // when the GPS fix is unchanged (otherwise the focus dedup swallows it).
+      setRecenterCounter((c) => c + 1)
+      forceFocusRef.current = true
+      if (clientLocation.position) {
+        setFocusTarget({ lat: clientLocation.position.lat, lng: clientLocation.position.lng })
+        forceFocusRef.current = false
+      } else {
+        // No fix yet — ASK THE BROWSER. This used to centre on the home point "meanwhile",
+        // which is worse than doing nothing: the map flies somewhere plausible and the
+        // operator reads that as a successful fix. A request here is a user gesture, which is
+        // exactly when the browser will show its permission prompt.
+        clientLocation.requestLocation()
+      }
     }
-  }, [clientLocation])
+
+    if (leavingOverwatch) requestAnimationFrame(flyToOperator)
+    else flyToOperator()
+  }, [clientLocation, overwatchReportId])
 
   /**
    * Pressing the location control means "show me where I am" — not "let me type my
@@ -555,9 +581,14 @@ export default function VPOverwatch() {
    * current filters are candidates.
    */
   const onNearestGround = useCallback(() => {
-    const from = clientLocation.position
-      ? { lat: clientLocation.position.lat, lng: clientLocation.position.lng }
-      : { lat: HOME_LAT, lng: HOME_LNG }
+    // Same rule as onNearestAircraft: never measure "nearest to me" from the home point.
+    // Ranking by a location the operator is not at produces a confident, wrong answer.
+    const fix = clientLocation.position
+    if (!fix) {
+      clientLocation.requestLocation()
+      return
+    }
+    const from = { lat: fix.lat, lng: fix.lng }
     const ranked = filteredReports
       .map((r) => {
         const d = haversineMetres(from, { lat: r.lat, lng: r.lng })
