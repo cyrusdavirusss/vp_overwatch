@@ -121,11 +121,13 @@ its mark — a patrol car for a police unit, a camera badge for a speed camera, 
 for a helicopter sighting. They are drawn as outlines rather than solids so the ground stays
 readable straight through them.
 
-**Helicopters hold a fixed orientation.** A rotary aircraft no longer turns its nose to follow
-its track while it moves. The rotor keeps spinning and the sensor cone keeps slewing
-independently, but the airframe itself stays put: at a three-second poll the heading is noisy,
-and a helicopter that wheeled around on every refresh read as twitchy rather than
-informative. Position and the sensor cone are what you actually read.
+**A tracking view for aircraft.** Opening the rotational view on an aircraft zooms in to a chase
+level (14), holds the bearing north and follows the contact. It deliberately does NOT orbit: the
+subject is already moving, and sweeping a circle around something in motion is two motions
+fighting each other. Every airframe's nose follows its own heading — an earlier pass pinned
+helicopters upright, reading "no rotation" in the rotational view as being about the icon when it
+meant the CAMERA must not orbit. That pin left a helicopter flying east with its nose locked
+north, which reads as broken rather than calm.
 
 **The review fixture now crosses the state.** The `?mock=1` helicopter used to orbit a 2 km
 circle over the CBD, which meant it barely moved: a measured 45-second trace covered 5px, so
@@ -202,13 +204,11 @@ unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only res
   map as a fault. Separately, the configured box is Melbourne metro
   (`144.0–145.8 / -38.6–-37.2`), not the state, so traffic outside it would not appear even if
   it existed.
-- **The helicopter fix is verified against the fixture, not against real traffic.** A rotary
-  contact's rotation is pinned before any heading is applied, so it cannot turn by definition.
-  The review fixture now flies a straight cross-state leg, and a 19-sample / 90-second trace
-  moved 15.8px along that line (net drift 15.0px, so it did not loop back) while holding
-  exactly one rotation value — so "no rotation WHILE MOVING" now has real displacement behind
-  it, which the old 2 km orbit could not provide (5px in 45s). What is still unverified is the
-  same behaviour on live ADS-B traffic, and there is none to test against.
+- **The aircraft tracking view is verified on the fixture, not on real traffic.** Confirmed on
+  the review helicopter: the view opens on the contact rather than a ground report, zooms from 7
+  to 14, holds pitch 58 and a single north bearing, keeps the contact framed, and its nose tracks
+  its own heading. What is unverified is the same behaviour on live ADS-B traffic — there is none
+  to test against.
 - **A sighting published without coordinates still falls back to the home point.** The
   publisher uses `coords?.lat ?? userPosition.lat`, and `userPosition` resolves to the home
   point when there is no fix. In practice the operator taps the map so coordinates exist, but

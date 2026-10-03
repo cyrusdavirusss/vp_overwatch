@@ -53,9 +53,9 @@ export const WHATS_NEW: WhatsNewEntry[] = [
       'Closing Overwatch flattens the camera and returns it to north, leaving you where you were looking. If there are no ground contacts to orbit, the launch control is disabled and says so rather than doing nothing.',
   },
   {
-    title: 'HELICOPTERS HOLD STEADY',
+    title: 'TRACKING VIEW',
     body:
-      'A helicopter no longer turns its nose to follow its track while it moves. The rotor keeps spinning and its sensor cone keeps sweeping, but the airframe itself stays put — at a three-second refresh the heading is noisy, and a contact that wheeled around on every update read as twitchy rather than informative. Position and the sensor cone are the things worth watching.',
+      "Opening the rotational view on an aircraft now zooms in close and follows it, so you can watch where it is going and what it passes over. Every contact's nose points along its own heading, so which way it is travelling is readable at a glance.",
   },
   {
     title: 'THE SAME BAR EVERYWHERE',
