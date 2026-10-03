@@ -24,6 +24,7 @@ import { RouteAlertPanel } from '@/components/route-alert-panel'
 import { useRealtimeData, sampleTrack, type RealtimeData } from '@/hooks/useRealtimeData'
 import { mockAircraft, mockRequested } from '@/lib/mock-flight'
 import { useClientLocation } from '@/hooks/useClientLocation'
+import { haversineMetres } from '@/lib/geo/haversine'
 import { useCommunityDots } from '@/hooks/useCommunityDots'
 import { useRouteAlerts } from '@/hooks/useRouteAlerts'
 import { useImmersiveLandscape } from '@/hooks/useImmersiveLandscape'
@@ -219,7 +220,7 @@ export default function VPOverwatch() {
   const [scrubT, setScrubT] = useState(0)
   const [selectedAircraftId, setSelectedAircraftId] = useState<string | null>(null)
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
-  const [snap, setSnap] = useState<'peek' | 'half' | 'full'>('peek')
+  const [snap, setSnap] = useState<'peek' | 'half'>('peek')
   const [filterOpen, setFilterOpen] = useState(false)
   const [followUser, setFollowUser] = useState(true)
   // Above this reported accuracy a fix may be drawn but must not drag the camera.
@@ -234,6 +235,15 @@ export default function VPOverwatch() {
   const [northLock, setNorthLock] = useState(false)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lng: number } | null>(null)
   const [fitAllCounter, setFitAllCounter] = useState(0)
+  /**
+   * Mirror of the live position for the placement callbacks. They must NOT depend on the
+   * position value: rebuilding the pick target on every GPS tick re-ran the map's framing
+   * effect and dragged the operator back to the wide view mid-placement, which made
+   * "zoom in, then place it accurately" impossible. Reads the latest value at call time.
+   */
+  const userPositionRef = useRef(userPosition)
+  useEffect(() => { userPositionRef.current = userPosition }, [userPosition])
+
   const [recenterCounter, setRecenterCounter] = useState(0)
   /** Set by an explicit location press so the next fix is used even if it is coarse. */
   const forceFocusRef = useRef(false)
@@ -345,6 +355,13 @@ export default function VPOverwatch() {
   const modeSCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive && a.isModeS).length, [liveData.aircraft])
   const [mlatBannerExpanded, setMlatBannerExpanded] = useState(false)
   const [showAR, setShowAR] = useState(false)
+  /**
+   * Overwatch: the ground report being ORBITED, or null when the view is off.
+   * Holds a report id rather than a coordinate so the orbit always tracks the
+   * live position of the unit it was pointed at, and so the map can pick the
+   * right hollow model from the report's own kind.
+   */
+  const [overwatchReportId, setOverwatchReportId] = useState<string | null>(null)
   const [showSubscribe, setShowSubscribe] = useState(false)
   const [pickingDest, setPickingDest] = useState(false)
   const [mapView, setMapView] = useState<MapViewType>('radar')
@@ -352,6 +369,30 @@ export default function VPOverwatch() {
     const order: MapViewType[] = ['radar', 'dark', 'light', 'grayscale', 'satellite']
     setMapView((v) => order[(order.indexOf(v) + 1) % order.length])
   }, [])
+
+  /**
+   * Overwatch reads the GROUND a unit is standing on, so it forces the satellite
+   * basemap: the radar/vector views stylise the terrain away, which removes exactly
+   * what the operator opened the view to look at. The basemap live before Overwatch
+   * is remembered and put back on exit, so leaving the view never silently changes a
+   * map setting the operator chose.
+   */
+  const preOverwatchView = useRef<MapViewType | null>(null)
+  useEffect(() => {
+    if (overwatchReportId) {
+      // Captured ONCE. Re-reading mapView on a later run would capture 'satellite'
+      // itself and we would "restore" the operator to satellite.
+      if (preOverwatchView.current === null) preOverwatchView.current = mapView
+      if (mapView !== 'satellite') setMapView('satellite')
+    } else if (preOverwatchView.current !== null) {
+      setMapView(preOverwatchView.current)
+      preOverwatchView.current = null
+    }
+    // Runs on entering/leaving Overwatch only. `mapView` is read at that moment
+    // rather than tracked — so a basemap the operator changes mid-Overwatch is
+    // still restored on exit, instead of overwriting what was remembered.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overwatchReportId])
 
   const onSelectAircraft = useCallback((id: string | null) => {
     setSelectedAircraftId(id)
@@ -366,6 +407,38 @@ export default function VPOverwatch() {
       }
     }
   }, [liveData.aircraft])
+
+  /**
+   * Fly to the closest aircraft to me.
+   *
+   * "Closest" means closest to MY position, because the person pressing it is standing
+   * somewhere and wants the airframe that is actually nearest them. With no fix yet it
+   * falls back to the home point rather than refusing to work — a button that silently
+   * does nothing is worse than one that is merely approximate.
+   *
+   * Pressing it again steps to the NEXT closest rather than re-selecting the same one, so
+   * a second press is never a dead press. It wraps back to the closest at the end.
+   *
+   * Only aircraft that pass the current filters are candidates: flying to something the
+   * operator has hidden would be its own bug.
+   */
+  const onNearestAircraft = useCallback(() => {
+    const from = clientLocation.position
+      ? { lat: clientLocation.position.lat, lng: clientLocation.position.lng }
+      : { lat: HOME_LAT, lng: HOME_LNG }
+    const ranked = filteredAircraft
+      .map((a) => {
+        const p = sampleTrack(a.track, 0)
+        if (!p) return null
+        const d = haversineMetres(from, { lat: p.lat, lng: p.lng })
+        return Number.isFinite(d) ? { id: a.id, d } : null
+      })
+      .filter((x): x is { id: string; d: number } => x !== null)
+      .sort((x, y) => x.d - y.d)
+    if (ranked.length === 0) return
+    const at = ranked.findIndex((x) => x.id === selectedAircraftId)
+    onSelectAircraft(ranked[(at + 1) % ranked.length].id)
+  }, [clientLocation.position, filteredAircraft, selectedAircraftId, onSelectAircraft, HOME_LAT, HOME_LNG])
 
   const onSelectReport = useCallback((id: string | null) => {
     setSelectedReportId(id)
@@ -416,6 +489,27 @@ export default function VPOverwatch() {
     }
   }, [onRecenter, clientLocation.permissionState])
 
+  /**
+   * Fly to the closest ground contact — the police/camera pin nearest me, walking through
+   * them on repeat presses exactly as the aircraft button does. Only pins passing the
+   * current filters are candidates.
+   */
+  const onNearestGround = useCallback(() => {
+    const from = clientLocation.position
+      ? { lat: clientLocation.position.lat, lng: clientLocation.position.lng }
+      : { lat: HOME_LAT, lng: HOME_LNG }
+    const ranked = filteredReports
+      .map((r) => {
+        const d = haversineMetres(from, { lat: r.lat, lng: r.lng })
+        return Number.isFinite(d) ? { id: r.id, d } : null
+      })
+      .filter((x): x is { id: string; d: number } => x !== null)
+      .sort((x, y) => x.d - y.d)
+    if (ranked.length === 0) return
+    const at = ranked.findIndex((x) => x.id === selectedReportId)
+    onSelectReport(ranked[(at + 1) % ranked.length].id)
+  }, [clientLocation.position, filteredReports, selectedReportId, onSelectReport, HOME_LAT, HOME_LNG])
+
   const onFitAll = useCallback(() => {
     setFitAllCounter((c) => c + 1)
   }, [])
@@ -464,13 +558,17 @@ export default function VPOverwatch() {
     setSelectedReportId(null)
     setFollowUser(false)
     setSightingPoint(null)
-    setSightingPick({ lat: userPosition.lat, lng: userPosition.lng, rangeM: SIGHTING_PICK_RANGE_M })
-  }, [userPosition.lat, userPosition.lng])
+    const at = userPositionRef.current
+    setSightingPick({ lat: at.lat, lng: at.lng, rangeM: SIGHTING_PICK_RANGE_M })
+  }, [])
 
-  // ── STEALTH HELICOPTER — scope half the state, hold north-up, arm the tap ──────
-  // The operator is placing a sighting of something that may not be on the map at all,
-  // so the view is set wide on purpose: wide enough to contain wherever the aircraft is,
-  // with north held up so that a direction judged against the ground stays true. Following
+  // ── STEALTH HELICOPTER — hold north-up, arm the tap, MOVE NOTHING ──────────────
+  // This used to zoom the map out to half the state on arming. That was the wrong trade:
+  // at that scale a fingertip is worth ±13 km, so the "helpful" wide view was the reason a
+  // sighting could not be placed accurately — and it also fought the operator, who was
+  // already looking at the part of the map where they had seen the aircraft. The view the
+  // operator has is the frame now: the mode arms the tap and leaves the camera alone.
+  // North is still held up, so a direction judged against the ground stays true. Following
   // is switched off, or the camera gets dragged back to the operator mid-placement.
   const onHelicopterMode = useCallback(() => {
     setSelectedAircraftId(null)
@@ -478,13 +576,10 @@ export default function VPOverwatch() {
     setFollowUser(false)
     setSightingPoint(null)
     setNorthLock(true)
-    setSightingPick({
-      lat: userPosition.lat,
-      lng: userPosition.lng,
-      rangeM: 0,
-      scopeAreaM2: HELI_SCOPE_AREA_M2,
-    })
-  }, [userPosition.lat, userPosition.lng])
+    const at = userPositionRef.current
+    // rangeM 0 and no scopeAreaM2: nothing to frame, so the map does not fly at all.
+    setSightingPick({ lat: at.lat, lng: at.lng, rangeM: 0 })
+  }, [])
 
   // A tap while armed records where the contact was seen. The pick stays armed
   // so a mis-tap is corrected by tapping again rather than starting over.
@@ -532,30 +627,47 @@ export default function VPOverwatch() {
     />
   ) : null
 
-  // Dedicated AR launch control — its own feature, anchored bottom-right of the
-  // UI (not bundled into the map-control FAB cluster).
-  const arLaunch = !showAR ? (
+  // ── Overwatch launch control ──────────────────────────────────────────────
+  // Overwatch orbits the selected ground unit and stands a hollow model on its
+  // reported position. Anchored bottom-right of the UI, not bundled into the
+  // map-control FAB cluster.
+  const toggleOverwatch = useCallback(() => {
+    setOverwatchReportId((cur) => {
+      if (cur) return null
+      // Prefer the operator's own selection; fall back to the top-ranked report
+      // so the control always does something rather than silently no-op-ing.
+      return selectedReportId ?? filteredReports[0]?.id ?? null
+    })
+  }, [selectedReportId, filteredReports])
+
+  const overwatchOn = overwatchReportId !== null
+  const arLaunch = (
     <button
-      onClick={() => setShowAR(true)}
-      aria-label="AR Sky — point your phone at aircraft"
-      title="AR Sky"
+      onClick={toggleOverwatch}
+      aria-label={
+        overwatchOn ? 'Exit Overwatch' : 'Overwatch — orbit the selected ground unit'
+      }
+      aria-pressed={overwatchOn}
+      title="Overwatch"
       style={{
         position: 'fixed', bottom: 20, right: 16, zIndex: 30,
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '11px 17px', borderRadius: 999,
-        background: 'rgba(45,140,255,0.18)', border: '1px solid rgba(45,140,255,0.55)',
+        background: overwatchOn ? 'rgba(45,140,255,0.34)' : 'rgba(45,140,255,0.18)',
+        border: `1px solid rgba(45,140,255,${overwatchOn ? '0.90' : '0.55'})`,
         color: 'var(--blue-hi)', backdropFilter: 'blur(8px)',
         fontFamily: 'var(--font-mono, monospace)', fontSize: 12, fontWeight: 700, letterSpacing: '0.14em',
         boxShadow: '0 4px 18px rgba(0,0,0,0.45), 0 0 14px rgba(45,140,255,0.22)', cursor: 'pointer',
       }}
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M23 7l-7 5 7 5V7z" />
-        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+        <circle cx="12" cy="12" r="8" />
+        <circle cx="12" cy="12" r="2.5" />
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
       </svg>
-      AR SKY
+      {overwatchOn ? 'EXIT OVERWATCH' : 'OVERWATCH'}
     </button>
-  ) : null
+  )
 
   /** Compact relative age for the VPS report list. `reportedAgo` is in SECONDS. */
   const formatAgo = (secs?: number | null): string => {
@@ -595,6 +707,8 @@ export default function VPOverwatch() {
           lastUpdate={liveData.lastUpdate}
           groundAgeSec={liveData.relay?.secondsSinceLastIngest}
           onSubscribeClick={() => setShowSubscribe(true)}
+          onNearestAircraft={onNearestAircraft}
+          onNearestGround={onNearestGround}
         />
 
         {/* ON AIR bar */}
@@ -602,6 +716,7 @@ export default function VPOverwatch() {
           aircraft={liveData.aircraft}
           selectedId={selectedAircraftId}
           onSelect={onSelectAircraft}
+          onNearest={onNearestAircraft}
         />
 
         {/* Main content — three columns: left rail, map, right rail. The panels
@@ -681,6 +796,7 @@ export default function VPOverwatch() {
               hasUserFix={clientLocation.position !== null}
               selectedAircraftId={selectedAircraftId}
               selectedReportId={selectedReportId}
+              overwatchReportId={overwatchReportId}
               onSelectAircraft={onSelectAircraft}
               onSelectReport={onSelectReport}
               scrubT={scrubT}
@@ -738,6 +854,7 @@ export default function VPOverwatch() {
               onHeading={heading.supported ? onToggleHeading : undefined}
               headingActive={headingMode}
               heading={heading.heading}
+              onArSky={() => setShowAR(true)}
             />
 
             {/* Route awareness — destination pick hint + threat panel (desktop) */}
@@ -895,13 +1012,14 @@ export default function VPOverwatch() {
             </div>
 
             <div className="vp-rail-section">
-              <div className="vp-rail-title">AR Sky</div>
+              <div className="vp-rail-title">Overwatch</div>
               <button
                 className="vp-view-tab"
                 style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
-                onClick={() => setShowAR(true)}
+                onClick={toggleOverwatch}
+                aria-pressed={overwatchOn}
               >
-                Launch AR
+                {overwatchOn ? 'Exit Overwatch' : 'Launch Overwatch'}
               </button>
             </div>
           </aside>
@@ -933,9 +1051,9 @@ export default function VPOverwatch() {
               collection/delivery service with no affiliation to either. */}
           <span>Road events via WazeAPI (wazeapi.com)</span>
         </footer>
-        {/* The floating AR launcher is mobile-only: on desktop the right rail
-            carries an AR Sky panel, so rendering both would be two controls for
-            one action. */}
+        {/* AR Sky's overlay. Its LAUNCH control is the AR Sky button in the map's FAB
+            cluster, which BOTH layouts render — so the overlay needs no launcher of
+            its own here, and the two layouts cannot drift apart again. */}
         {arOverlay}
       {showSubscribe && <SubscribeModal onClose={() => setShowSubscribe(false)} />}
       <TermsGate />
@@ -986,6 +1104,8 @@ export default function VPOverwatch() {
             lastUpdate={liveData.lastUpdate}
             groundAgeSec={liveData.relay?.secondsSinceLastIngest}
             onSubscribeClick={() => setShowSubscribe(true)}
+            onNearestAircraft={onNearestAircraft}
+            onNearestGround={onNearestGround}
           />
 
           {/* ON AIR bar — persistent airframe indicator, never filtered */}
@@ -994,6 +1114,7 @@ export default function VPOverwatch() {
               aircraft={liveData.aircraft}
               selectedId={selectedAircraftId}
               onSelect={onSelectAircraft}
+              onNearest={onNearestAircraft}
             />
           </div>
         </div>
@@ -1062,6 +1183,7 @@ export default function VPOverwatch() {
             hasUserFix={clientLocation.position !== null}
             selectedAircraftId={selectedAircraftId}
             selectedReportId={selectedReportId}
+            overwatchReportId={overwatchReportId}
             onSelectAircraft={onSelectAircraft}
             onSelectReport={onSelectReport}
             scrubT={scrubT}
@@ -1151,6 +1273,7 @@ export default function VPOverwatch() {
             onHeading={heading.supported ? onToggleHeading : undefined}
             headingActive={headingMode}
             heading={heading.heading}
+            onArSky={() => setShowAR(true)}
           />
 
           {/* Operator announcements — top-centre, dismissed per notice */}

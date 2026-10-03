@@ -810,6 +810,67 @@ samp,
   box-shadow: 0 0 0 2px var(--blue), 0 0 12px var(--blue-glow);
 }
 
+/* ── Overwatch ghost models ──────────────────────────────────────────────── */
+/* The hollow model Overwatch stands on a ground unit's reported position.
+   Deliberately unlike the badge: a badge asserts "this is here now", whereas
+   this is a viewing frame around a REPORTED position — so it is stroke and
+   blend only, with no fill and no opaque plate to hide the ground it stands on.
+   `--ghost-c` is set per marker from the unit's status colour.
+
+   MPTRAP: MapLibre positions every marker by writing an inline `transform` on
+   the element it was handed. A CSS animation on `transform` OUTRANKS an inline
+   style, so animating this container would clobber the positioning and fling the
+   ghost to the map origin. Every keyframe in this block therefore targets the
+   inner <svg>/<g>, never `.vp-ghost-marker` itself. */
+.vp-ghost-marker {
+  --ghost-c: var(--blue);
+  width: 96px;
+  height: 96px;
+  pointer-events: none;
+  filter: drop-shadow(0 0 5px var(--ghost-c)) drop-shadow(0 0 14px var(--ghost-c));
+}
+.vp-ghost-marker svg {
+  display: block;
+  overflow: visible;
+  animation: vp-ghost-hover 6.5s ease-in-out infinite;
+}
+/* The model reads as a hologram by BLENDING, not by tinting: over the dark map
+   the artwork's dark pixels drop out and only its lit structure survives, which
+   is what makes it read as hollow. Its own colours are left alone. If a browser
+   declines to blend, this degrades to the plain artwork at reduced opacity — a
+   duller ghost, not a broken one. */
+.vp-ghost-marker .vp-ghost-model {
+  mix-blend-mode: screen;
+  opacity: 0.78;
+}
+/* The one perpetual motion in the view: a slow orbit of the ring. Stroke only,
+   so it circles the model without ever covering the ground under it. */
+.vp-ghost-spin {
+  transform-box: view-box;
+  transform-origin: 24px 24px;
+  animation: vp-ghost-orbit 18s linear infinite;
+}
+@keyframes vp-ghost-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes vp-ghost-hover {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp-ghost-marker svg,
+  .vp-ghost-spin {
+    animation: none;
+  }
+}
+
 @keyframes silent-pulse {
   0%,
   100% {

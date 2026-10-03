@@ -15,6 +15,15 @@ interface FabClusterProps {
   headingActive?: boolean
   /** Live compass heading, for the needle. Null while unavailable. */
   heading?: number | null
+  /**
+   * AR Sky: aim the phone at the sky and see aircraft on the camera feed.
+   *
+   * It lives here rather than on its own corner launcher because Overwatch took
+   * that launcher. Without a home the camera-AR view would have become unreachable
+   * code with a live API route behind it — the feature is small but real, and the
+   * cluster is the established place for a view control.
+   */
+  onArSky?: () => void
 }
 
 export function FabCluster({
@@ -28,6 +37,7 @@ export function FabCluster({
   onHeading,
   headingActive,
   heading,
+  onArSky,
 }: FabClusterProps) {
   return (
     <div className="vp-fab-cluster">
@@ -76,6 +86,16 @@ export function FabCluster({
             <polygon points="12 19.5 9.8 12 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" />
           </svg>
           {headingActive && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-[var(--green)] border-2 border-ink-0 rounded-full" />}
+        </FabBtn>
+      )}
+      {/* AR Sky. Not a projection control like the rest: it replaces the map with a
+          camera view, so it keeps a plain eye icon and sits last. */}
+      {onArSky && (
+        <FabBtn onClick={onArSky} label="AR Sky — point your phone at aircraft">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4.9 12 C6.8 8.6 9.2 7.4 12 7.4 C14.8 7.4 17.2 8.6 19.1 12 C17.2 15.4 14.8 16.6 12 16.6 C9.2 16.6 6.8 15.4 4.9 12 Z" />
+            <circle cx="12" cy="12" r="2.4" />
+          </svg>
         </FabBtn>
       )}
     </div>
