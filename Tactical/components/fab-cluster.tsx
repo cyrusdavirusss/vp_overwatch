@@ -24,6 +24,10 @@ interface FabClusterProps {
    * cluster is the established place for a view control.
    */
   onArSky?: () => void
+  /** Open the What's New panel. */
+  onWhatsNew?: () => void
+  /** Show the release flag dot on the What's New control. */
+  whatsNewUnseen?: boolean
 }
 
 export function FabCluster({
@@ -38,6 +42,8 @@ export function FabCluster({
   headingActive,
   heading,
   onArSky,
+  onWhatsNew,
+  whatsNewUnseen,
 }: FabClusterProps) {
   return (
     <div className="vp-fab-cluster">
@@ -96,6 +102,20 @@ export function FabCluster({
             <path d="M4.9 12 C6.8 8.6 9.2 7.4 12 7.4 C14.8 7.4 17.2 8.6 19.1 12 C17.2 15.4 14.8 16.6 12 16.6 C9.2 16.6 6.8 15.4 4.9 12 Z" />
             <circle cx="12" cy="12" r="2.4" />
           </svg>
+        </FabBtn>
+      )}
+      {/* What's New. This is the release FLAG: a dot in the corner until the notes
+          have been opened once on this device, so an update gets noticed without a
+          banner covering the map. */}
+      {onWhatsNew && (
+        <FabBtn onClick={onWhatsNew} label="What's new in this release">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 3.5l1.7 4.6 4.6 1.7-4.6 1.7L11 16.1 9.3 11.5 4.7 9.8l4.6-1.7z" />
+            <path d="M18 15l0.7 1.9 1.9 0.7-1.9 0.7-0.7 1.9-0.7-1.9-1.9-0.7 1.9-0.7z" />
+          </svg>
+          {whatsNewUnseen && (
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-[var(--blue)] border-2 border-ink-0 rounded-full" />
+          )}
         </FabBtn>
       )}
     </div>
