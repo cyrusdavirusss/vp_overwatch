@@ -639,7 +639,7 @@
 /* ── FAB Cluster (floats over the map) ───────────────────────────────────── */
 .vp-fab-cluster {
   position: absolute;
-  bottom: 76px; /* clear the dedicated AR Sky button anchored at the corner */
+  bottom: 76px; /* clear the dedicated Overwatch button anchored at the corner */
   right: 16px;
   display: flex;
   flex-direction: column;
@@ -679,13 +679,10 @@
   border-color: rgba(255,45,45, 0.4);
   color: var(--red);
 }
-/* AR Sky — a premium feature, so it gets the bright blue rather than a
-   decorative second accent colour. */
-.vp-fab.vp-fab--ar {
-  background: rgba(45, 140, 255, 0.12);
-  border-color: rgba(45, 140, 255, 0.42);
-  color: var(--blue-hi);
-}
+/* AR Sky used to have its own corner launcher styled here via `.vp-fab--ar`.
+   Nothing applied that class after the launcher moved into the FAB cluster, so the
+   rule was removed rather than left looking like live styling. AR Sky's control now
+   uses the cluster's ordinary FAB chrome, like every other view control. */
 
 /* ── Detail Panel ────────────────────────────────────────────────────────── */
 .vp-detail-panel {
@@ -1240,7 +1237,7 @@
     animation: none;
     /* Keep the last row clear of Android's gesture bar / iOS home indicator. */
     padding-bottom: env(safe-area-inset-bottom, 0px);
-    /* The AR Sky launch button is fixed at z-index 30 in page.tsx and was
+    /* The Overwatch launch button is fixed at z-index 30 in page.tsx and was
        drawing over the sheet's lower rows, hiding the heading value. The sheet
        is the foreground surface here, so it stacks above it. */
     z-index: 35;

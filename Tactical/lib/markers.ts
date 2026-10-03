@@ -245,3 +245,74 @@ export function reportMarkerSVG(
   )
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">${inner}</svg>`
 }
+
+// ── Overwatch ghost models ──────────────────────────────────────────────────
+/**
+ * The Overwatch view stands a HOLLOW model on a ground unit's reported position
+ * and orbits it, rather than showing the flat badge the map uses. Two models
+ * exist because the two ground threats are physically different objects: the
+ * unit is a car, the camera is a fixed cabinet on a post.
+ *
+ * Art is reused from `public/markers/` rather than drawn fresh — the police car
+ * is the operator's own artwork, which no badge kind has used since the cap
+ * glyphs took over `marked`/`unmarked`. The camera is taken as VECTOR
+ * (`camera-badge.svg`) even though its badge kind still uses the PNG: the ghost
+ * renders at 96px, where the raster softens and the vector stays crisp.
+ */
+export type GhostModel = 'police' | 'camera'
+
+export const GHOST_MODEL_ART: Record<GhostModel, string> = {
+  police: '/markers/marked-police-car.png',
+  camera: '/markers/camera-badge.svg',
+}
+
+/**
+ * Which ghost, if any, a ground kind gets in Overwatch.
+ *
+ * `marked` and `unmarked` are both a police CAR seen on the road, so both get the
+ * car; `rbt` (a random breath-test station) is a police presence on the road and
+ * takes the car too. Everything else — `stop`, `checkpoint`, `hidden`,
+ * `helicopter` — has no model, and Overwatch shows no ghost for it rather than
+ * standing a car on a hazard. Returns null when there is nothing honest to draw.
+ */
+export function ghostModelFor(kind: Report['kind']): GhostModel | null {
+  if (kind === 'marked' || kind === 'unmarked' || kind === 'rbt') return 'police'
+  if (kind === 'camera') return 'camera'
+  return null
+}
+
+/**
+ * A hollow "ghost" of a ground unit: a targeting frame and a slowly orbiting
+ * ring drawn around the model, with the model itself left translucent so the
+ * ground reads through it.
+ *
+ * The hollowness is deliberate and is what separates this from the badge: the
+ * badge asserts "this is here now", the ghost is a viewing frame around a
+ * reported position. It carries no fill of its own — the frame and ring are
+ * STROKES only, and the model is blended so its dark pixels drop out against
+ * the map.
+ *
+ * @param model Which object to stand on the mark.
+ * @param color Status colour — threat red for a unit, informational blue for a
+ *   camera, matching the badge convention in the map.
+ * @param size Rendered pixel size of the square frame.
+ */
+export function ghostMarkerSVG(
+  model: GhostModel,
+  color: string,
+  size: number
+): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 48 48" fill="none">
+  <g class="vp-ghost-spin">
+    <circle cx="24" cy="24" r="21" stroke="${color}" stroke-width="0.6" stroke-dasharray="1.6 3.4" opacity="0.55"></circle>
+  </g>
+  <g stroke="${color}" stroke-width="1.1" stroke-linecap="round" opacity="0.85">
+    <path d="M5 13 V5 H13"></path>
+    <path d="M35 5 H43 V13"></path>
+    <path d="M43 35 V43 H35"></path>
+    <path d="M13 43 H5 V35"></path>
+  </g>
+  <ellipse cx="24" cy="41.5" rx="9" ry="2.1" stroke="${color}" stroke-width="0.7" opacity="0.45"></ellipse>
+  <image class="vp-ghost-model" href="${GHOST_MODEL_ART[model]}" x="9" y="8" width="30" height="30" preserveAspectRatio="xMidYMid meet"></image>
+</svg>`
+}

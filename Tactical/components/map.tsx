@@ -13,7 +13,7 @@ import {
 } from '@/lib/data'
 import { buildMapStyle, registerPmtilesProtocol, outsideCoverage, type MapViewType } from '@/lib/map-style'
 import type { CommunityDot } from '@/lib/visual-sighting'
-import { aircraftMarkerSVG, reportMarkerSVG, isGlowingKind, RED, BLUE } from '@/lib/markers'
+import { aircraftMarkerSVG, reportMarkerSVG, isGlowingKind, ghostMarkerSVG, ghostModelFor, RED, BLUE } from '@/lib/markers'
 import { deadReckon } from '@/lib/geo/dead-reckoning'
 import {
   visionConeForAltitude,
@@ -47,6 +47,14 @@ export interface VPMapProps {
   hasUserFix?: boolean
   selectedAircraftId: string | null
   selectedReportId: string | null
+  /**
+   * Overwatch mode: the ground report to orbit, or null for the normal view.
+   *
+   * Passed as an ID rather than a coordinate so the orbit follows the report's
+   * live position and so the map can choose the hollow model from the report's
+   * own `kind` — a caller cannot silently stand a police car on a speed camera.
+   */
+  overwatchReportId?: string | null
   onSelectAircraft: (id: string | null) => void
   onSelectReport: (id: string | null) => void
   scrubT: number
@@ -113,6 +121,19 @@ export interface VPMapProps {
 // positions interpolate over ~900ms so live polls never snap.
 const FOCUS_MS = 400
 const FOCUS_ZOOM = 10
+
+// ── Overwatch ───────────────────────────────────────────────────────────────
+/** Degrees of bearing per second the Overwatch camera sweeps around its mark.
+ *  Deliberately slow: this is a viewing motion for reading the ground a report
+ *  sits on, not a search pattern, and a faster spin is unwatchable for more than
+ *  a few seconds. A full circle takes a minute. */
+const OVERWATCH_ORBIT_DPS = 6
+/** Tilt of the Overwatch camera. Steep enough to read the ground the model
+ *  stands on, shallow enough that the ghost still reads as a standing object
+ *  rather than a plan view. */
+const OVERWATCH_PITCH = 58
+/** Close enough that the ghost is the subject of the frame, not a detail on it. */
+const OVERWATCH_ZOOM = 16.5
 const AIRCRAFT_TWEEN_MS = 900
 
 /**
@@ -287,6 +308,7 @@ export function VPMap({
   hasUserFix = true,
   selectedAircraftId,
   selectedReportId,
+  overwatchReportId = null,
   onSelectAircraft,
   onSelectReport,
   scrubT,
@@ -328,6 +350,20 @@ export function VPMap({
       map.dragRotate.disable()
       map.touchZoomRotate.disableRotation()
       if (Math.abs(map.getBearing()) > 0.2) map.setBearing(0)
+      return
+    }
+
+    // ── Overwatch is the ONE mode that turns the map on purpose ──────────────
+    // The north-up hold below would fight it silently. Every setBearing fires a
+    // `rotate` event, pinNorth snaps the bearing straight back to 0, and the orbit
+    // becomes a no-op — measured: the loop ran at 50fps and the bearing never left
+    // 0. Worse, that snap IS a camera command, so it also CANCELS the in-flight
+    // Overwatch easeTo: the centre arrived while the pitch stalled at 1.2° instead
+    // of the intended 58° and the zoom never moved. Rotation is therefore handed to
+    // the orbit for as long as Overwatch is up, and the hold returns when it closes.
+    if (overwatchReportId && !northLock && !headingMode) {
+      map.dragRotate.enable()
+      map.touchZoomRotate.enableRotation()
       return
     }
 
@@ -376,7 +412,7 @@ export function VPMap({
       // Deliberately no re-enable: leaving head-up returns to north-up, it does not return
       // to a map the user can twist by accident.
     }
-  }, [headingMode, headingRef, northLock, ready])
+  }, [headingMode, headingRef, northLock, ready, overwatchReportId])
   // Set when the map cannot be created at all — no WebGL context, or a context
   // lost mid-session. Without this the throw escapes to the page-level error
   // boundary and the entire app becomes "This page couldn't load", so a client
@@ -1031,6 +1067,14 @@ export function VPMap({
     const live = new Set<string>()
 
     for (const r of visible) {
+      // A report with no usable position is SKIPPED, not drawn. This loop used to
+      // hand its coordinates straight to setLngLat: a single report arriving without
+      // a lat/lng threw "Invalid LngLat object: (NaN, NaN)" INSIDE the map's error
+      // boundary, which took the entire map down — aircraft, reports and all — over
+      // one bad row. The relay's own filter makes that rare, but "rare" is not
+      // "impossible" on a service-to-service boundary, and the failure mode was the
+      // whole product. Skipping the row degrades one contact instead.
+      if (!Number.isFinite(r.lat) || !Number.isFinite(r.lng)) continue
       live.add(r.id)
       const isSel = r.id === selectedReportId
       // CONFIRMED ground threat → threat red; single-source Reported → softer green.
@@ -1074,7 +1118,156 @@ export function VPMap({
     }
   }, [ready, reports, scrubT, layers.reports, selectedReportId, onSelectReport])
 
-  // ── Community sighting dots (crowdsourced, Signal Blue, APPROX) ─────────
+  // ── Overwatch: circle a ground unit and stand its hollow model on the mark ──
+  // Two effects, deliberately. The one that matters is that the CAMERA must not
+  // restart when data polls: `reports` is a fresh array on every feed tick, so an
+  // orbit effect that depended on it would re-run easeTo and reset the bearing
+  // several times a minute — the view would stutter instead of circling. The
+  // camera therefore reads reports through a ref and depends only on WHICH report
+  // is being orbited.
+  const orbitRef = useRef<number | null>(null)
+  const ghostMarker = useRef<maplibregl.Marker | null>(null)
+  const orbitCentreRef = useRef<{ lat: number; lng: number } | null>(null)
+  const reportsRef = useRef(reports)
+  useEffect(() => {
+    reportsRef.current = reports
+  }, [reports])
+
+  useEffect(() => {
+    const map = mapRef.current
+    const stopOrbit = () => {
+      if (orbitRef.current !== null) {
+        cancelAnimationFrame(orbitRef.current)
+        orbitRef.current = null
+      }
+    }
+    if (!ready || !map || !overwatchReportId) {
+      stopOrbit()
+      orbitCentreRef.current = null
+      return
+    }
+    const report = reportsRef.current.find((r) => r.id === overwatchReportId)
+    // A stealth / head-up view refuses rotation outright (northLock), because the
+    // operator is judging north against the ground there. Overwatch still draws
+    // its ghost in that mode; it just leaves the camera alone rather than fighting
+    // the north lock.
+    //
+    // The finite check is not paranoia: a camera move to a non-finite coordinate
+    // THROWS, and that throw lands in the map's error boundary and takes the whole
+    // map down rather than just this view. A report that arrives without a usable
+    // position is therefore refused here, before it can reach the camera.
+    if (
+      !report ||
+      northLock ||
+      !Number.isFinite(report.lat) ||
+      !Number.isFinite(report.lng)
+    ) {
+      stopOrbit()
+      return
+    }
+
+    orbitCentreRef.current = { lat: report.lat, lng: report.lng }
+    const SETTLE_MS = 950
+    map.easeTo({
+      center: [report.lng, report.lat],
+      zoom: Math.max(map.getZoom(), OVERWATCH_ZOOM),
+      pitch: OVERWATCH_PITCH,
+      duration: SETTLE_MS,
+      essential: true,
+    })
+
+    stopOrbit()
+    // The sweep starts only AFTER the settle has finished. MapLibre cancels a
+    // running camera animation the moment the next camera command arrives, so a
+    // setBearing issued during the easeTo stopped it dead — measured: the centre
+    // arrived, the pitch stalled at 1.2° and the zoom never moved, leaving the view
+    // flat and wide. Starting on a timer just past the settle keeps the two
+    // commands from overlapping.
+    const startTimer = window.setTimeout(() => {
+      let last = performance.now()
+      const tick = (now: number) => {
+        const dt = (now - last) / 1000
+        last = now
+        // setBearing every frame — a single easeTo sweeps once and then stops at
+        // 360°, and the sweep is meant to be continuous.
+        map.setBearing((map.getBearing() + OVERWATCH_ORBIT_DPS * dt) % 360)
+        orbitRef.current = requestAnimationFrame(tick)
+      }
+      orbitRef.current = requestAnimationFrame(tick)
+    }, SETTLE_MS + 50)
+
+    return () => {
+      window.clearTimeout(startTimer)
+      stopOrbit()
+      // Leave the map as Overwatch found it. Closing the view would otherwise strand
+      // the operator on a tilted map, and the north-up hold above only pins the
+      // BEARING — nothing else flattens the pitch.
+      map.easeTo({ pitch: 0, duration: 500, essential: true })
+    }
+  }, [ready, overwatchReportId, northLock])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map || !overwatchReportId) {
+      ghostMarker.current?.remove()
+      ghostMarker.current = null
+      return
+    }
+    const report = reports.find((r) => r.id === overwatchReportId)
+    // A report with no usable position is refused here for the same reason the
+    // camera refuses it above: setLngLat with a non-finite coordinate throws into
+    // the map's error boundary and takes the WHOLE map down, not just this view.
+    const model =
+      report && Number.isFinite(report.lat) && Number.isFinite(report.lng)
+        ? ghostModelFor(report.kind)
+        : null
+    // A kind with no honest model — stop, checkpoint, hidden, helicopter — gets
+    // no ghost at all. Better no object than the wrong object on the mark.
+    if (!report || !model) {
+      ghostMarker.current?.remove()
+      ghostMarker.current = null
+      return
+    }
+
+    // Follow a re-report. Waze revises a position as the report is confirmed, and
+    // a ghost left standing on the old one reads as a second unit. The centre is
+    // SET rather than eased: an in-flight easeTo would fight the orbit's own
+    // per-frame setBearing, and a correction of this size is imperceptible.
+    const centre = orbitCentreRef.current
+    if (!northLock && centre) {
+      const movedM = Math.hypot(
+        (report.lat - centre.lat) * 111320,
+        (report.lng - centre.lng) * 111320 * Math.cos((centre.lat * Math.PI) / 180)
+      )
+      if (movedM > 30) {
+        orbitCentreRef.current = { lat: report.lat, lng: report.lng }
+        map.setCenter([report.lng, report.lat])
+      }
+    }
+
+    if (!ghostMarker.current) {
+      const el = document.createElement('div')
+      el.className = 'vp-ghost-marker'
+      ghostMarker.current = new maplibregl.Marker({
+        element: el,
+        // Bottom-anchored: the model STANDS on the reported point, so the mark is
+        // where its wheels are rather than its centre.
+        anchor: 'bottom',
+      })
+        .setLngLat([report.lng, report.lat])
+        .addTo(map)
+    }
+    const el = ghostMarker.current.getElement() as HTMLDivElement
+    // Threat red for a unit, informational blue for a camera — the same
+    // convention the badge layer uses, so the two can never disagree about what
+    // colour a camera is.
+    const color = model === 'police' ? RED : BLUE
+    el.style.setProperty('--ghost-c', color)
+    el.innerHTML = ghostMarkerSVG(model, color, 96)
+    ghostMarker.current.setLngLat([report.lng, report.lat])
+  }, [ready, overwatchReportId, reports, northLock])
+
+  // ── Community sighting dots (crowdsourced, Signal Blue, APPROX) ──────────
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map) return
