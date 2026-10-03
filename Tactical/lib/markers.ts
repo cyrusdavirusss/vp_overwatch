@@ -259,26 +259,63 @@ export function reportMarkerSVG(
  * (`camera-badge.svg`) even though its badge kind still uses the PNG: the ghost
  * renders at 96px, where the raster softens and the vector stays crisp.
  */
-export type GhostModel = 'police' | 'camera'
+export type GhostModel = 'police' | 'camera' | 'helicopter'
 
-export const GHOST_MODEL_ART: Record<GhostModel, string> = {
+/**
+ * External art, for the models that HAVE art.
+ *
+ * `helicopter` is deliberately absent: its ghost is drawn inline (see ghostBody)
+ * because the only rotary art in the repo is the aircraft marker, which is painted
+ * aviation amber — reserved for ACTIVE AIRCRAFT. A helicopter SIGHTING is a ground
+ * report, so amber would be both off-palette and misleading. Inline paths take the
+ * ghost's own status colour instead, so the model matches the frame around it.
+ */
+export const GHOST_MODEL_ART: Record<'police' | 'camera', string> = {
   police: '/markers/marked-police-car.png',
   camera: '/markers/camera-badge.svg',
 }
 
 /**
- * Which ghost, if any, a ground kind gets in Overwatch.
+ * Which ghost a ground kind gets in Overwatch.
  *
  * `marked` and `unmarked` are both a police CAR seen on the road, so both get the
  * car; `rbt` (a random breath-test station) is a police presence on the road and
- * takes the car too. Everything else — `stop`, `checkpoint`, `hidden`,
- * `helicopter` — has no model, and Overwatch shows no ghost for it rather than
- * standing a car on a hazard. Returns null when there is nothing honest to draw.
+ * takes the car too. `camera` is a fixed cabinet on a post. `helicopter` is a
+ * crowdsourced SIGHTING rather than a unit position, but it is a ground contact the
+ * operator can orbit, and orbiting an empty frame was reported as a defect — so it
+ * gets a model of its own.
+ *
+ * `stop`, `checkpoint` and `hidden` still return null: they are road events, not
+ * objects, and Overwatch shows no model rather than standing the wrong one on the
+ * mark.
  */
 export function ghostModelFor(kind: Report['kind']): GhostModel | null {
   if (kind === 'marked' || kind === 'unmarked' || kind === 'rbt') return 'police'
   if (kind === 'camera') return 'camera'
+  if (kind === 'helicopter') return 'helicopter'
   return null
+}
+
+/**
+ * The model itself: the operator's art where it exists, an inline glyph otherwise.
+ * Both are drawn inside the same 30x30 box the <image> models occupy, so every ghost
+ * stands at the same scale on its mark.
+ */
+function ghostBody(model: GhostModel, color: string): string {
+  if (model === 'helicopter') {
+    // Inline so the model takes the ghost's status colour — see GHOST_MODEL_ART.
+    return `<g class="vp-ghost-model" stroke="${color}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <ellipse cx="24" cy="15" rx="12.5" ry="1.6" opacity="0.7"></ellipse>
+    <path d="M24 15.6 v5.2"></path>
+    <path d="M19 26.4 c0 -3.2 2.3 -5.2 5 -5.2 s5 2 5 5.2 v3.4 c0 1.6 -1.3 2.9 -2.9 2.9 h-4.2 c-1.6 0 -2.9 -1.3 -2.9 -2.9 z"></path>
+    <path d="M29 25.6 h5.4"></path>
+    <path d="M19 25 l-7.6 -2.2"></path>
+    <circle cx="10.4" cy="22.3" r="1.7"></circle>
+    <path d="M20.5 32.7 v2.6 M27.5 32.7 v2.6"></path>
+    <path d="M17 35.3 h14"></path>
+  </g>`
+  }
+  return `<image class="vp-ghost-model" href="${GHOST_MODEL_ART[model]}" x="9" y="8" width="30" height="30" preserveAspectRatio="xMidYMid meet"></image>`
 }
 
 /**
@@ -293,8 +330,8 @@ export function ghostModelFor(kind: Report['kind']): GhostModel | null {
  * the map.
  *
  * @param model Which object to stand on the mark.
- * @param color Status colour — threat red for a unit, informational blue for a
- *   camera, matching the badge convention in the map.
+ * @param color Status colour — threat red for a unit or a sighting, informational
+ *   blue for a camera, matching the badge convention in the map.
  * @param size Rendered pixel size of the square frame.
  */
 export function ghostMarkerSVG(
@@ -313,6 +350,6 @@ export function ghostMarkerSVG(
     <path d="M13 43 H5 V35"></path>
   </g>
   <ellipse cx="24" cy="41.5" rx="9" ry="2.1" stroke="${color}" stroke-width="0.7" opacity="0.45"></ellipse>
-  <image class="vp-ghost-model" href="${GHOST_MODEL_ART[model]}" x="9" y="8" width="30" height="30" preserveAspectRatio="xMidYMid meet"></image>
+  ${ghostBody(model, color)}
 </svg>`
 }

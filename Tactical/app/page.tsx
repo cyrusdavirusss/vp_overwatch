@@ -5,6 +5,8 @@ import { VPHeader } from '@/components/vp-header'
 import { AnnouncementsBanner } from '@/components/announcements-banner'
 import { OnAirBar as VPOnAirBar } from '@/components/on-air-bar'
 import { FabCluster } from '@/components/fab-cluster'
+import { WhatsNewPanel } from '@/components/whats-new'
+import { hasSeenWhatsNew, markWhatsNewSeen } from '@/lib/whats-new'
 import { AircraftDetail } from '@/components/aircraft-detail'
 import { ReportDetail } from '@/components/report-detail'
 import { FilterPanel, type Filters } from '@/components/filter-panel'
@@ -362,6 +364,26 @@ export default function VPOverwatch() {
    * right hollow model from the report's own kind.
    */
   const [overwatchReportId, setOverwatchReportId] = useState<string | null>(null)
+
+  // ── What's New ──────────────────────────────────────────────────────────────
+  // The release FLAG is device-local and read on the client only: it lives in
+  // localStorage, so reading it during render would desync the server-rendered
+  // markup (and localStorage does not exist during SSR at all).
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false)
+  const [whatsNewUnseen, setWhatsNewUnseen] = useState(false)
+  useEffect(() => {
+    setWhatsNewUnseen(!hasSeenWhatsNew())
+  }, [])
+  const openWhatsNew = useCallback(() => {
+    setWhatsNewOpen(true)
+    // Cleared on OPEN, not on close: the operator has been shown the notes the
+    // moment they appear, and a flag that survives a glance would nag.
+    markWhatsNewSeen()
+    setWhatsNewUnseen(false)
+  }, [])
+  const whatsNew = whatsNewOpen ? (
+    <WhatsNewPanel onClose={() => setWhatsNewOpen(false)} />
+  ) : null
   const [showSubscribe, setShowSubscribe] = useState(false)
   const [pickingDest, setPickingDest] = useState(false)
   const [mapView, setMapView] = useState<MapViewType>('radar')
@@ -867,6 +889,8 @@ export default function VPOverwatch() {
               headingActive={headingMode}
               heading={heading.heading}
               onArSky={() => setShowAR(true)}
+              onWhatsNew={openWhatsNew}
+              whatsNewUnseen={whatsNewUnseen}
             />
 
             {/* Route awareness — destination pick hint + threat panel (desktop) */}
@@ -1069,6 +1093,7 @@ export default function VPOverwatch() {
             cluster, which BOTH layouts render — so the overlay needs no launcher of
             its own here, and the two layouts cannot drift apart again. */}
         {arOverlay}
+        {whatsNew}
       {showSubscribe && <SubscribeModal onClose={() => setShowSubscribe(false)} />}
       <TermsGate />
       </div>
@@ -1288,6 +1313,8 @@ export default function VPOverwatch() {
             headingActive={headingMode}
             heading={heading.heading}
             onArSky={() => setShowAR(true)}
+            onWhatsNew={openWhatsNew}
+            whatsNewUnseen={whatsNewUnseen}
           />
 
           {/* Operator announcements — top-centre, dismissed per notice */}
@@ -1359,6 +1386,7 @@ export default function VPOverwatch() {
       </div>
       {arLaunch}
       {arOverlay}
+      {whatsNew}
       {showSubscribe && <SubscribeModal onClose={() => setShowSubscribe(false)} />}
       <TermsGate />
     </div>
