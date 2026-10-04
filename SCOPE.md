@@ -122,12 +122,18 @@ for a helicopter sighting. They are drawn as outlines rather than solids so the 
 readable straight through them.
 
 **A tracking view for aircraft.** Opening the rotational view on an aircraft zooms in to a chase
-level (14), holds the bearing north and follows the contact. It deliberately does NOT orbit: the
-subject is already moving, and sweeping a circle around something in motion is two motions
-fighting each other. Every airframe's nose follows its own heading — an earlier pass pinned
-helicopters upright, reading "no rotation" in the rotational view as being about the icon when it
-meant the CAMERA must not orbit. That pin left a helicopter flying east with its nose locked
-north, which reads as broken rather than calm.
+level and follows the contact. It deliberately does NOT orbit: the subject is already moving, and
+sweeping a circle around something in motion is two motions fighting each other.
+
+The camera is a TRACK-UP chase, modelled on `gods-eye-view`'s Cesium camera, whose own comment
+gives the trick: its HeadingPitchRange is built from the path's forward heading because that
+"keeps the camera behind the vehicle". Here the bearing follows the aircraft's heading, so the view
+sits behind and parallel to travel, and because the icon's rotation is the same value the two
+cancel and the nose points straight up the screen. The pitch is 74 against the ground orbit's 58 —
+a chase wants the horizon and a survey wants the ground — which needs the map's pitch cap raised
+from MapLibre's default 60, or it silently clamps back toward top-down. Framing is per role: a
+helicopter at zoom 14, fixed wing two levels further out at 12, because a plane crosses the state
+while a helicopter works locally.
 
 **The review fixture now crosses the state.** The `?mock=1` helicopter used to orbit a 2 km
 circle over the CBD, which meant it barely moved: a measured 45-second trace covered 5px, so

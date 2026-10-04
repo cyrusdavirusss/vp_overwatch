@@ -1282,7 +1282,9 @@
        is the foreground surface here, so it stacks above it. */
     z-index: 35;
   }
-  .vp-fab-cluster { bottom: calc(var(--vp-panel-h, 42%) + 16px); }
+  /* Lifted clear of the Overwatch button, which now rides just above the sheet at
+     panel-h + 24 and is 42px tall. Without this the cluster and the button overlap. */
+  .vp-fab-cluster { bottom: calc(var(--vp-panel-h, 42%) + 74px); }
   .vp-map-pill    { display: none; }
   /* The header is a drag zone, so it must not scroll the sheet instead. */
   .vp-detail-panel .vp-panel-header { touch-action: none; }
