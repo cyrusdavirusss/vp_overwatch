@@ -129,11 +129,27 @@ The camera is a TRACK-UP chase, modelled on `gods-eye-view`'s Cesium camera, who
 gives the trick: its HeadingPitchRange is built from the path's forward heading because that
 "keeps the camera behind the vehicle". Here the bearing follows the aircraft's heading, so the view
 sits behind and parallel to travel, and because the icon's rotation is the same value the two
-cancel and the nose points straight up the screen. The pitch is 74 against the ground orbit's 58 —
+cancel and the nose points straight up the screen. The pitch is 78 against the ground orbit's 58 —
 a chase wants the horizon and a survey wants the ground — which needs the map's pitch cap raised
 from MapLibre's default 60, or it silently clamps back toward top-down. Framing is per role: a
-helicopter at zoom 14, fixed wing two levels further out at 12, because a plane crosses the state
-while a helicopter works locally.
+helicopter at zoom 16.5, fixed wing two levels further out at 14.5, because a plane crosses the
+state while a helicopter works locally.
+
+**Two MapLibre marker gotchas, both of which cost a round of "it still looks wrong":**
+
+- Markers default to VIEWPORT rotation alignment, so they do not inherit the map's bearing. In a
+  north-up view that is invisible, but in a track-up view the aircraft keeps pointing at its
+  compass heading on screen while the map has that heading pointing up — it flies sideways.
+  `rotationAlignment: 'map'` is required, and it is load-bearing.
+- Setting `rotationAlignment` ALONE also pitch-aligns the glyph, because MapLibre derives
+  `_pitchAlignment` from `_rotationAlignment` when pitchAlignment is left `'auto'`. That lays the
+  marker flat into the ground with `rotateX(pitch)` — measured `rotateX(78deg) rotateZ(-97.56deg)`
+  — and a squashed top-down helicopter lying on tilted ground reads as birdseye no matter how far
+  the camera tilts. `pitchAlignment: 'viewport'` must be set explicitly alongside it.
+
+While debugging, note that with pitch applied MapLibre writes `matrix3d(...)` rather than
+`matrix(...)`; an angle helper that only parses `matrix` returns 0 and makes a correct build look
+broken.
 
 **The review fixture now crosses the state.** The `?mock=1` helicopter used to orbit a 2 km
 circle over the CBD, which meant it barely moved: a measured 45-second trace covered 5px, so
@@ -210,11 +226,14 @@ unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only res
   map as a fault. Separately, the configured box is Melbourne metro
   (`144.0–145.8 / -38.6–-37.2`), not the state, so traffic outside it would not appear even if
   it existed.
-- **The aircraft tracking view is verified on the fixture, not on real traffic.** Confirmed on
-  the review helicopter: the view opens on the contact rather than a ground report, zooms from 7
-  to 14, holds pitch 58 and a single north bearing, keeps the contact framed, and its nose tracks
-  its own heading. What is unverified is the same behaviour on live ADS-B traffic — there is none
-  to test against.
+- **The aircraft tracking view is verified on the fixture, not on real traffic.** Measured on the
+  review helicopter and the review fixed-wing: the view opens on the selected contact rather than a
+  ground report, frames the helicopter at zoom 16.5 and the plane at 14.5, holds pitch 78 with the
+  pitch cap raised to 85, tracks up so the map bearing equals the contact's heading, keeps the
+  contact framed as it travels, puts the nose 0deg from screen-up, and exits to pitch 0 with the
+  basemap restored. The ground orbit was re-checked in the same pass and still rotates. What is
+  UNVERIFIED is the same behaviour on live ADS-B traffic — there is none to test against, so every
+  number above comes from the synthetic fixture.
 - **A sighting published without coordinates still falls back to the home point.** The
   publisher uses `coords?.lat ?? userPosition.lat`, and `userPosition` resolves to the home
   point when there is no fix. In practice the operator taps the map so coordinates exist, but
