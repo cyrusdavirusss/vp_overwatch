@@ -111,9 +111,9 @@ basemaps flatten exactly the ground the view exists to inspect, and it restores 
 basemap you were on when you close it. Closing also flattens the camera and returns it to
 north, leaving you looking at where you were. An aircraft is a valid target too, and behaves
 differently ON PURPOSE: no orbit. A helicopter is already travelling, and sweeping a circle
-around something in motion is two motions fighting each other — so the bearing is pinned north
-and the camera simply tracks the contact, which is what makes the satellite ground beneath it
-readable. The launch control names which of the two it will open on, and is disabled only when
+around something in motion is two motions fighting each other — so the bearing follows the
+contact's heading, the view sits behind and parallel to travel, and the camera simply tracks the
+contact. That is what makes the satellite ground beneath it readable. The launch control names which of the two it will open on, and is disabled only when
 there is neither a selected aircraft nor a ground contact.
 
 **Hollow ghost models.** While the view is open, a translucent outline of the unit stands on

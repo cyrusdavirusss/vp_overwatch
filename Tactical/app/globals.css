@@ -598,7 +598,12 @@ samp,
   position: absolute;
   bottom: calc(100% + 7px);
   left: 50%;
-  transform: translateX(-50%);
+  /* Counter-rotated by the map's bearing (--vp-callout-yaw, set on the map container in
+     components/map.tsx). The callout has to live inside the marker element so it tracks the glyph,
+     but that marker is map-rotation-aligned so the aircraft keeps its heading in the tracking
+     view — and the label inherited that rotation and ran vertically. Measured before this:
+     a 56x185px box, i.e. sideways text. */
+  transform: translateX(-50%) rotate(var(--vp-callout-yaw, 0deg));
   background: var(--ink-2);
   border: 1px solid var(--amber-lo);
   border-radius: var(--r-sm, 6px);

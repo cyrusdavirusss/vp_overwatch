@@ -1300,7 +1300,7 @@ export default function VPOverwatch() {
 
         {/* Collapse handle — sits on the seam between chrome and map. */}
         <button
-          className="vp-chrome-collapse vp-imm-hide"
+          className="vp-chrome-collapse"
           style={{ top: chromeH, transition: 'top 240ms var(--ease-out, ease)' }}
           onClick={() => setChromeCollapsed((v) => !v)}
           aria-label={chromeCollapsed ? 'Show header' : 'Hide header'}

@@ -824,6 +824,32 @@ export function VPMap({
     })
   }, [ready, hasUserFix, user.lat, user.lng, user.accuracy])
 
+  /**
+   * Keep the aircraft callout UPRIGHT while its marker rotates.
+   *
+   * The callout is deliberately a child of the marker element — it has to be, so it stays anchored
+   * to the glyph — but that marker is map-rotation-aligned so the aircraft keeps its heading in the
+   * tracking view, and the callout inherited that rotation and went sideways. Measured: a 56x185px
+   * label box, text running vertically, and an effective rotation of -97.6deg, directly
+   * contradicting the CSS comment that it "never rotates".
+   *
+   * Counter-rotating by the map's bearing cancels it exactly. Driven by the map's own 'rotate'
+   * event rather than a frame loop, so it is correct in the tracking view, in the rotating ground
+   * orbit and under a manual twist alike, and costs nothing while the map is north-up.
+   */
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    const apply = () => {
+      map.getContainer().style.setProperty('--vp-callout-yaw', `${map.getBearing()}deg`)
+    }
+    apply()
+    map.on('rotate', apply)
+    return () => {
+      map.off('rotate', apply)
+    }
+  }, [ready])
+
   // ── Aircraft markers, trails, predictive vector, connections, density ──
   useEffect(() => {
     const map = mapRef.current
