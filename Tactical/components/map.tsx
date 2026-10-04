@@ -149,18 +149,17 @@ const OVERWATCH_PITCH = 58
  * this value would silently clamp and the view would stay close to top-down, which is exactly the
  * "it cant just be birdseye" complaint.
  */
-const OVERWATCH_TRACK_PITCH = 74
+const OVERWATCH_TRACK_PITCH = 78
 /** Close enough that the ghost is the subject of the frame, not a detail on it. */
 const OVERWATCH_ZOOM = 16.5
 /**
- * Zoom for the AIRCRAFT tracking view — closer than the ground orbit's, but not street-level.
+ * Zoom for the AIRCRAFT tracking view — now the SAME street-level 16.5 as the ground orbit.
  *
- * Without this the view kept whatever zoom the operator was already using, often a whole-state
- * overview, and at that scale a 58-degree tilt barely reads: the map looked like it had done
- * nothing but switch the basemap. A moving subject needs to be close enough to see where it is
- * going, and 16.5 would be too tight to see anything approach.
+ * It started at 14 and the verdict on it was "its too zoomed out get in way closer", so it now
+ * comes in as far as the ground view does. Fixed wing is framed two levels further out than this
+ * (see the tracking effect), because a plane crosses the state while a helicopter works locally.
  */
-const OVERWATCH_AIRCRAFT_ZOOM = 14
+const OVERWATCH_AIRCRAFT_ZOOM = 16.5
 const AIRCRAFT_TWEEN_MS = 900
 
 /**
@@ -865,7 +864,36 @@ export function VPMap({
           vision.className = 'vp-ac-vision'
           vision.title = 'Estimated forward visibility — a model (20/20 acuity, Johnson detection, clear air), not a sensor spec'
           el.appendChild(vision)
-          const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          // rotationAlignment 'map' is LOAD-BEARING for the aircraft tracking view, and this was
+          // the bug behind "the heli followed the tilt and tilted with the tilt".
+          //
+          // MapLibre's default leaves markers VIEWPORT-aligned: they do not inherit the map's
+          // bearing. In the normal north-up view that is indistinguishable from 'map', which is why
+          // it went unnoticed for so long. But the tracking view rotates the map to the contact's
+          // heading, and under viewport alignment the icon does not come along — so the helicopter
+          // kept pointing east on screen while the map had east pointing up the screen. It flew
+          // sideways.
+          //
+          // With 'map', the icon's own heading rotation and the map's bearing are applied in the
+          // same space, so in the tracking view they cancel exactly and the nose sits up the
+          // screen. In the normal view the bearing is 0 and nothing changes.
+          const marker = new maplibregl.Marker({
+            element: el,
+            anchor: 'center',
+            rotationAlignment: 'map',
+            // 'viewport' is NOT optional here, and leaving it out caused the "the heli followed the
+            // tilt and tilted with the tilt" report.
+            //
+            // MapLibre derives _pitchAlignment from _rotationAlignment when pitchAlignment is 'auto',
+            // so setting rotationAlignment 'map' alone ALSO pitch-aligns the glyph: it laid the
+            // marker flat into the ground plane with rotateX(pitch). Measured at pitch 78 the marker
+            // transform was `rotateX(78deg) rotateZ(-97.56deg)` — a squashed top-down helicopter
+            // lying on the tilted ground, still reading as birdseye however far the camera tilted.
+            //
+            // 'viewport' keeps the glyph SCREEN-facing while it still inherits the bearing, so the
+            // nose maths works and the aircraft looks like an aircraft.
+            pitchAlignment: 'viewport',
+          })
             .setLngLat(target)
             .addTo(map)
           const hdg0 = Number.isFinite(pos.hdg) ? pos.hdg : 0
