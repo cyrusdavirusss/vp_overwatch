@@ -785,7 +785,16 @@ export default function VPOverwatch() {
       aria-pressed={overwatchOn}
       title={overwatchAvailable || overwatchOn ? 'Overwatch' : 'Overwatch — nothing to open on'}
       style={{
-        position: 'fixed', bottom: 20, right: 16, zIndex: 30,
+        // Rides ABOVE the mobile detail sheet, exactly as the FAB cluster does, by reading the
+        // sheet's published top edge.
+        //
+        // It used to sit at a fixed bottom:20 with z-index 30, and the sheet was deliberately
+        // stacked above it (z-index 35) because the pill was drawing over the sheet's lower rows
+        // and hiding the heading value. The result was that selecting a unit — the very thing you
+        // do before launching this — hid the control completely. Lifting it clear of the sheet
+        // resolves both: the sheet keeps its rows, and the control is reachable while a unit is
+        // selected.
+        position: 'fixed', bottom: 'calc(var(--vp-panel-h, 0px) + 24px)', right: 16, zIndex: 34,
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '11px 17px', borderRadius: 999,
         background: overwatchOn ? 'rgba(45,140,255,0.34)' : 'rgba(45,140,255,0.18)',

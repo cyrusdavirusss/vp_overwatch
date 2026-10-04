@@ -138,6 +138,18 @@ const OVERWATCH_ORBIT_DPS = 6
  *  stands on, shallow enough that the ghost still reads as a standing object
  *  rather than a plan view. */
 const OVERWATCH_PITCH = 58
+/**
+ * Pitch for the AIRCRAFT tracking view — much closer to the horizon than the ground orbit's.
+ *
+ * Orbiting a ground unit is a SURVEY: you want to look down at the ground around it. Tracking an
+ * aircraft is a CHASE: the point is to see it against the horizon and read where it is going, so
+ * the camera comes down to roughly the contact's own horizon rather than hovering overhead.
+ *
+ * MapLibre clamps pitch at 60 by default, so the map is created with a raised cap — without that
+ * this value would silently clamp and the view would stay close to top-down, which is exactly the
+ * "it cant just be birdseye" complaint.
+ */
+const OVERWATCH_TRACK_PITCH = 74
 /** Close enough that the ghost is the subject of the frame, not a detail on it. */
 const OVERWATCH_ZOOM = 16.5
 /**
@@ -490,6 +502,10 @@ export function VPMap({
         attributionControl: false,
         dragRotate: true,
         pitchWithRotate: true,
+        // Default cap is 60, which is not shallow enough for the aircraft chase view to reach the
+        // horizon (OVERWATCH_TRACK_PITCH is 74). Without raising it the tilt silently clamps and
+        // the chase view stays near top-down.
+        maxPitch: 85,
       })
     } catch (err) {
       console.error('[VP-MAP INIT FAILED]', err)
@@ -1269,17 +1285,37 @@ export function VPMap({
 
     // Set rather than eased, so an in-flight camera animation cannot fight the follow — the
     // same reasoning as the orbit's exit flatten and the orbit's own start.
-    map.setBearing(0)
-    map.setPitch(OVERWATCH_PITCH)
-    // Zoom IN to a chase level. See OVERWATCH_AIRCRAFT_ZOOM: without this the view stayed at
-    // whatever scale the operator was already on, where the tilt is barely visible.
-    map.setZoom(Math.max(map.getZoom(), OVERWATCH_AIRCRAFT_ZOOM))
+    // A helicopter works locally; a plane crosses the state. Framing both at one scale would
+    // either crop the plane's surroundings or lose the helicopter in empty country, so fixed
+    // wing is framed two zoom levels further out.
+    const target = aircraftMarkers.current.get(overwatchAircraftId)
+    const targetZoom =
+      target?.role === 'rotary' ? OVERWATCH_AIRCRAFT_ZOOM : OVERWATCH_AIRCRAFT_ZOOM - 2
+    map.setPitch(OVERWATCH_TRACK_PITCH)
+    // SET, not max().
+    //
+    // This was Math.max(map.getZoom(), targetZoom), which kept the CLOSER of the two framings —
+    // so leaving one contact's view and opening another inherited the previous zoom entirely.
+    // Measured: the plane opened at the helicopter's 14 instead of its own 12, the two frames
+    // were identical, and the wider fixed-wing framing never happened at all. The framing IS the
+    // feature here, so it is set outright.
+    map.setZoom(targetZoom)
 
     let raf: number | null = null
     const tick = () => {
       const entry = aircraftMarkers.current.get(overwatchAircraftId)
       const pos = entry?.cur
       if (pos && Number.isFinite(pos[0]) && Number.isFinite(pos[1])) {
+        // ── TRACK-UP, the way gods-eye-view does it ──────────────────────────────────────
+        // Its chase camera is a Cesium HeadingPitchRange built from the path's FORWARD heading,
+        // and its own comment explains the trick: "HeadingPitchRange positions the camera
+        // opposite its heading vector. Passing the forward path heading therefore keeps the
+        // camera behind the vehicle." Same thing here — the bearing follows the aircraft's
+        // heading, so the view sits BEHIND and PARALLEL to travel with the nose up the screen.
+        //
+        // hdgShown, not the raw fix: the icon's own rotation IS hdgShown, and the map bearing
+        // cancels it, so the nose lands exactly screen-up instead of lagging the heading glide.
+        map.setBearing(entry?.hdgShown ?? 0)
         // Only issue a camera command when the contact has actually drifted. A stationary one
         // would otherwise cancel an unrelated animation every single frame.
         const c = map.getCenter()
