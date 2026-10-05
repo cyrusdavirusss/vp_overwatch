@@ -562,6 +562,16 @@ samp,
   transform: scale(1.18);
   filter: drop-shadow(0 0 12px var(--amber-glow));
 }
+/* The aircraft tracking view draws a SIDE ELEVATION instead of the usual top-down glyph, and
+   a side profile collapses into an unreadable blob at the normal 36px — measured on the review
+   sheet, it needs 52px to read and 60px to be unambiguous. So the marker BOX grows with the
+   glyph: the SVG is sized in the markup and this keeps `anchor: 'center'` meaning what it says,
+   rather than letting a 60px child overflow a 36px box off-centre. The only knock-on is the
+   callout, which is positioned off the box and so sits 12px higher. */
+.vp-ac-marker--tracking {
+  width: 60px;
+  height: 60px;
+}
 .vp-ac-rot {
   width: 100%;
   height: 100%;

@@ -160,6 +160,30 @@ const OVERWATCH_ZOOM = 16.5
  * (see the tracking effect), because a plane crosses the state while a helicopter works locally.
  */
 const OVERWATCH_AIRCRAFT_ZOOM = 16.5
+/**
+ * Bearing offset from the contact's own heading for the AIRCRAFT tracking view, in degrees.
+ *
+ * The contact's heading alone puts the camera BEHIND it (the `gods-eye-view` trick above),
+ * which shows the aircraft from its tail. The operator asked for the camera ABEAM instead —
+ * "a side angle going parallel with the heli or plane" — so the ground is seen from the side
+ * and sweeps across the frame while the aircraft appears to travel alongside the viewer.
+ *
+ * The sign and the art are one decision: the side glyphs in lib/markers.ts export NOSE-DOWN,
+ * and `screen angle = marker rotation − map bearing`. What the camera reads on screen is
+ * `hdgShown − (hdgShown − 90) = +90°`, a quarter turn clockwise, which turns that nose-down
+ * glyph to point LEFT. Flip this to +90 and the aircraft flies the other way.
+ */
+const OVERWATCH_TRACK_SIDE_DEG = -90
+/**
+ * Size the aircraft glyph is drawn at while the tracking view is open.
+ *
+ * 36 is the map's normal marker size and it does NOT survive the change to a side elevation:
+ * rendered to a review sheet at 36 and 44 px, both silhouettes collapsed into blobs (rotor,
+ * boom and skids merging), became clearly readable at 52, and unambiguous at 60. This is the
+ * "make the helicopter bigger" half of the request — it is a legibility requirement for the
+ * side view, not a preference. The marker box grows with it (`.vp-ac-marker--tracking`).
+ */
+const AIRCRAFT_TRACKING_SIZE = 60
 const AIRCRAFT_TWEEN_MS = 900
 
 /**
@@ -325,6 +349,12 @@ interface AircraftMarkerEntry {
   role: Aircraft['role']
   /** Stable id used to keep this marker's cone gradient unique on the map. */
   markerId: string
+  /**
+   * Which glyph is currently rendered — `view:role:size`. Guards the innerHTML swap so
+   * a poll cannot re-parse the SVG and restart the rotor animation (same pattern the
+   * ghost marker uses), and lets the tracking view swap to the side elevation.
+   */
+  glyphKey: string
 }
 
 export function VPMap({
@@ -928,8 +958,30 @@ export function VPMap({
             marker, rot, callout, cur: target, raf: null, fix: null, live: false,
             settle: null, hdgShown: hdg0, hdgFrom: hdg0,
             vision, coneKey: '', pointing: null, altM: null, hdg: hdg0, role: a.role, markerId: a.id,
+            glyphKey: `top:${a.role}:36`,
           }
           aircraftMarkers.current.set(a.id, entry)
+        }
+
+        // ── Glyph swap: the tracking view draws a SIDE ELEVATION, larger ──────────
+        // A top-down glyph cannot show a side view however the camera is aimed, because
+        // `pitchAlignment: 'viewport'` keeps it screen-facing — so the tracking view swaps in
+        // the side-profile art from lib/markers.ts. It also has to be bigger: on the review
+        // sheet both side glyphs collapsed into unreadable blobs at the map's normal 36px.
+        //
+        // Keyed rather than applied unconditionally, for the same reason the Overwatch ghost
+        // marker is keyed: this effect re-runs on every feed poll, and re-assigning innerHTML
+        // re-parses the SVG and RESTARTS the rotor animation at the poll cadence.
+        const tracking = a.id === overwatchAircraftId
+        const glyphKey = `${tracking ? 'side' : 'top'}:${a.role}:${tracking ? AIRCRAFT_TRACKING_SIZE : 36}`
+        if (entry.glyphKey !== glyphKey) {
+          entry.glyphKey = glyphKey
+          entry.rot.innerHTML = aircraftMarkerSVG(
+            a.role,
+            tracking ? AIRCRAFT_TRACKING_SIZE : 36,
+            tracking ? 'side' : 'top'
+          )
+          entry.marker.getElement().classList.toggle('vp-ac-marker--tracking', tracking)
         }
 
         // Callout content refreshes every data pass.
@@ -1156,6 +1208,9 @@ export function VPMap({
     layers.predictive,
     selectedAircraftId,
     onSelectAircraft,
+    // So opening/closing the tracking view swaps the glyph immediately rather than on the
+    // next feed poll — a mode change that visibly lags up to 3s reads as a broken control.
+    overwatchAircraftId,
   ])
 
   // ── Report markers ─────────────────────────────────────────────────────
@@ -1360,16 +1415,24 @@ export function VPMap({
       const entry = aircraftMarkers.current.get(overwatchAircraftId)
       const pos = entry?.cur
       if (pos && Number.isFinite(pos[0]) && Number.isFinite(pos[1])) {
-        // ── TRACK-UP, the way gods-eye-view does it ──────────────────────────────────────
+        // ── ABEAM TRACK, after gods-eye-view's HeadingPitchRange ─────────────────────────
         // Its chase camera is a Cesium HeadingPitchRange built from the path's FORWARD heading,
         // and its own comment explains the trick: "HeadingPitchRange positions the camera
         // opposite its heading vector. Passing the forward path heading therefore keeps the
-        // camera behind the vehicle." Same thing here — the bearing follows the aircraft's
-        // heading, so the view sits BEHIND and PARALLEL to travel with the nose up the screen.
+        // camera behind the vehicle." Taking that literally puts the view BEHIND the contact,
+        // looking at its tail.
         //
-        // hdgShown, not the raw fix: the icon's own rotation IS hdgShown, and the map bearing
-        // cancels it, so the nose lands exactly screen-up instead of lagging the heading glide.
-        map.setBearing(entry?.hdgShown ?? 0)
+        // This camera is deliberately offset from it: the bearing is the contact's heading plus
+        // OVERWATCH_TRACK_SIDE_DEG, so the view sits ABEAM and travels PARALLEL to the contact
+        // instead of behind it. The ground then sweeps across the frame and the aircraft reads
+        // side-on, which is what the operator asked for — "a side angle going parallel with the
+        // heli or plane". The glyph is swapped to a side elevation to match (see the marker
+        // block), because a top-down silhouette under an abeam camera still reads as birdseye.
+        //
+        // hdgShown, not the raw fix: the icon's own rotation IS hdgShown and the two are applied
+        // in the same space, so deriving the bearing from it keeps the quarter-turn exact
+        // instead of lagging the heading glide.
+        map.setBearing((entry?.hdgShown ?? 0) + OVERWATCH_TRACK_SIDE_DEG)
         // Only issue a camera command when the contact has actually drifted. A stationary one
         // would otherwise cancel an unrelated animation every single frame.
         const c = map.getCenter()

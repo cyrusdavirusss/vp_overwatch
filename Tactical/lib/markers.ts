@@ -118,7 +118,114 @@ function fixedwingSVG(size: number): string {
 </svg>`
 }
 
-export function aircraftMarkerSVG(role: Aircraft['role'], size: number): string {
+// ── Side-profile silhouettes: the Overwatch AIRCRAFT TRACKING view ───────────
+//
+// The two glyphs above are TOP-DOWN, and a top-down drawing cannot show a side-on
+// view however the camera is aimed: with `pitchAlignment: 'viewport'` the glyph stays
+// screen-facing, so it keeps reading as "seen from above" while the ground is read
+// edge-on. That mismatch IS the "it still looks birdseye" complaint, and it is why
+// these exist rather than a camera tweak alone.
+//
+// ORIENTATION, and how the camera arithmetic lands (keep these two in step with
+// `OVERWATCH_TRACK_SIDE_DEG` in map.tsx):
+//
+//   - Each silhouette below is DESIGNED nose-LEFT (nose at low x, tail at high x — the
+//     natural way to draw a side elevation), then wrapped in `rotate(-90 12 12)` so the
+//     EXPORTED glyph is nose-DOWN... which is deliberately NOT the nose-up convention of
+//     rotarySVG/fixedwingSVG, and that is fine because the exported orientation only has
+//     to be consistent with the ONE bearing offset below. Do not assume nose-up here.
+//   - In the tracking view the screen angle is (marker rotation − map bearing), and the
+//     marker rotation is `hdgShown`. `OVERWATCH_TRACK_SIDE_DEG = -90` makes that +90°,
+//     which turns the nose-down glyph a quarter turn clockwise to nose-LEFT: the
+//     aircraft reads side-on with the camera ABEAM, travelling parallel to it.
+//
+// Worked through once because the double rotation is easy to get backwards: a nose-left
+// design under rotate(-90) points down; a down vector under rotate(+90) points left.
+// Net, the exported art is drawn exactly as a side view should look, nose leading
+// leftward — so the flight-direction constant only has to be flipped to fly it right.
+//
+// Judged at the size it is DRAWN, like all marker art here — a review sheet of this art
+// at 36 px showed both glyphs collapsing into blobs, which is why the tracking view now
+// draws them at 60 px (see AIRCRAFT_SIDE_SIZE in map.tsx). Preview: scripts/render-markers.ts.
+
+/**
+ * Side elevation of a rotary aircraft: edge-on main rotor over a blunt-nosed cabin,
+ * a tapering tail boom with the fin and tail rotor aft, and a single skid rail below.
+ *
+ * What carries the read at 36 px, in order: the ROTOR BLADES SEEN EDGE-ON as one
+ * shallow arc above the cabin (the unambiguous rotorcraft cue from the side), the
+ * long tail boom, and the skid rail. Cabin glazing is a dark patch, not drawn panes —
+ * panes vanish below ~44 px and turn the cabin into noise.
+ */
+function rotarySideSVG(size: number): string {
+  const BODY2 = '#0086ab' // boom / fin: darker cyan for depth, as in rotarySVG
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
+  <g transform="rotate(-90 12 12)">
+    <path d="M1.9 4.5 c3.7 -1.5 16.9 -1.5 20.3 0" stroke="${PALE}" stroke-width="1.05" stroke-linecap="round" opacity="0.95"></path>
+    <path d="M10.1 5.2 L10.1 9.6" stroke="${PALE}" stroke-width="0.8"></path>
+    <circle cx="10.1" cy="4.5" r="0.85" fill="${PALE}"></circle>
+    <path d="M3.0 12.9 c0.1 -2.1 1.5 -3.4 3.5 -3.6 l6.5 -0.4 c1.7 -0.1 2.9 1.0 3.1 2.6 l0.2 1.5 c0.1 1.4 -1.0 2.4 -2.5 2.5 l-7.1 0.4 c-2.0 0.1 -3.8 -1.0 -3.7 -3.0 z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.45"></path>
+    <path d="M3.6 12.5 c0.4 -1.5 1.5 -2.4 3.1 -2.5 l2.3 -0.1 l0.5 3.2 l-2.7 0.1 c-1.9 0.1 -3.2 -0.2 -3.2 -0.7 z" fill="${INK0}" opacity="0.7"></path>
+    <path d="M10.8 9.5 l2.1 -0.1 l0.2 2.2 l-2.2 0.1 z" fill="${INK0}" opacity="0.55"></path>
+    <path d="M15.6 11.9 l5.8 -0.5 c0.5 0 0.9 0.3 0.9 0.8 l0 1.0 c0 0.5 -0.4 0.9 -0.9 0.9 l-5.7 0.3 z" fill="${BODY2}" stroke="${INK0}" stroke-width="0.32"></path>
+    <path d="M20.9 11.5 l0 -3.1 c0 -0.45 0.45 -0.7 0.8 -0.5 l0.85 0.5 l0 3.2 z" fill="${BODY2}" stroke="${INK0}" stroke-width="0.3"></path>
+    <path d="M22.2 8.4 l0 3.0 M20.9 9.9 l2.6 0" stroke="${PALE}" stroke-width="0.7" stroke-linecap="round" opacity="0.9"></path>
+    <circle cx="22.2" cy="9.9" r="0.42" fill="${PALE}"></circle>
+    <path d="M6.3 15.5 l0 1.6 M12.7 15.4 l0 1.7 M4.5 17.4 l9.9 0" stroke="${PALE}" stroke-width="0.85" stroke-linecap="round" opacity="0.95"></path>
+  </g>
+</svg>`
+}
+
+/**
+ * Side elevation of the King Air 350ER — the airframe that actually flies this role.
+ *
+ * The side view's identification cues are NOT the top-down ones, and the first cut of
+ * this glyph proved it: judged on the review sheet it read as a generic twin-engine
+ * aircraft (or a jet), because the wing — edge-on and hidden behind the fuselage in a
+ * true side view — was drawn as a band that crossed the body. What was carrying the
+ * read was nothing.
+ *
+ * The cues that DO carry it from the side, in order: the NOSE CUT OFF STRAIGHT (the
+ * operator's standing instruction — a domed side profile reads as a light aircraft),
+ * a nacelle with a PALE PROP DISC and a blade across it (the only thing that says
+ * turboprop rather than jet), and the fin with the tailplane at its very TOP (T-tail).
+ * The wing fairing was dropped rather than redrawn: at this size the nacelle IS the
+ * wing statement, and every extra mark costs legibility.
+ */
+function fixedwingSideSVG(size: number): string {
+  const BODY2 = '#0086ab'
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
+  <g transform="rotate(-90 12 12)">
+    <path d="M2.2 10.8 L20.2 11.5 L23.2 12.2 L20.2 12.9 L2.2 14.4 Z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.42"></path>
+    <path d="M3.2 11.15 l2.3 0.1 l0.2 1.9 l-2.5 -0.15 z" fill="${INK0}" opacity="0.7"></path>
+    <path d="M7.0 12.2 h1.15 M8.9 12.25 h1.15 M10.8 12.3 h1.15 M12.7 12.35 h1.15" stroke="${INK0}" stroke-width="0.66" opacity="0.66"></path>
+    <path d="M6.6 13.9 l4.1 0 c0.42 0 0.72 0.3 0.72 0.72 l0 1.15 c0 0.42 -0.3 0.72 -0.72 0.72 l-4.1 0 z" fill="${BODY2}" stroke="${INK0}" stroke-width="0.26"></path>
+    <circle cx="6.3" cy="14.95" r="1.75" fill="${PALE}" opacity="0.46"></circle>
+    <path d="M6.3 13.2 l0 3.5" stroke="${PALE}" stroke-width="0.48" stroke-linecap="round" opacity="0.92"></path>
+    <path d="M11.6 13.35 l3.7 0 c0.38 0 0.64 0.26 0.64 0.64 l0 1.0 c0 0.38 -0.26 0.64 -0.64 0.64 l-3.7 0 z" fill="${BODY2}" stroke="${INK0}" stroke-width="0.24"></path>
+    <circle cx="11.35" cy="14.3" r="1.42" fill="${PALE}" opacity="0.36"></circle>
+    <path d="M11.35 12.9 l0 2.8" stroke="${PALE}" stroke-width="0.42" stroke-linecap="round" opacity="0.85"></path>
+    <path d="M19.4 11.6 l0 -5.2 l1.5 0 l0 5.1 z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.28"></path>
+    <path d="M18.2 5.8 l4.4 0 l0 0.9 l-4.4 0 z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.28"></path>
+    <path d="M9.6 16.5 l0 1.2 M14.0 15.9 l0 1.5" stroke="${PALE}" stroke-width="0.55" opacity="0.78"></path>
+  </g>
+</svg>`
+}
+
+/**
+ * Which view an aircraft glyph is drawn for.
+ *  - `top`  — the map's normal north-up view. Top-down silhouettes.
+ *  - `side` — the Overwatch tracking view, where the camera sits abeam and the
+ *             aircraft must read as a side elevation (see the notes above).
+ */
+export type AircraftView = 'top' | 'side'
+
+export function aircraftMarkerSVG(
+  role: Aircraft['role'],
+  size: number,
+  view: AircraftView = 'top'
+): string {
+  if (view === 'side') return role === 'rotary' ? rotarySideSVG(size) : fixedwingSideSVG(size)
   return role === 'rotary' ? rotarySVG(size) : fixedwingSVG(size)
 }
 

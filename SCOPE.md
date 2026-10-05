@@ -127,13 +127,34 @@ sweeping a circle around something in motion is two motions fighting each other.
 
 The camera is a TRACK-UP chase, modelled on `gods-eye-view`'s Cesium camera, whose own comment
 gives the trick: its HeadingPitchRange is built from the path's forward heading because that
-"keeps the camera behind the vehicle". Here the bearing follows the aircraft's heading, so the view
-sits behind and parallel to travel, and because the icon's rotation is the same value the two
-cancel and the nose points straight up the screen. The pitch is 78 against the ground orbit's 58 —
+"keeps the camera behind the vehicle". Its pitch is 78 against the ground orbit's 58 —
 a chase wants the horizon and a survey wants the ground — which needs the map's pitch cap raised
 from MapLibre's default 60, or it silently clamps back toward top-down. Framing is per role: a
 helicopter at zoom 16.5, fixed wing two levels further out at 14.5, because a plane crosses the
 state while a helicopter works locally.
+
+**The bearing is offset ABEAM, not left behind the contact.** Taking the `gods-eye-view` trick
+literally parks the camera behind the aircraft looking at its tail. `OVERWATCH_TRACK_SIDE_DEG`
+(−90) is added to the contact's heading instead, so the view sits ABEAM and travels PARALLEL to
+it, the ground sweeps across the frame, and the aircraft reads side-on. The operator asked for
+exactly this — "a side angle going parallel with the heli or plane".
+
+**The tracking view draws a SIDE ELEVATION, at 60 px, because a top-down glyph cannot show a side
+view.** With `pitchAlignment: 'viewport'` the glyph stays screen-facing, so a top-down silhouette
+under an abeam camera still reads as birdseye — the same mismatch that produced the earlier "it
+lays flat" report. `aircraftMarkerSVG(role, size, 'side')` supplies side-profile art, and the
+marker box grows via `.vp-ac-marker--tracking`. The SIZE is a legibility requirement, not a
+preference: rendered to a review sheet, both side silhouettes collapsed into blobs at the map's
+normal 36 px, became readable at 52, and were unambiguous at 60. The glyph swap is keyed
+(`entry.glyphKey`) so a feed poll cannot re-parse the SVG and restart the rotor animation, and
+`overwatchAircraftId` is a dependency of the marker effect so the swap happens on the mode change
+rather than up to 3 s later.
+
+**Open on this:** the side-profile FIXED WING does not yet read as a twin turboprop. Two
+independent looks at the review sheet agreed — the prop discs do not survive the size, and the
+first cut (one nacelle) read as a nose-mounted prop while the second (two offset nacelles) read as
+a possible four-engine aircraft. The helicopter side profile is confirmed good at 60 px. Top-down
+art is retained for the normal map view and is unchanged.
 
 **Two MapLibre marker gotchas, both of which cost a round of "it still looks wrong":**
 
