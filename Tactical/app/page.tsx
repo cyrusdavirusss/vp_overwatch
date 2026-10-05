@@ -451,10 +451,21 @@ export default function VPOverwatch() {
    * map setting the operator chose.
    */
   const preOverwatchView = useRef<MapViewType | null>(null)
+  /**
+   * Satellite imagery appears in exactly TWO situations: while the rotational view is open, and
+   * while a unit is selected. Both are contexts where the operator is reading the GROUND around
+   * something specific, and the vector basemaps flatten precisely that.
+   *
+   * It is deliberately NOT revealed by default, by panning, or as a stand-in for missing vector
+   * data — auto-satellite used to appear wherever the vector tiles ran out, which painted a raster
+   * seam across outer Victoria. With the basemap now covering the whole state there is nothing to
+   * stand in for.
+   */
+  const satelliteForced =
+    overwatchReportId !== null || overwatchAircraftId !== null ||
+    selectedReportId !== null || selectedAircraftId !== null
   useEffect(() => {
-    // Either target forces the satellite basemap: the vector views flatten exactly the ground
-    // the view exists to read, and that is as true of a helicopter as of a camera.
-    if (overwatchReportId || overwatchAircraftId) {
+    if (satelliteForced) {
       // Captured ONCE. Re-reading mapView on a later run would capture 'satellite'
       // itself and we would "restore" the operator to satellite.
       if (preOverwatchView.current === null) preOverwatchView.current = mapView
@@ -463,11 +474,11 @@ export default function VPOverwatch() {
       setMapView(preOverwatchView.current)
       preOverwatchView.current = null
     }
-    // Runs on entering/leaving Overwatch only. `mapView` is read at that moment
-    // rather than tracked — so a basemap the operator changes mid-Overwatch is
-    // still restored on exit, instead of overwriting what was remembered.
+    // Runs on entering/leaving those states only. `mapView` is read at that moment rather than
+    // tracked — so a basemap the operator changes while one is active is still restored on exit,
+    // instead of overwriting what was remembered.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overwatchReportId, overwatchAircraftId])
+  }, [satelliteForced])
 
   const onSelectAircraft = useCallback((id: string | null) => {
     setSelectedAircraftId(id)

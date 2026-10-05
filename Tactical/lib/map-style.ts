@@ -212,7 +212,20 @@ export type MapViewType = 'radar' | 'dark' | 'light' | 'grayscale' | 'satellite'
  * view centre leaves this box, and the tactical vector view has nothing to draw.
  * A small margin keeps the fallback from flickering right at the edge.
  */
-export const COVERAGE_BBOX = { west: 143.9, south: -38.6, east: 146.1, north: -36.4 }
+/**
+ * The vector basemap's true extent — all of Victoria plus a small margin, which is what the
+ * self-hosted extract actually contains.
+ *
+ * This used to be a Melbourne-and-central box (143.9..146.1 / -38.6..-36.4), matching an earlier
+ * extract that only covered that area. Anything outside it was treated as "no vector data" and the
+ * Esri raster was revealed underneath to fill the void, which painted a satellite seam across
+ * outer Victoria. Widening the box to the real state extent — with an extract that genuinely
+ * covers it — means the raster is never needed anywhere in Victoria.
+ *
+ * Anything beyond this box IS genuinely outside the extract, so the raster fallback still applies
+ * out there rather than leaving a black void over New South Wales.
+ */
+export const COVERAGE_BBOX = { west: 140.9, south: -39.2, east: 150.1, north: -33.9 }
 
 /** True when a lng/lat sits outside the vector basemap coverage. */
 export function outsideCoverage(lng: number, lat: number): boolean {
