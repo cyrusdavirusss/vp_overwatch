@@ -43,6 +43,16 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
 <div class="row">
 ${kinds.map((k) => `  <div class="cell"><div class="big" style="padding:10px">${reportMarkerSVG(k, colour[k], 30)}</div><div class="cap">${k}</div></div>`).join('\n')}
 </div>
+<h2>Aircraft SIDE PROFILE — the Overwatch tracking view (nose-up glyph; the view rotates it a quarter turn)</h2>
+<div class="row">
+  <div class="cell"><div class="big">${aircraftMarkerSVG('rotary', 36, 'side')}</div><div class="cap">heli side 36px live</div></div>
+  <div class="cell"><div class="big"><div style="transform:rotate(90deg)">${aircraftMarkerSVG('rotary', 36, 'side')}</div></div><div class="cap">heli side 36px, quarter-turned as the view draws it</div></div>
+  <div class="cell"><div class="big">${aircraftMarkerSVG('rotary', 60, 'side')}</div><div class="cap">heli side 60px</div></div>
+  <div class="cell"><div class="big">${aircraftMarkerSVG('rotary', 140, 'side')}</div><div class="cap">heli side 140px</div></div>
+  <div class="cell"><div class="big">${aircraftMarkerSVG('fixedwing', 36, 'side')}</div><div class="cap">fixed wing side 36px</div></div>
+  <div class="cell"><div class="big">${aircraftMarkerSVG('fixedwing', 60, 'side')}</div><div class="cap">fixed wing side 60px</div></div>
+  <div class="cell"><div class="big">${aircraftMarkerSVG('fixedwing', 140, 'side')}</div><div class="cap">fixed wing side 140px</div></div>
+</div>
 <h2>Ground glyphs enlarged</h2>
 <div class="row">
 ${kinds.map((k) => `  <div class="cell"><div class="big">${reportMarkerSVG(k, colour[k], 100)}</div><div class="cap">${k}</div></div>`).join('\n')}
