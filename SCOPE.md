@@ -289,6 +289,7 @@ unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only res
   point when there is no fix. In practice the operator taps the map so coordinates exist, but
   the fallback should not be a real place at all. Left alone here because it is the publish
   path and deserves its own decision.
-- **In landscape the map's measured top offset reads 0** rather than the chrome height,
-  meaning the map may start underneath the chrome there. Unexplained; worth checking on a real
-  device before trusting the landscape layout.
+- **In landscape the map's measured top offset reads 0 — that is INTENTIONAL, not a bug.** The map
+  goes full-bleed and the half-scale chrome floats over it, so the chrome's height is deliberately
+  not subtracted (see the `.vp-map-area` style in `page.tsx`). Earlier entries here recorded it as
+  unexplained; it was a misreading of a deliberate choice.
