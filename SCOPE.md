@@ -182,6 +182,35 @@ header, the ON AIR strip, the control cluster and the status bar, leaving a bare
 small tab. It now keeps every one of those on screen at half scale instead — the map, and the
 aircraft and ground icons on it, stay full size.
 
+**One consistent basemap across the whole state.** The self-hosted vector extract used to cover only
+lon 144–146 / lat −38.5..−36.5 — Melbourne and central Victoria. Everything outside that box had no
+vector data, so the app revealed an Esri satellite raster underneath to fill the void, which painted
+a photographic seam across outer Victoria and made the map read as two different products stitched
+together. The extract was rebuilt to cover the whole state — lon 140.9–150.1 / lat −39.2..−33.9,
+169,503 tiles, z0–14, ~230MB — and `COVERAGE_BBOX` widened to match, so the raster is never needed
+anywhere inside Victoria. Measured at Melbourne, Mildura, Gippsland, Portland, Wodonga and Mallacoota:
+`esri-imagery visibility=none` at every one.
+
+Regenerate it when a newer OSM build is wanted (about 15 seconds; the CLI is at
+`github.com/protomaps/go-pmtiles`):
+
+```
+pmtiles extract https://build.protomaps.com/<DATE>.pmtiles public/victoria-full.pmtiles \
+  --bbox=140.90,-39.20,150.10,-33.90 --maxzoom=14
+```
+
+**A fresh environment must regenerate that file.** `Tactical/public/*.pmtiles` is gitignored and
+`NEXT_PUBLIC_PMTILES_URL` lives in the gitignored `.env.local`, so neither travels in the repo; what
+ships is the remote Protomaps fallback in `lib/map-style.ts`. The old central-Victoria extract is
+still on disk as a rollback but nothing points at it.
+
+**Satellite imagery now appears in exactly two places:** while the rotational view is open, and while
+a unit is selected. Both are contexts where the operator is reading the GROUND around something
+specific, and the vector basemaps flatten exactly that. It is deliberately no longer revealed as a
+stand-in for missing vector data. Verified end to end — vector by default, satellite on selection,
+satellite in the tracking view, and restored on deselect: measured `vector → SATELLITE → SATELLITE →
+SATELLITE (still selected, correct) → vector`.
+
 **What's New** — a release flag in the map cluster, carrying a dot until the notes are opened
 once on that device, opening a dismissible (non-modal) panel. Notes live as data in
 `lib/whats-new.ts`; bump `WHATS_NEW_VERSION` and the flag reappears for everyone.
