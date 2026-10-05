@@ -451,18 +451,17 @@ export default function VPOverwatch() {
    */
   const preOverwatchView = useRef<MapViewType | null>(null)
   /**
-   * Satellite imagery appears in exactly TWO situations: while the rotational view is open, and
-   * while a unit is selected. Both are contexts where the operator is reading the GROUND around
-   * something specific, and the vector basemaps flatten precisely that.
+   * Satellite imagery appears in exactly ONE situation: while the rotational view is open.
    *
-   * It is deliberately NOT revealed by default, by panning, or as a stand-in for missing vector
-   * data — auto-satellite used to appear wherever the vector tiles ran out, which painted a raster
-   * seam across outer Victoria. With the basemap now covering the whole state there is nothing to
-   * stand in for.
+   * It is deliberately NOT tied to selection. An earlier pass also forced it whenever a unit was
+   * selected, which meant a single tap on any contact flipped the entire basemap — reported as
+   * "it still goes to sat view as soon as heli is selected". Selecting a contact is far too
+   * common an action to carry a map-settings change.
+   *
+   * Nor is it revealed by panning or as a stand-in for missing vector data: auto-satellite used to
+   * appear wherever the vector tiles ran out, painting a raster seam across outer Victoria.
    */
-  const satelliteForced =
-    overwatchReportId !== null || overwatchAircraftId !== null ||
-    selectedReportId !== null || selectedAircraftId !== null
+  const satelliteForced = overwatchReportId !== null || overwatchAircraftId !== null
   useEffect(() => {
     if (satelliteForced) {
       // Captured ONCE. Re-reading mapView on a later run would capture 'satellite'
