@@ -1,25 +1,32 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 /**
- * Landscape immersion for phones and tablets.
+ * Landscape detection for phones and tablets.
  *
- * Rotating a phone/tablet to landscape should leave nothing on screen but the
- * map: no header, no ON AIR strip, no rails, no tabs, no status chips. Panels
- * come back only when something is selected (an aircraft, a report, the filter
- * sheet) and the rest of the chrome is revealed on demand.
+ * Rotating a phone or tablet to landscape puts the app into its COMPACT layout: the chrome is
+ * scaled to half size (the `data-vp-immersive='on'` rules in vp-theme.css) so the map gets the
+ * room while every control stays on screen and reachable.
  *
- * Two constraints shaped this:
+ * Two things this deliberately no longer does:
  *
- * 1. Fullscreen cannot be entered from an orientation change. The Fullscreen API
- *    requires a user gesture, and `orientationchange` is not one. So the attempt
- *    is armed on rotation and fired on the user's first touch — otherwise the
- *    browser rejects it. Once the document has been interacted with, rotation
- *    can drive it directly.
- * 2. Only touch devices get immersion. A 1366x768 laptop is also "landscape", so
- *    gating on aspect ratio alone would hijack the desktop layout; the pointer
- *    type and the short side of the viewport do the discriminating.
+ * 1. It does not HIDE the chrome. An earlier mode removed the header, the ON AIR strip, the
+ *    control cluster and the status bar, leaving a bare map behind a reveal tab — which is what
+ *    the reviews complained about. Nothing is hidden now.
+ *
+ * 2. It does NOT request fullscreen. There used to be an arm-and-fire mechanism here: on rotation
+ *    it attached pointer listeners that called `requestFullscreen()` on the user's next touch,
+ *    because the Fullscreen API refuses a request that does not come from a gesture and an
+ *    orientation change is not one. Nothing ever asked for fullscreen, it fired on the first tap
+ *    anywhere on a landscape phone, and once the reveal/fullscreen tab was removed there was no
+ *    longer any UI to leave it — so a stray tap could put the browser in fullscreen with no way
+ *    out except the browser's own control. Fullscreen is now gone from this app entirely: nothing
+ *    here enters it automatically, and nothing offers it.
+ *
+ * Only touch devices qualify. A 1366x768 laptop is also "landscape", so gating on aspect ratio
+ * alone would hijack the desktop layout; the pointer type and the short side do the
+ * discriminating.
  */
 
 // Above this short-side size we assume a laptop/desktop even if a touchscreen is
@@ -30,22 +37,10 @@ const MAX_SHORT_SIDE = 900
 type ImmersiveState = {
   /** True when the device is a phone/tablet held in landscape. */
   immersive: boolean
-  /** True while the document is in fullscreen. */
-  fullscreen: boolean
-  /** True when the user has asked for the chrome back temporarily. */
-  revealed: boolean
-  reveal: () => void
-  conceal: () => void
-  toggleReveal: () => void
-  /** Enter (or leave) fullscreen. Must be called from a user gesture. */
-  toggleFullscreen: () => void
 }
 
 export function useImmersiveLandscape(): ImmersiveState {
   const [immersive, setImmersive] = useState(false)
-  const [fullscreen, setFullscreen] = useState(false)
-  const [revealed, setRevealed] = useState(false)
-  const interacted = useRef(false)
 
   // ── Detection ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -68,87 +63,13 @@ export function useImmersiveLandscape(): ImmersiveState {
     }
   }, [])
 
-  // ── Fullscreen state tracking ──────────────────────────────────────────────
+  // Reflect state on <html> so CSS does the scaling — no prop drilling into the chrome components,
+  // and no flash before React hydrates the classes. The value carries the meaning ('on' vs 'off'),
+  // which is what the CSS tests.
   useEffect(() => {
-    const onChange = () => setFullscreen(Boolean(document.fullscreenElement))
-    document.addEventListener('fullscreenchange', onChange)
-    onChange()
-    return () => document.removeEventListener('fullscreenchange', onChange)
-  }, [])
+    document.documentElement.dataset.vpImmersive = immersive ? 'on' : 'off'
+    return () => { document.documentElement.dataset.vpImmersive = 'off' }
+  }, [immersive])
 
-  const toggleFullscreen = useCallback(() => {
-    const el = document.documentElement as HTMLElement & {
-      requestFullscreen?: (o?: { navigationUI?: string }) => Promise<void>
-    }
-    try {
-      if (document.fullscreenElement) {
-        void document.exitFullscreen?.()
-        return
-      }
-      const go = el.requestFullscreen?.({ navigationUI: 'hide' })
-      void go?.catch(() => { /* gesture refused or unsupported — stay in-page */ })
-      // Orientation lock only works once fullscreen is granted, and is unsupported
-      // on iOS Safari. Best-effort: the CSS below handles the layout either way.
-      void (screen.orientation as unknown as { lock?: (o: string) => Promise<void> })
-        ?.lock?.('landscape')?.catch?.(() => { /* unsupported */ })
-    } catch { /* unsupported */ }
-  }, [])
-
-  // ── Arm the fullscreen attempt on rotation, fire it on the next touch ──────
-  useEffect(() => {
-    if (!immersive || document.fullscreenElement) return
-
-    if (interacted.current) {
-      // Rotation after any prior interaction is itself enough of a gesture
-      // context for most mobile browsers; if it is refused we simply stay
-      // in-page, which still hides the chrome via CSS.
-      toggleFullscreen()
-      return
-    }
-
-    const fire = () => {
-      cleanup()
-      interacted.current = true
-      toggleFullscreen()
-    }
-    const cleanup = () => {
-      window.removeEventListener('pointerdown', fire, true)
-      window.removeEventListener('touchend', fire, true)
-    }
-    window.addEventListener('pointerdown', fire, true)
-    window.addEventListener('touchend', fire, true)
-    return cleanup
-  }, [immersive, toggleFullscreen])
-
-  // Any real interaction marks the session as gesture-primed.
-  useEffect(() => {
-    const mark = () => { interacted.current = true }
-    window.addEventListener('pointerdown', mark, true)
-    return () => window.removeEventListener('pointerdown', mark, true)
-  }, [])
-
-  // ── Reveal / conceal ───────────────────────────────────────────────────────
-  const reveal = useCallback(() => setRevealed(true), [])
-  const conceal = useCallback(() => setRevealed(false), [])
-  const toggleReveal = useCallback(() => setRevealed((v) => !v), [])
-
-  // Auto-conceal: the chrome is a detour, not a destination. Selections still open
-  // their own panel and are not affected by this.
-  useEffect(() => {
-    if (!immersive || !revealed) return
-    const t = setTimeout(() => setRevealed(false), 6000)
-    return () => clearTimeout(t)
-  }, [immersive, revealed])
-
-  // Reflect state on <html> so CSS does the hiding — no prop drilling into the
-  // chrome components, and no flash before React hydrates the classes.
-  useEffect(() => {
-    const root = document.documentElement
-    const value = immersive ? (revealed ? 'revealed' : 'on') : 'off'
-    root.dataset.vpImmersive = value
-    if (!immersive) setRevealed(false)
-    return () => { root.dataset.vpImmersive = 'off' }
-  }, [immersive, revealed])
-
-  return { immersive, fullscreen, revealed, reveal, conceal, toggleReveal, toggleFullscreen }
+  return { immersive }
 }

@@ -65,10 +65,9 @@ export default function VPOverwatch() {
     return () => window.removeEventListener('resize', update)
   }, [])
 
-  // Landscape immersion (phone/tablet rotated sideways): the map gets the whole
-  // screen and the chrome is hidden until something is selected or the user asks
-  // for it back. See hooks/useImmersiveLandscape.ts for why fullscreen has to be
-  // gesture-triggered rather than pure orientation-driven.
+  // Landscape on a phone/tablet: the chrome scales to half size so the map gets the room while
+  // every control stays on screen. Nothing is hidden, and this does NOT enter fullscreen — see
+  // hooks/useImmersiveLandscape.ts for what that hook used to do and why it no longer does.
   const immersion = useImmersiveLandscape()
 
   /**
@@ -1331,14 +1330,13 @@ export default function VPOverwatch() {
         <div
           className="vp-map-area absolute left-0 right-0"
           style={{
-            // Immersion reclaims the chrome's height — the map starts at the very top.
+            // In landscape the map starts at the very top and the half-scale chrome floats OVER
+            // it — the chrome's height is deliberately not subtracted here. (This is why a
+            // landscape map_top measures 0; it is intended, not a bug.)
             top: immersion.immersive ? 0 : chromeH,
             bottom: 0,
             transition: 'top 240ms var(--ease-out, ease)',
           }}
-          // Touching the map in immersion puts the chrome away again; panels opened
-          // by a selection are unaffected, since they are their own surfaces.
-          onPointerDown={immersion.immersive ? immersion.conceal : undefined}
         >
           {isLostSignal && <div className="vp-map-lost-tint" />}
           <LazyMap
