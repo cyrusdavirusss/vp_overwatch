@@ -161,35 +161,43 @@ function fixedwingSVG(size: number): string {
  * panes vanish below ~44 px and turn the cabin into noise.
  */
 function rotarySideSVG(size: number): string {
-  const BODY2 = '#0086ab' // boom / fin: darker cyan for depth, as in rotarySVG
-  // A side elevation of the AW139 that actually flies this role, drawn SEE-THROUGH: the fills sit
-  // at 0.14-0.30 opacity and the strokes carry the silhouette, so the ground stays readable through
-  // the aircraft. The previous cut was a rotor bar over a rounded blob with a stub boom, which read
-  // as a generic shape rather than a helicopter — the identifying cues of a side view are the long
-  // glass nose, the engine deck over the cabin, and the tail boom tapering into a finned tail rotor,
-  // and none of those were there.
+  // COLOUR: this is drawn in the AMBER constant, which despite the name holds CYAN (#00d4ff) —
+  // "active aircraft (cyan — VP·Overwatch v2 theme)". Do not "correct" it to the CSS --vp-amber:
+  // that token means MLAT/silent in this theme, and an active aircraft drawn in it would claim the
+  // wrong state. The constant name is a v1 leftover; the value is the live palette, and the top-view
+  // glyph (rotarySVG) draws its body from the same constant.
   //
-  // Gear is deliberately absent: this is an in-flight view and the AW139's gear is retracted, so
-  // drawing it would be inventing detail.
+  // The boom and fin used to be BODY2 (#0086ab), a darker cyan, for depth. An independent look at
+  // that version measured the problem: "the main body, tail boom and fin use a dark teal colour with
+  // no outer stroke ... the contrast ratio is far too low ... at the real map size the dark body
+  // completely vanishes into the black background ... unreadable as a map marker". A two-tone
+  // airframe is a reasonable idea that loses on this background, so the airframe is one tone.
+  //
+  // Opacity is the balance this file keeps getting wrong in both directions. 0.14-0.26 (first cut)
+  // dissolved; 0.36 still measured DARK, because #00d4ff at 0.36 over #0A0B0D composites to about
+  // (6,82,100) — legible only because the strokes carried it. Fills now sit at 0.52-0.60 with
+  // 0.85-1.0 strokes: the ground still reads through the airframe, and the airframe reads at 36px.
+  //
+  // Gear is deliberately absent: in-flight view, and the AW139's is retracted.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
   <g transform="rotate(90 12 12)">
-    <path d="M2.5 5.05 L21.5 5.05" stroke="${PALE}" stroke-width="0.85" stroke-linecap="round" opacity="0.8"></path>
-    <path d="M10.75 3.9 L11.35 3.9 L11.35 8.5 L10.75 8.5 Z" fill="${PALE}" opacity="0.75"></path>
-    <path d="M9.7 4.75 L12.4 4.75 L12.4 5.45 L9.7 5.45 Z" fill="${PALE}" opacity="0.55"></path>
-    <path d="M2.5 10.7 C3.3 9.0 5.2 8.25 7.3 8.15 L12.6 8.05 C14.0 8.0 15.1 8.55 15.7 9.4 L16.25 11.25 C16.65 12.7 15.6 13.6 14.0 13.7 L6.4 13.9 C4.0 14.0 2.75 12.7 2.5 10.7 Z"
-      fill="${AMBER}" opacity="0.26" stroke="${AMBER}" stroke-width="0.5" stroke-linejoin="round"></path>
-    <path d="M3.3 10.25 C4.0 9.2 5.4 8.7 6.9 8.6 L6.95 10.6 C5.6 10.7 4.2 10.7 3.3 10.25 Z"
-      fill="${PALE}" opacity="0.3" stroke="${PALE}" stroke-width="0.32"></path>
-    <path d="M8.6 8.1 C9.0 6.85 10.2 6.35 11.6 6.45 L13.4 6.65 C14.35 6.8 14.75 7.4 14.65 8.2 L14.55 8.75"
-      fill="${PALE}" opacity="0.14" stroke="${PALE}" stroke-width="0.38" stroke-linecap="round"></path>
-    <path d="M6.2 12.05 L14.2 11.9" stroke="${PALE}" stroke-width="0.3" opacity="0.35"></path>
-    <path d="M15.5 9.65 L20.55 9.05 L20.8 10.35 L15.9 11.4 Z"
-      fill="${BODY2}" opacity="0.28" stroke="${BODY2}" stroke-width="0.38" stroke-linejoin="round"></path>
-    <path d="M19.55 10.0 L20.6 8.3 L21.9 6.9 L22.25 7.35 L22.25 9.5 L21.05 10.3 Z"
-      fill="${BODY2}" opacity="0.28" stroke="${BODY2}" stroke-width="0.38" stroke-linejoin="round"></path>
-    <path d="M22.05 5.95 L22.05 10.15" stroke="${PALE}" stroke-width="0.5" stroke-linecap="round" opacity="0.7"></path>
-    <circle cx="22.05" cy="8.05" r="0.5" fill="${PALE}" opacity="0.85"></circle>
-    <path d="M18.1 10.55 L20.6 10.35" stroke="${PALE}" stroke-width="0.42" stroke-linecap="round" opacity="0.6"></path>
+    <path d="M1.9 4.6 L22.1 4.6" stroke="${PALE}" stroke-width="1.3" stroke-linecap="round" opacity="0.95"></path>
+    <path d="M10.2 4.6 L12.2 4.6 L12.2 5.9 L10.2 5.9 Z" fill="${PALE}" opacity="0.9"></path>
+    <path d="M10.7 5.9 L11.7 5.9 L11.7 8.35 L10.7 8.35 Z" fill="${PALE}" opacity="0.9"></path>
+    <path d="M2.2 12.3 C3.1 9.6 5.3 8.35 7.6 8.25 L12.5 8.15 C14.0 8.1 15.2 8.7 15.8 9.7 L16.3 11.6 C16.7 13.2 15.5 14.15 13.8 14.25 L6.3 14.4 C3.9 14.5 2.45 13.2 2.2 12.3 Z"
+      fill="${AMBER}" opacity="0.5" stroke="${AMBER}" stroke-width="0.95" stroke-linejoin="round"></path>
+    <path d="M3.1 11.6 C3.9 10.1 5.4 9.5 7.1 9.4 L7.15 11.9 C5.8 12.0 4.2 12.0 3.1 11.6 Z"
+      fill="${PALE}" opacity="0.42" stroke="${PALE}" stroke-width="0.62" stroke-linejoin="round"></path>
+    <path d="M8.7 8.3 C9.1 6.75 10.4 6.2 11.9 6.3 L13.6 6.5 C14.75 6.65 15.2 7.4 15.05 8.35"
+      fill="${AMBER}" opacity="0.4" stroke="${AMBER}" stroke-width="0.7" stroke-linecap="round"></path>
+    <path d="M13.6 9.15 L21.05 8.9 L21.15 9.55 L21.75 9.5 L21.75 10.9 L15.6 11.35 L13.6 12.0 Z"
+      fill="${AMBER}" opacity="0.85" stroke="${AMBER}" stroke-width="0.85" stroke-linejoin="round"></path>
+    <path d="M20.15 9.5 L21.0 6.9 L21.55 6.05 L22.3 6.3 L22.3 9.5 L21.75 9.5 Z"
+      fill="${AMBER}" opacity="0.85" stroke="${AMBER}" stroke-width="0.85" stroke-linejoin="round"></path>
+    <path d="M21.55 5.8 L21.55 10.8" stroke="${PALE}" stroke-width="0.95" stroke-linecap="round" opacity="0.95"></path>
+    <circle cx="21.55" cy="8.3" r="0.8" fill="${PALE}" opacity="0.95"></circle>
+    <path d="M17.2 10.3 L20.9 10.05" stroke="${PALE}" stroke-width="0.6" stroke-linecap="round" opacity="0.8"></path>
+    <path d="M6.5 12.6 L13.6 12.5" stroke="${PALE}" stroke-width="0.35" opacity="0.35"></path>
   </g>
 </svg>`
 }
