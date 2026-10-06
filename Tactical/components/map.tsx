@@ -150,6 +150,22 @@ const OVERWATCH_PITCH = 58
  * "it cant just be birdseye" complaint.
  */
 const OVERWATCH_TRACK_PITCH = 78
+/**
+ * The tilt the map opens at, and the tilt it returns to.
+ *
+ * This was 0 — a dead-flat plan view — and the verdict on it was "make the world more 3d it looks
+ * shit when its flat". A tilted camera is what gives a map ground relief and horizon, and the data
+ * behind this app is all positions on terrain.
+ *
+ * 50 is a compromise, not a maximum: enough that the ground reads as ground rather than as a
+ * diagram, but flat enough that street names and pin positions still line up with what is under
+ * them. The rotational view tilts much further (see OVERWATCH_TRACK_PITCH) because there the whole
+ * point is looking across the ground rather than down at it.
+ *
+ * Selection-driven fly-tos deliberately stay flat — when the operator is placing a sighting they
+ * are reading X/Y positions, not relief.
+ */
+const DEFAULT_PITCH = 50
 /** Close enough that the ghost is the subject of the frame, not a detail on it. */
 const OVERWATCH_ZOOM = 16.5
 /**
@@ -512,7 +528,7 @@ export function VPMap({
         // dot is already hidden when hasUserFix is false, so nothing claims to know.
         center: [user.lng, user.lat],
         zoom: hasUserFix ? 9 : 7,
-        pitch: 0, // pitch/bearing enabled but default flat, north up
+        pitch: DEFAULT_PITCH, // opens tilted so the ground reads as ground, not as a diagram
         bearing: 0,
         attributionControl: false,
         dragRotate: true,
@@ -1361,7 +1377,7 @@ export function VPMap({
       // deliberately LEFT where they are: the operator has just left a view of this
       // mark, so leaving them looking at it is the useful place to be, and snapping
       // the camera back would also undo a pan they may have made while orbiting.
-      map.setPitch(0)
+      map.setPitch(DEFAULT_PITCH)
     }
   }, [ready, overwatchReportId, northLock])
 
@@ -1444,7 +1460,7 @@ export function VPMap({
       if (raf !== null) cancelAnimationFrame(raf)
       // Flatten immediately on the way out, for the same reason the orbit does: an eased
       // flatten gets cancelled by the next camera command, an instant one cannot be.
-      map.setPitch(0)
+      map.setPitch(DEFAULT_PITCH)
       map.setBearing(0)
     }
   }, [ready, overwatchAircraftId])

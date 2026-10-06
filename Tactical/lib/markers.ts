@@ -162,19 +162,34 @@ function fixedwingSVG(size: number): string {
  */
 function rotarySideSVG(size: number): string {
   const BODY2 = '#0086ab' // boom / fin: darker cyan for depth, as in rotarySVG
+  // A side elevation of the AW139 that actually flies this role, drawn SEE-THROUGH: the fills sit
+  // at 0.14-0.30 opacity and the strokes carry the silhouette, so the ground stays readable through
+  // the aircraft. The previous cut was a rotor bar over a rounded blob with a stub boom, which read
+  // as a generic shape rather than a helicopter — the identifying cues of a side view are the long
+  // glass nose, the engine deck over the cabin, and the tail boom tapering into a finned tail rotor,
+  // and none of those were there.
+  //
+  // Gear is deliberately absent: this is an in-flight view and the AW139's gear is retracted, so
+  // drawing it would be inventing detail.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
   <g transform="rotate(90 12 12)">
-    <path d="M1.9 4.5 c3.7 -1.5 16.9 -1.5 20.3 0" stroke="${PALE}" stroke-width="1.05" stroke-linecap="round" opacity="0.95"></path>
-    <path d="M10.1 5.2 L10.1 9.6" stroke="${PALE}" stroke-width="0.8"></path>
-    <circle cx="10.1" cy="4.5" r="0.85" fill="${PALE}"></circle>
-    <path d="M3.0 12.9 c0.1 -2.1 1.5 -3.4 3.5 -3.6 l6.5 -0.4 c1.7 -0.1 2.9 1.0 3.1 2.6 l0.2 1.5 c0.1 1.4 -1.0 2.4 -2.5 2.5 l-7.1 0.4 c-2.0 0.1 -3.8 -1.0 -3.7 -3.0 z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.45"></path>
-    <path d="M3.6 12.5 c0.4 -1.5 1.5 -2.4 3.1 -2.5 l2.3 -0.1 l0.5 3.2 l-2.7 0.1 c-1.9 0.1 -3.2 -0.2 -3.2 -0.7 z" fill="${INK0}" opacity="0.7"></path>
-    <path d="M10.8 9.5 l2.1 -0.1 l0.2 2.2 l-2.2 0.1 z" fill="${INK0}" opacity="0.55"></path>
-    <path d="M15.6 11.9 l5.8 -0.5 c0.5 0 0.9 0.3 0.9 0.8 l0 1.0 c0 0.5 -0.4 0.9 -0.9 0.9 l-5.7 0.3 z" fill="${BODY2}" stroke="${INK0}" stroke-width="0.32"></path>
-    <path d="M20.9 11.5 l0 -3.1 c0 -0.45 0.45 -0.7 0.8 -0.5 l0.85 0.5 l0 3.2 z" fill="${BODY2}" stroke="${INK0}" stroke-width="0.3"></path>
-    <path d="M22.2 8.4 l0 3.0 M20.9 9.9 l2.6 0" stroke="${PALE}" stroke-width="0.7" stroke-linecap="round" opacity="0.9"></path>
-    <circle cx="22.2" cy="9.9" r="0.42" fill="${PALE}"></circle>
-    <path d="M6.3 15.5 l0 1.6 M12.7 15.4 l0 1.7 M4.5 17.4 l9.9 0" stroke="${PALE}" stroke-width="0.85" stroke-linecap="round" opacity="0.95"></path>
+    <path d="M2.5 5.05 L21.5 5.05" stroke="${PALE}" stroke-width="0.85" stroke-linecap="round" opacity="0.8"></path>
+    <path d="M10.75 3.9 L11.35 3.9 L11.35 8.5 L10.75 8.5 Z" fill="${PALE}" opacity="0.75"></path>
+    <path d="M9.7 4.75 L12.4 4.75 L12.4 5.45 L9.7 5.45 Z" fill="${PALE}" opacity="0.55"></path>
+    <path d="M2.5 10.7 C3.3 9.0 5.2 8.25 7.3 8.15 L12.6 8.05 C14.0 8.0 15.1 8.55 15.7 9.4 L16.25 11.25 C16.65 12.7 15.6 13.6 14.0 13.7 L6.4 13.9 C4.0 14.0 2.75 12.7 2.5 10.7 Z"
+      fill="${AMBER}" opacity="0.26" stroke="${AMBER}" stroke-width="0.5" stroke-linejoin="round"></path>
+    <path d="M3.3 10.25 C4.0 9.2 5.4 8.7 6.9 8.6 L6.95 10.6 C5.6 10.7 4.2 10.7 3.3 10.25 Z"
+      fill="${PALE}" opacity="0.3" stroke="${PALE}" stroke-width="0.32"></path>
+    <path d="M8.6 8.1 C9.0 6.85 10.2 6.35 11.6 6.45 L13.4 6.65 C14.35 6.8 14.75 7.4 14.65 8.2 L14.55 8.75"
+      fill="${PALE}" opacity="0.14" stroke="${PALE}" stroke-width="0.38" stroke-linecap="round"></path>
+    <path d="M6.2 12.05 L14.2 11.9" stroke="${PALE}" stroke-width="0.3" opacity="0.35"></path>
+    <path d="M15.5 9.65 L20.55 9.05 L20.8 10.35 L15.9 11.4 Z"
+      fill="${BODY2}" opacity="0.28" stroke="${BODY2}" stroke-width="0.38" stroke-linejoin="round"></path>
+    <path d="M19.55 10.0 L20.6 8.3 L21.9 6.9 L22.25 7.35 L22.25 9.5 L21.05 10.3 Z"
+      fill="${BODY2}" opacity="0.28" stroke="${BODY2}" stroke-width="0.38" stroke-linejoin="round"></path>
+    <path d="M22.05 5.95 L22.05 10.15" stroke="${PALE}" stroke-width="0.5" stroke-linecap="round" opacity="0.7"></path>
+    <circle cx="22.05" cy="8.05" r="0.5" fill="${PALE}" opacity="0.85"></circle>
+    <path d="M18.1 10.55 L20.6 10.35" stroke="${PALE}" stroke-width="0.42" stroke-linecap="round" opacity="0.6"></path>
   </g>
 </svg>`
 }
