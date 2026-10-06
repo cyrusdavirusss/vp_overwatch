@@ -126,23 +126,26 @@ function fixedwingSVG(size: number): string {
 // edge-on. That mismatch IS the "it still looks birdseye" complaint, and it is why
 // these exist rather than a camera tweak alone.
 //
-// ORIENTATION, and how the camera arithmetic lands (keep these two in step with
-// `OVERWATCH_TRACK_SIDE_DEG` in map.tsx):
+// ORIENTATION, and how the camera arithmetic lands (keep this in step with SIDE_DEG in
+// map.tsx):
 //
-//   - Each silhouette below is DESIGNED nose-LEFT (nose at low x, tail at high x — the
-//     natural way to draw a side elevation), then wrapped in `rotate(-90 12 12)` so the
-//     EXPORTED glyph is nose-DOWN... which is deliberately NOT the nose-up convention of
-//     rotarySVG/fixedwingSVG, and that is fine because the exported orientation only has
-//     to be consistent with the ONE bearing offset below. Do not assume nose-up here.
-//   - In the tracking view the screen angle is (marker rotation − map bearing), and the
-//     marker rotation is `hdgShown`. `OVERWATCH_TRACK_SIDE_DEG = -90` makes that +90°,
-//     which turns the nose-down glyph a quarter turn clockwise to nose-LEFT: the
-//     aircraft reads side-on with the camera ABEAM, travelling parallel to it.
+//   - Each silhouette below is DESIGNED nose-LEFT (nose at low x, tail at high x — the natural
+//     way to draw a side elevation), then wrapped in `rotate(90 12 12)` so the EXPORTED glyph is
+//     nose-UP. Nose-up is what makes the tracking view come out straight, and the arithmetic in
+//     the next point is why.
+//   - In the tracking view the glyph's screen angle is (icon rotation − map bearing) = −SIDE_DEG.
+//     The exported art adds its own orientation on top of that. With the art exported NOSE-UP the
+//     two coincide exactly: the nose lands on −SIDE_DEG, which is precisely the direction of
+//     travel, so a side-on aircraft faces the way it is going.
 //
-// Worked through once because the double rotation is easy to get backwards: a nose-left
-// design under rotate(-90) points down; a down vector under rotate(+90) points left.
-// Net, the exported art is drawn exactly as a side view should look, nose leading
-// leftward — so the flight-direction constant only has to be flipped to fly it right.
+// This wrapper used to be `rotate(-90)`, exporting the glyph nose-DOWN, and that put the nose
+// exactly 180° out — a helicopter travelling right with its nose pointing left, flying backwards
+// along its own trail. That is the "the heli is sideways" report.
+//
+// Flipping SIDE_DEG does NOT fix it, which is the trap that cost a round trip: the error is in the
+// ART, so reversing the camera reverses the travel and the nose together and the two stay 180°
+// apart. Measured both ways — SIDE_DEG −90 gave "travelling right, nose left", +90 gave
+// "travelling left, nose right", both backwards. The wrapping is what had to change.
 //
 // Judged at the size it is DRAWN, like all marker art here — a review sheet of this art
 // at 36 px showed both glyphs collapsing into blobs, which is why the tracking view now
@@ -160,7 +163,7 @@ function fixedwingSVG(size: number): string {
 function rotarySideSVG(size: number): string {
   const BODY2 = '#0086ab' // boom / fin: darker cyan for depth, as in rotarySVG
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
-  <g transform="rotate(-90 12 12)">
+  <g transform="rotate(90 12 12)">
     <path d="M1.9 4.5 c3.7 -1.5 16.9 -1.5 20.3 0" stroke="${PALE}" stroke-width="1.05" stroke-linecap="round" opacity="0.95"></path>
     <path d="M10.1 5.2 L10.1 9.6" stroke="${PALE}" stroke-width="0.8"></path>
     <circle cx="10.1" cy="4.5" r="0.85" fill="${PALE}"></circle>
@@ -195,7 +198,7 @@ function rotarySideSVG(size: number): string {
 function fixedwingSideSVG(size: number): string {
   const BODY2 = '#0086ab'
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
-  <g transform="rotate(-90 12 12)">
+  <g transform="rotate(90 12 12)">
     <path d="M2.2 10.8 L20.2 11.5 L23.2 12.2 L20.2 12.9 L2.2 14.4 Z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.42"></path>
     <path d="M3.2 11.15 l2.3 0.1 l0.2 1.9 l-2.5 -0.15 z" fill="${INK0}" opacity="0.7"></path>
     <path d="M7.0 12.2 h1.15 M8.9 12.25 h1.15 M10.8 12.3 h1.15 M12.7 12.35 h1.15" stroke="${INK0}" stroke-width="0.66" opacity="0.66"></path>

@@ -949,30 +949,30 @@ export function VPMap({
           aircraftMarkers.current.set(a.id, entry)
         }
 
-        // ── Glyph size: the tracking view draws it LARGER ─────────────────────────
-        // A tracked contact gets a bigger glyph than the map's 36px default — at the tracking
-        // view's close zoom the standard size read as a speck. It stays TOP-DOWN art; see below
-        // for why the side elevation was dropped.
-        // `pitchAlignment: 'viewport'` keeps the glyph screen-facing. The tracking view enlarges
-        // it: on the review sheet the icon collapsed into an unreadable blob at the map's normal
-        // 36px, so a tracked contact gets AIRCRAFT_TRACKING_SIZE.
+        // ── Glyph: the tracking view draws a SIDE ELEVATION, larger ───────────────
+        // A plan-view glyph cannot show a side view however the camera is aimed, because
+        // `pitchAlignment: 'viewport'` keeps it screen-facing — and a top-down silhouette under an
+        // abeam camera still reads as birdseye, which is the complaint this answers. So the
+        // tracking view swaps in the side-profile art from lib/markers.ts.
         //
-        // It stays TOP-DOWN art in both views. A chase camera looks at the contact from behind and
-        // above, so the plan view is the correct one — and it is the only glyph whose nose agrees
-        // with the trail. A side-elevation glyph was tried alongside the abeam camera and came out
-        // with the nose pointing backward along the flight path; both went together.
+        // It is also bigger: on the review sheet the icon collapsed into an unreadable blob at the
+        // map's normal 36px, so a tracked contact gets AIRCRAFT_TRACKING_SIZE.
+        //
+        // The art is drawn nose-LEFT, which is why the camera's SIDE_DEG is +90 rather than -90 —
+        // the two must agree, or the aircraft appears to fly backwards along its own trail. See
+        // the bearing block for the derivation.
         //
         // Keyed rather than applied unconditionally, for the same reason the Overwatch ghost
         // marker is keyed: this effect re-runs on every feed poll, and re-assigning innerHTML
         // re-parses the SVG and RESTARTS the rotor animation at the poll cadence.
         const tracking = a.id === overwatchAircraftId
-        const glyphKey = `top:${a.role}:${tracking ? AIRCRAFT_TRACKING_SIZE : 36}`
+        const glyphKey = `${tracking ? 'side' : 'top'}:${a.role}:${tracking ? AIRCRAFT_TRACKING_SIZE : 36}`
         if (entry.glyphKey !== glyphKey) {
           entry.glyphKey = glyphKey
           entry.rot.innerHTML = aircraftMarkerSVG(
             a.role,
             tracking ? AIRCRAFT_TRACKING_SIZE : 36,
-            'top'
+            tracking ? 'side' : 'top'
           )
           entry.marker.getElement().classList.toggle('vp-ac-marker--tracking', tracking)
         }
@@ -1408,26 +1408,27 @@ export function VPMap({
       const entry = aircraftMarkers.current.get(overwatchAircraftId)
       const pos = entry?.cur
       if (pos && Number.isFinite(pos[0]) && Number.isFinite(pos[1])) {
-        // ── CHASE, after gods-eye-view's HeadingPitchRange ───────────────────────────────
+        // ── ABEAM TRACK, after gods-eye-view's HeadingPitchRange ─────────────────────────
         // Its chase camera is a Cesium HeadingPitchRange built from the path's FORWARD heading,
         // and its own comment gives the trick: "HeadingPitchRange positions the camera opposite
         // its heading vector. Passing the forward path heading therefore keeps the camera behind
-        // the vehicle." The bearing follows the contact's heading, so the view sits BEHIND it and
-        // travels parallel to its track — nose up the screen, trail behind, ground receding
-        // toward the horizon. All three agree.
+        // the vehicle." Taken literally that sits BEHIND the contact looking at its tail, which
+        // still reads as birdseye.
         //
-        // This was briefly an ABEAM camera (bearing offset by OVERWATCH_TRACK_SIDE_DEG) with a
-        // side-elevation glyph, on a reading of "a side angle going parallel with the heli or
-        // plane". Measured on the running app it came out incoherent: the aircraft sat beside the
-        // camera at a fixed screen position while the ground slid past underneath, and its nose
-        // pointed BACKWARD along its own trail — the side sprite faced left while the trail ran
-        // left to right. Reported as "the heli is sideways ... it seems like the heli is keeping
-        // distance from me but we're moving along the map". Reverted to the chase.
+        // This camera is deliberately offset from it: the bearing is the contact's heading plus
+        // SIDE_DEG, so the view sits ABEAM and travels PARALLEL to the contact instead of behind
+        // it. The ground then sweeps across the frame and the aircraft reads SIDE-ON, which is
+        // what was asked for — "a side angle going parallel with the heli or plane". The glyph is
+        // swapped to a side elevation to match (see the marker block).
         //
-        // hdgShown, not the raw fix: the icon's own rotation IS hdgShown and the two are applied
-        // in the same space, so deriving the bearing from it keeps them locked rather than the
-        // bearing lagging the heading glide.
-        map.setBearing(entry?.hdgShown ?? 0)
+        // THE SIGN IS ORIENTATION, NOT PREFERENCE. The side glyphs in lib/markers.ts are drawn
+        // with the nose pointing LEFT. With SIDE_DEG = -90 the contact travels RIGHT across the
+        // screen, so a nose-left glyph faces backwards along its own trail — which is exactly the
+        // "the heli is sideways" report, and it measured as a 90deg error. +90 sends the contact
+        // LEFT instead, so the nose leads and the trail streams out behind it. The two directions
+        // agree. (The earlier attempt drew the right conclusion and then picked the wrong sign.)
+        const SIDE_DEG = 90
+        map.setBearing((entry?.hdgShown ?? 0) + SIDE_DEG)
         // Only issue a camera command when the contact has actually drifted. A stationary one
         // would otherwise cancel an unrelated animation every single frame.
         const c = map.getCenter()
