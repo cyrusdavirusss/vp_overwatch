@@ -537,7 +537,7 @@ const POLICE_CALLSIGNS: Record<string, string> = {
   '7C4EF5': 'POL32',
   '7C4EE8': 'POL35',
 }
-const FAST_POLICE_INTERVAL = 3_000
+const FAST_POLICE_INTERVAL = 8_000
 
 /**
  * The fast loop's cadence is ADAPTIVE, because ADSB.lol's limits are not fixed: their own
@@ -548,9 +548,17 @@ const FAST_POLICE_INTERVAL = 3_000
  * costs the map a fix, the honest behaviour is to keep asking at the rate the upstream is
  * actually granting: start at the 3s the map wants, back off while being refused, and creep
  * back toward 3s once a clean run of polls says the limiter has relaxed.
+ *
+ * The base was raised 3s -> 8s after the loop was measured being refused CONTINUOUSLY: 162
+ * refusal lines in one hour while the ingest worker and the fuel collector were refused zero
+ * times, i.e. this loop alone was oversubscribing the shared per-IP budget. An 8s base is
+ * ~7.5 requests/min, under the ~12/min ceiling measured here, and it does not cost visible
+ * smoothness: the map dead-reckons each live marker along its own heading between fixes
+ * (AIRCRAFT_PREDICT_MAX_SEC, 60s), so the marker keeps moving on a 3s feed and an 8s feed
+ * alike. Poll latency shows up as trail VERTEX spacing, not as a stuttering icon.
  */
-const FAST_POLL_MAX_MS = 24_000
-const FAST_POLL_CLEAN_BEFORE_RAMP = 4
+const FAST_POLL_MAX_MS = 60_000
+const FAST_POLL_CLEAN_BEFORE_RAMP = 6
 let fastPollIntervalMs = FAST_POLICE_INTERVAL
 let fastPollCleanPolls = 0
 let lastFastPollAt = 0
@@ -1228,8 +1236,17 @@ const pointPollStats = { adds: 0, slides: 0 }
  * jumping display the breaker was introduced to reduce. The sustained request rate is the
  * adaptive cadence's job (FAST_POLL_MAX_MS); this only absorbs the tick we just lost.
  */
-const ADSB_BACKOFF_START_MS = 8_000
-const ADSB_BACKOFF_MAX_MS = 8_000
+const ADSB_BACKOFF_START_MS = 60_000
+/**
+ * These were BOTH 8_000, which pinned the ladder: `min(ms * 2, MAX)` could never grow past the
+ * start, so a refusal stood the fast loop down for eight seconds, it re-asked, and was refused
+ * again — 162 refusals in an hour with no escalation, which is a loop that never leaves the
+ * penalty box it is in. The pair now actually escalates (1 min doubling to 5 min), so a sustained
+ * refusal costs a handful of requests an hour instead of hundreds, and clears the cooldown on the
+ * first success. A 60s floor is deliberate: it is the same order as AIRCRAFT_PREDICT_MAX_SEC, so
+ * the marker stops dead-reckoning at about the moment the feed owes it a fresh fix.
+ */
+const ADSB_BACKOFF_MAX_MS = 300_000
 let adsbCooldownUntil = 0
 let adsbBackoffMs = ADSB_BACKOFF_START_MS
 
