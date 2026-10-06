@@ -895,26 +895,32 @@ export default function VPOverwatch() {
               </div>
             </div>
 
+            {/* Overwatch sits SECOND, directly under Map view, and that placement IS the fix for
+                "the button is gone".
+
+                It used to live at the very BOTTOM of this rail, after the VPS report list — and
+                that list is a `vp-rail-grow` section with its own inner scroll, so the fixed-height
+                sections after it (Air/Gnd status, report detail, then the button) were pushed past
+                the end of the rail. The rail has no outer scroll, only that list does, so there was
+                nothing to scroll them into view. The control was in the DOM and clickable in
+                automated tests at every width from 844px to 1600px while being physically
+                unreachable on a real screen — which is exactly why a hard reload changed nothing.
+
+                This is also the ONLY Overwatch control in the desktop layout. An earlier change
+                added a second one beside it, believing the layout had none; it did, and the
+                duplicate has been removed. */}
             <div className="vp-rail-section">
-              <div className="vp-rail-title">Rotational view</div>
-              {/* The desktop layout never had this control — it only ever existed as the
-                  floating pill in the phone layout. So on a desktop there was no way to open
-                  Overwatch at all, and the nearest-looking thing was the SAT basemap tab in the
-                  section above, which does nothing but switch the basemap. */}
+              <div className="vp-rail-title">Overwatch</div>
               <button
-                className="vp-btn"
+                className="vp-view-tab"
+                style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
                 onClick={toggleOverwatch}
-                disabled={!overwatchLive}
                 aria-label={overwatchLabel}
                 aria-pressed={overwatchOn}
-                title={
-                  overwatchOn
-                    ? 'Close the rotational view'
-                    : 'Open the rotational view on the selected unit — a ground unit is orbited, an aircraft is tracked'
-                }
-                style={{ width: '100%', justifyContent: 'center' }}
+                disabled={!overwatchLive}
+                title={overwatchAvailable || overwatchOn ? 'Overwatch' : 'Overwatch — no ground contacts'}
               >
-                {overwatchOn ? 'EXIT OVERWATCH' : 'OVERWATCH'}
+                {overwatchOn ? 'Exit Overwatch' : 'Launch Overwatch'}
               </button>
             </div>
 
@@ -1192,19 +1198,6 @@ export default function VPOverwatch() {
               )}
             </div>
 
-            <div className="vp-rail-section">
-              <div className="vp-rail-title">Overwatch</div>
-              <button
-                className="vp-view-tab"
-                style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
-                onClick={toggleOverwatch}
-                aria-pressed={overwatchOn}
-                disabled={!overwatchLive}
-                title={overwatchAvailable || overwatchOn ? 'Overwatch' : 'Overwatch — no ground contacts'}
-              >
-                {overwatchOn ? 'Exit Overwatch' : 'Launch Overwatch'}
-              </button>
-            </div>
           </aside>
         </div>
 
