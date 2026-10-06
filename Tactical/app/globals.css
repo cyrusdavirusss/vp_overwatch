@@ -572,6 +572,32 @@ samp,
   width: 60px;
   height: 60px;
 }
+/*
+  In the tracking view the aircraft IS the subject, so the glyph is drawn up to a viewport-relative
+  size rather than 60px — on a wide screen 60px is a speck. "make it so it fits in the whole screen."
+
+  The BOX stays 60px on purpose, and that is the load-bearing part:
+    - MapLibre anchors the box at `center`, so the aircraft's own reported position stays at the
+      centre of the box no matter how large the glyph is. Sizing the BOX instead would move the
+      aircraft's apparent position and put a tracking view's contact off its own fix.
+    - the callout is positioned off the box, so it keeps a sane offset instead of flying to the
+      top of the screen (the rule below re-offsets it above the enlarged glyph).
+  The SVG is centred on the box with translate(-50%,-50%), so it scales about the same centre the
+  anchor uses. `clamp` keeps this from being a speck on a desktop or a wall on a phone, and the
+  viewBox preserves the glyph's aspect at any of those sizes.
+*/
+.vp-ac-marker--tracking svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: clamp(150px, 46vmin, 460px);
+  height: clamp(150px, 46vmin, 460px);
+  transform: translate(-50%, -50%);
+}
+/* The enlarged glyph swallows the box, so the callout has to clear half the glyph, not half the box. */
+.vp-ac-marker--tracking .vp-ac-callout {
+  bottom: calc(50% + clamp(75px, 23vmin, 230px) + 8px);
+}
 .vp-ac-rot {
   width: 100%;
   height: 100%;
