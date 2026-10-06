@@ -151,21 +151,21 @@ const OVERWATCH_PITCH = 58
  */
 const OVERWATCH_TRACK_PITCH = 78
 /**
- * The tilt the map opens at, and the tilt it returns to.
+ * The tilt the map opens at, and the tilt it returns to. ZERO — deliberately.
  *
- * This was 0 — a dead-flat plan view — and the verdict on it was "make the world more 3d it looks
- * shit when its flat". A tilted camera is what gives a map ground relief and horizon, and the data
- * behind this app is all positions on terrain.
+ * This was briefly 50 in an attempt to answer "make the world more 3d", and that was the wrong
+ * lever: a whole-map tilt changes how every pin, street and report reads, and the correction was
+ * "u added a tilt to the whole map i only wanted the terain to look more 3d ... keep it to
+ * overwatch button". So the ordinary map stays flat and TILT BELONGS TO OVERWATCH ALONE
+ * (OVERWATCH_ORBIT_PITCH for ground contacts, OVERWATCH_TRACK_PITCH for aircraft).
  *
- * 50 is a compromise, not a maximum: enough that the ground reads as ground rather than as a
- * diagram, but flat enough that street names and pin positions still line up with what is under
- * them. The rotational view tilts much further (see OVERWATCH_TRACK_PITCH) because there the whole
- * point is looking across the ground rather than down at it.
- *
- * Selection-driven fly-tos deliberately stay flat — when the operator is placing a sighting they
- * are reading X/Y positions, not relief.
+ * What "3D terrain" actually requires, recorded here so the next attempt does not repeat the
+ * mistake: relief is only VISIBLE when the camera is tilted, so a dem source without a tilt shows
+ * nothing, and a tilt without a dem shows the same flat ground from an angle. Real ground relief
+ * needs BOTH — a raster-dem source plus map.setTerrain() — and that is a separate decision from
+ * this constant.
  */
-const DEFAULT_PITCH = 50
+const DEFAULT_PITCH = 0
 /** Close enough that the ghost is the subject of the frame, not a detail on it. */
 const OVERWATCH_ZOOM = 16.5
 /**
