@@ -219,21 +219,47 @@ function rotarySideSVG(size: number): string {
  * wing statement, and every extra mark costs legibility.
  */
 function fixedwingSideSVG(size: number): string {
-  const BODY2 = '#0086ab'
+  // Side elevation of the Beechcraft King Air 350ER that flies this role, drawn from a photograph
+  // of a real 350 (Kingair 350-N113GF, Wikimedia Commons) rather than from a generic twin.
+  //
+  // The cues a side view actually needs, and each one is here deliberately:
+  //   - the NOSE IS ROUNDED. Note this DIFFERS from the top-down glyph (fixedwingSVG), where the
+  //     operator had the nose CUT OFF STRAIGHT. That instruction was about the plan view, where a
+  //     domed nose read as the wrong aircraft; a side elevation of a real 350 has a smoothly
+  //     rounded nose, and this view was asked for as "a real side angle of the actual king air".
+  //   - the long cabin of near-constant depth tapering into a pencil-like tail cone
+  //   - a swept-back windscreen with a triangular side cockpit window, then a row of round cabin
+  //     windows
+  //   - the NACELLE: long, mounted low on the wing, and extending well FORWARD of the wing's
+  //     leading edge, with the propeller on its front face. That gap between prop and wing is what
+  //     says "turboprop" rather than "jet".
+  //   - a 4-blade prop disc, drawn as an ellipse edge-on plus a blade line, in PALE so it reads
+  //     over the body.
+  //   - a T-TAIL: the tailplane sits at the VERY TOP of the swept fin. This is the single most
+  //     identifying feature of the type from the side.
+  //
+  // Gear is absent on purpose: in-flight view, and the 350's gear is retracted. The reference photo
+  // is a parked aircraft with gear down, which is exactly the detail NOT to copy.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
   <g transform="rotate(90 12 12)">
-    <path d="M2.2 10.8 L20.2 11.5 L23.2 12.2 L20.2 12.9 L2.2 14.4 Z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.42"></path>
-    <path d="M3.2 11.15 l2.3 0.1 l0.2 1.9 l-2.5 -0.15 z" fill="${INK0}" opacity="0.7"></path>
-    <path d="M7.0 12.2 h1.15 M8.9 12.25 h1.15 M10.8 12.3 h1.15 M12.7 12.35 h1.15" stroke="${INK0}" stroke-width="0.66" opacity="0.66"></path>
-    <path d="M6.6 13.9 l4.1 0 c0.42 0 0.72 0.3 0.72 0.72 l0 1.15 c0 0.42 -0.3 0.72 -0.72 0.72 l-4.1 0 z" fill="${BODY2}" stroke="${INK0}" stroke-width="0.26"></path>
-    <circle cx="6.3" cy="14.95" r="1.75" fill="${PALE}" opacity="0.46"></circle>
-    <path d="M6.3 13.2 l0 3.5" stroke="${PALE}" stroke-width="0.48" stroke-linecap="round" opacity="0.92"></path>
-    <path d="M11.6 13.35 l3.7 0 c0.38 0 0.64 0.26 0.64 0.64 l0 1.0 c0 0.38 -0.26 0.64 -0.64 0.64 l-3.7 0 z" fill="${BODY2}" stroke="${INK0}" stroke-width="0.24"></path>
-    <circle cx="11.35" cy="14.3" r="1.42" fill="${PALE}" opacity="0.36"></circle>
-    <path d="M11.35 12.9 l0 2.8" stroke="${PALE}" stroke-width="0.42" stroke-linecap="round" opacity="0.85"></path>
-    <path d="M19.4 11.6 l0 -5.2 l1.5 0 l0 5.1 z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.28"></path>
-    <path d="M18.2 5.8 l4.4 0 l0 0.9 l-4.4 0 z" fill="${AMBER}" stroke="${INK0}" stroke-width="0.28"></path>
-    <path d="M9.6 16.5 l0 1.2 M14.0 15.9 l0 1.5" stroke="${PALE}" stroke-width="0.55" opacity="0.78"></path>
+    <path d="M1.6 12.55 C2.2 11.8 3.3 11.4 4.8 11.32 L15.2 11.3 C16.9 11.35 18.3 11.8 19.4 12.45 L22.6 12.75 L22.9 13.25 L19.1 13.6 L6.9 13.9 C4.1 13.95 2.2 13.3 1.6 12.55 Z"
+      fill="${AMBER}" opacity="0.62" stroke="${AMBER}" stroke-width="1.15" stroke-linejoin="round"></path>
+    <path d="M3.2 12.05 C4.0 11.6 5.0 11.5 6.3 11.45 L6.35 12.4 C5.1 12.5 4.0 12.45 3.2 12.05 Z"
+      fill="${PALE}" opacity="0.55" stroke="${PALE}" stroke-width="0.7" stroke-linejoin="round"></path>
+    <ellipse cx="8.7" cy="12.62" rx="0.85" ry="0.5" fill="${INK0}" opacity="0.88" stroke="${PALE}" stroke-width="0.5"></ellipse>
+    <ellipse cx="11.1" cy="12.67" rx="0.85" ry="0.5" fill="${INK0}" opacity="0.88" stroke="${PALE}" stroke-width="0.5"></ellipse>
+    <ellipse cx="13.5" cy="12.72" rx="0.8" ry="0.46" fill="${INK0}" opacity="0.88" stroke="${PALE}" stroke-width="0.46"></ellipse>
+    <path d="M8.1 13.25 L8.95 12.78 L13.5 12.76 L14.7 13.25 L14.65 14.25 L13.5 14.75 L8.95 14.7 L8.1 14.25 Z"
+      fill="${AMBER}" opacity="0.9" stroke="${AMBER}" stroke-width="1.05" stroke-linejoin="round"></path>
+    <path d="M9.0 14.62 L14.2 14.5 L15.6 14.62 L9.4 14.78 Z"
+      fill="${PALE}" opacity="0.5" stroke="${PALE}" stroke-width="0.5" stroke-linejoin="round"></path>
+    <path d="M8.3 12.62 L8.3 14.98" stroke="${PALE}" stroke-width="1.9" stroke-linecap="round" opacity="0.96"></path>
+    <path d="M7.35 13.9 L9.3 13.65" stroke="${PALE}" stroke-width="1.5" stroke-linecap="round" opacity="0.96"></path>
+    <circle cx="8.3" cy="13.8" r="0.72" fill="${PALE}" opacity="0.96"></circle>
+    <path d="M19.85 12.3 L21.85 8.7 L22.5 8.5 L22.9 8.6 L22.9 11.2 L21.5 12.4 Z"
+      fill="${AMBER}" opacity="0.9" stroke="${AMBER}" stroke-width="1.0" stroke-linejoin="round"></path>
+    <path d="M19.6 8.44 L23.6 8.3 L23.65 8.95 L19.8 9.05 Z"
+      fill="${PALE}" opacity="0.85" stroke="${PALE}" stroke-width="0.55" stroke-linejoin="round"></path>
   </g>
 </svg>`
 }
