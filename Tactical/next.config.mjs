@@ -22,7 +22,18 @@ const nextConfig = {
       key: 'Cache-Control',
       value: 'no-store, no-cache, must-revalidate, proxy-revalidate',
     }
+    // The self-hosted basemap is 240 MB and never changes under the same name, so it MUST be
+    // cached — and it was not. The comment above assumed Next leaves public files immutably
+    // cached; measured, a public file is served `Cache-Control: public, max-age=0`, so the
+    // whole basemap was re-fetched as 11 Range requests on EVERY app open. That is most of
+    // what a fresh load spends its time on, and on a phone it is paid over the tunnel.
+    const immutable = {
+      key: 'Cache-Control',
+      value: 'public, max-age=31536000, immutable',
+    }
     return [
+      { source: '/victoria-full.pmtiles', headers: [immutable] },
+      { source: '/victoria.pmtiles', headers: [immutable] },
       { source: '/', headers: [noStore] },
       { source: '/vicpol-history', headers: [noStore] },
       { source: '/dashboard', headers: [noStore] },

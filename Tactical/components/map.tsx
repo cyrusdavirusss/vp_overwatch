@@ -1195,11 +1195,27 @@ export function VPMap({
       // The buffer is bounded per-sortie in the store instead
       // (appendTrackPoint / TRAIL_MAX_POINTS), so no window is needed here.
       const trail = sel ? sampleTrailUntil(sel.track, scrubT, Number.POSITIVE_INFINITY) : []
-      if (trail.length >= 2) {
+      // CARRY THE TRAIL'S HEAD TO WHERE THE MARKER IS DRAWN.
+      //
+      // The trail is raw fixes, but the marker is dead-reckoned forward from its last fix —
+      // measured ~1141 m ahead at the current poll cadence — so the breadcrumb met the
+      // aircraft in a visible kink instead of under it. This is the repo's own open item, and
+      // one point fixes it: the same point the arrow is drawn at, so the two cannot disagree.
+      //
+      // Skipped while scrubbing, where the marker is deliberately showing a HISTORICAL
+      // position and the trail is the same slice of history — there they already agree.
+      // A NEW array is built rather than assigning into `trail`: sampleTrailUntil may hand
+      // back a view of the store's own track, and writing into that would corrupt the record.
+      const drawnHead = scrubbing ? undefined : aircraftMarkers.current.get(sel?.id ?? '')?.cur
+      const trailDrawn =
+        drawnHead && trail.length >= 1 && Number.isFinite(drawnHead[0]) && Number.isFinite(drawnHead[1])
+          ? [...trail.slice(0, -1), { ...trail[trail.length - 1], lng: drawnHead[0], lat: drawnHead[1] }]
+          : trail
+      if (trailDrawn.length >= 2) {
         trailFeatures.push({
           type: 'Feature',
           properties: { w: 3, o: 0.8 },
-          geometry: { type: 'LineString', coordinates: trail.map((p) => [p.lng, p.lat]) },
+          geometry: { type: 'LineString', coordinates: trailDrawn.map((p) => [p.lng, p.lat]) },
         })
       }
     }
@@ -1674,7 +1690,23 @@ export function VPMap({
         // The nose is NOT re-oriented for the chase — the model is always yawed onto its own
         // heading, so it is the CAMERA that moved, not the aircraft.
         const SIDE_DEG = 0
-        map.setBearing((entry?.hdgShown ?? 0) + SIDE_DEG)
+        // ONLY ISSUE A CAMERA COMMAND WHEN THE BEARING HAS ACTUALLY MOVED.
+        //
+        // This was an unconditional setBearing every frame, and it is expensive in a way that
+        // is easy to miss: setBearing is a camera command, so it invalidates and repaints the
+        // whole map. Measured in the 3D tracking view — the app's worst path — 0.7 FPS with
+        // six long tasks totalling 8.0 s. The drift guard below already covered setCenter; the
+        // bearing needed the same one.
+        //
+        // Wrapped shortest-delta on purpose: a heading crossing north goes 359 -> 1, and a raw
+        // |a - b| test would read that as 358 degrees of movement and swing the camera the long
+        // way round every lap.
+        const wantBearing = (entry?.hdgShown ?? 0) + SIDE_DEG
+        const bearingNow = map.getBearing()
+        let dBear = (wantBearing - bearingNow) % 360
+        if (dBear > 180) dBear -= 360
+        if (dBear < -180) dBear += 360
+        if (Math.abs(dBear) > 0.05) map.setBearing(bearingNow + dBear)
         // Only issue a camera command when the contact has actually drifted. A stationary one
         // would otherwise cancel an unrelated animation every single frame.
         // WHICH POINT THE CAMERA HOLDS. The contact, unless the operator has asked for their
@@ -2126,13 +2158,23 @@ function addVpOverlays(map: maplibregl.Map) {
 // centre leaves that box we reveal the raster and drop the opaque vector
 // background so the satellite fills the otherwise-black void; back inside
 // coverage we hide it again → pure radar, no external tiles. No-ops in satellite
-// mode (no vector source there — Esri is the whole basemap and must stay shown).
+// mode (Esri is the whole basemap and must stay shown).
+//
+// SATELLITE MODE IS DETECTED BY THE VECTOR *BACKGROUND LAYER*, NOT BY "any vector source".
+// It used to be the latter, and that silently broke the whole satellite basemap: the
+// satellite style gained a vector source of its own (the place-label layer needs something
+// to sit on), so `hasVector` became true in satellite mode, this guard stopped returning,
+// and line below set the ONLY basemap layer — esri-imagery — to visibility:none. The map
+// then painted black with labels floating on it and issued ZERO imagery requests. A
+// background layer is present in every vector flavour and absent from the satellite style,
+// so it is the honest discriminator.
 function applySatFallback(map: maplibregl.Map) {
   try {
     if (!map.getLayer('esri-imagery')) return
-    const sources = map.getStyle()?.sources || {}
-    const hasVector = Object.values(sources).some((s: any) => s?.type === 'vector')
-    if (!hasVector) return // satellite mode — leave the imagery as the base
+    const style = map.getStyle()
+    const layers = (style?.layers || []) as any[]
+    const hasVectorBackground = layers.some((l) => l.type === 'background')
+    if (!hasVectorBackground) return // satellite mode — leave the imagery as the base
     const c = map.getCenter()
     const off = outsideCoverage(c.lng, c.lat)
     map.setLayoutProperty('esri-imagery', 'visibility', off ? 'visible' : 'none')

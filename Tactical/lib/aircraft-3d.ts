@@ -69,6 +69,8 @@ const MODELS: Record<Aircraft3DRole, ModelSpec> = {
 }
 
 const FOV = 30
+/** Minimum gap between WebGL draws. 20 fps; see the note in render(). */
+const RENDER_MIN_MS = 50
 /** Fraction of the frame the airframe fills, leaving headroom for the model's full extent. */
 const FILL = 0.82
 const DPR = 2
@@ -170,8 +172,18 @@ export async function createAircraft3D(role: Aircraft3DRole): Promise<Aircraft3D
   const tmpOut = new THREE.Vector3()
   const tmpRight = new THREE.Vector3()
   let lastCss = 0
+  let lastDrawMs = 0
 
   const render = (frame: Aircraft3DFrame) => {
+    // 20 fps, not the display rate. The airframe is a small object on a moving map and the
+    // ground underneath it is what carries the sense of motion, so a full WebGL render every
+    // frame bought nothing visible and cost real time in the app's worst-measured path. The
+    // caller still updates the canvas transform every frame, so the airframe's on-screen
+    // rotation stays smooth even though its shading refreshes at 20 Hz.
+    const nowMs = performance.now()
+    if (nowMs - lastDrawMs < RENDER_MIN_MS) return
+    lastDrawMs = nowMs
+
     const bearing = frame.bearingDeg
     const elevation = (90 - frame.pitchDeg) * D2R
 
