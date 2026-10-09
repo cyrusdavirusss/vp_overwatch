@@ -537,7 +537,15 @@ const POLICE_CALLSIGNS: Record<string, string> = {
   '7C4EF5': 'POL32',
   '7C4EE8': 'POL35',
 }
-const FAST_POLICE_INTERVAL = 8_000
+// 12 s, NOT 8 s. 8 s is 7.5 requests/minute against adsb.lol's measured dynamic ceiling of
+// about 6/minute, so the floor sat ABOVE the ceiling and the adaptive ladder could never
+// settle: the log shows it climbing 8 -> 16 -> 32 -> 60 s and standing down for 60-120 s,
+// continuously. Every one of those stand-downs is a gap in the traffic, and a gap is what
+// the operator sees as "the aircraft is jumping all over the place" — the marker dead-reckons
+// to its cap, then leaps by everything flown during the gap. 12 s is 5/minute, under the
+// ceiling, which is the root fix; the client-side extrapolation caps are a separate,
+// secondary lever that should only be touched if gaps persist at 12 s.
+const FAST_POLICE_INTERVAL = 12_000
 
 /**
  * The fast loop's cadence is ADAPTIVE, because ADSB.lol's limits are not fixed: their own

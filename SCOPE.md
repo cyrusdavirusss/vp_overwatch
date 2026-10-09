@@ -221,6 +221,46 @@ glyph and callout nodes, so it is untouched. Note the related limit: aircraft ar
 real altitude and should not be — 8,500 ft against a frame a few hundred metres across would put the
 contact off screen entirely. Altitude is what the callout is for.
 
+**Satellite mode is detected by the vector BACKGROUND LAYER, never by "any vector source".**
+`applySatFallback` decides whether the raster imagery is the whole basemap by looking for a
+`background` layer. It used to ask whether the style had *any* vector source — and when the satellite
+style gained a vector source of its own (the place labels need something to sit on), that test
+silently became true in satellite mode. The guard stopped returning early and the only basemap layer,
+`esri-imagery`, was set to `visibility: none`. Result: the Overwatch basemap painted BLACK with
+labels floating on it and issued **zero** imagery requests. A background layer is present in every
+vector flavour and absent from the satellite style, so it is the honest discriminator. If imagery
+ever "stops loading" again, this function is the first place to look.
+
+**A camera command issued every frame is the most expensive thing in this app.** The tracking view
+called `map.setBearing()` unconditionally in its rAF. `setBearing` is a camera command — it
+invalidates and repaints the whole map — and measured in the 3D tracking view that path ran at
+**0.7 FPS with six long tasks totalling 8.0 s**. It is now guarded by a shortest-delta test (a
+heading crossing north goes 359 → 1, which a raw `|a − b|` would read as 358 degrees). The
+`setCenter` beside it already had the same guard; the bearing needed it. The three.js side is
+throttled to 20 fps for the same reason, since the airframe is a small object on a moving map.
+
+**The traffic feed's POLL FLOOR must sit below the provider's rate ceiling.** `FAST_POLICE_INTERVAL`
+was 8 s = 7.5 requests/minute against adsb.lol's measured ceiling of about 6/minute, so the adaptive
+ladder could never settle: the log shows it climbing 8 → 16 → 32 → 60 s and standing down for 60–120 s
+continuously. Every stand-down is a gap, and a gap is what an operator sees as "the aircraft is
+jumping all over the place" — the marker dead-reckons to its 30 s cap, then leaps by everything flown
+during the gap, and the leap exceeds `FIX_SETTLE_MAX_DEG` so the smoothing that would have hidden it
+is disabled exactly when it is needed most. Now 12 s = 5/minute. **A low aircraft count at night is
+NOT a fault**: measured over 30 h the same poll box returns 76–95 aircraft in daylight and 3–33
+overnight, and a direct provider query agreed. Check the time of day before diagnosing an empty map.
+
+**The breadcrumb trail is drawn from raw fixes while the marker is dead-reckoned forward of them** —
+measured ~1141 m ahead at the current cadence — so the trail met the aircraft in a visible kink. The
+trail's head is now carried to the marker's own drawn position, so the two cannot disagree. It is
+skipped while scrubbing, where both are deliberately showing a historical slice. The replacement
+builds a NEW array rather than assigning into the sampled one, because `sampleTrailUntil` may hand
+back a view of the store's own track and writing into it would corrupt the record.
+
+**The 240 MB basemap was being re-fetched on every app open.** A file in `next`'s `public/` is served
+`Cache-Control: public, max-age=0` — the comment in `next.config.mjs` assumed such files were left
+immutably cached, and they are not. The pmtiles now carries an explicit immutable header. Verify a
+caching claim against a real response header, never against the comment that makes it.
+
 **Two MapLibre marker gotchas, both of which cost a round of "it still looks wrong":**
 
 - Markers default to VIEWPORT rotation alignment, so they do not inherit the map's bearing. In a
