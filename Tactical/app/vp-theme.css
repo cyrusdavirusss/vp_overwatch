@@ -1330,12 +1330,19 @@
   }
 }
 
-/* ── Landscape phones: the chrome halves, the map does not ─────────────────────
+/* ── Landscape phones: the chrome shrinks to three quarters, the map does not ────
    This REPLACES an immersion mode that HID the chrome outright. That mode took the
    header, the ON AIR strip, the FAB cluster, the status bar and the pills off the
    screen and left a bare map behind a reveal tab — which is what the reviews
    complained about. Nothing is hidden any more: the same chrome stays on screen in
-   landscape, scaled to half so the map still gets its room.
+   landscape, scaled to three quarters, so the map gets more of a central view while
+   every control stays where it was.
+
+   THE CHROME ALSO STAYS IN FLOW. An intermediate version made landscape FULL-BLEED —
+   the map ran edge to edge with the shrunken chrome floating over it, and the map's
+   top offset was deliberately 0. The operator's call was to have the rotation back
+   WITHOUT that, so the header, the ON AIR strip and the status bar keep their places
+   and the map simply fills what is left. Nothing floats over the map.
 
    `zoom`, not `transform: scale()`, because zoom changes LAYOUT — the boxes really
    do take less space, and the map's top offset follows them. page.tsx measures the
@@ -1345,31 +1352,34 @@
    the map and the aircraft / ground / heli icons keep their full size. That is the
    one thing that must not shrink.
 
-   `data-vp-immersive` is set on <html> by hooks/useImmersiveLandscape.ts and is
+   `data-vp-landscape` is set on <html> by hooks/useCompactLandscape.ts and is
    ALWAYS present once that hook mounts — it holds 'on', 'off' or 'revealed', so
    every selector here must test the VALUE. Testing the bare attribute matched in
    portrait and on desktop too, which scaled the whole chrome to half everywhere.
    ──────────────────────────────────────────────────────────────────────────── */
 
-html[data-vp-immersive='on'] {
-  --vp-chrome-scale: 0.5;
+/* THREE QUARTERS, not half.
+   Half made the controls awkward to hit and still left the map looking like a letterbox;
+   0.75 buys visibly more map while every label and target stays comfortably tappable. */
+html[data-vp-landscape='on'] {
+  --vp-chrome-scale: 0.75;
 }
-html[data-vp-immersive='on'] .vp-chrome,
-html[data-vp-immersive='on'] .vp-status-bar,
-html[data-vp-immersive='on'] .vp-fab-cluster,
-html[data-vp-immersive='on'] .vp-map-pill,
-html[data-vp-immersive='on'] .vp-vps-button,
-html[data-vp-immersive='on'] .vp-detail-panel,
-html[data-vp-immersive='on'] .vp-report-sheet,
-html[data-vp-immersive='on'] .vp-chrome50 {
+html[data-vp-landscape='on'] .vp-chrome,
+html[data-vp-landscape='on'] .vp-status-bar,
+html[data-vp-landscape='on'] .vp-fab-cluster,
+html[data-vp-landscape='on'] .vp-map-pill,
+html[data-vp-landscape='on'] .vp-vps-button,
+html[data-vp-landscape='on'] .vp-detail-panel,
+html[data-vp-landscape='on'] .vp-report-sheet,
+html[data-vp-landscape='on'] .vp-chrome50 {
   zoom: var(--vp-chrome-scale);
 }
 
 /* A full-width box would span only half the viewport once zoomed, so its width is
    pre-divided and its right edge released. Its children scale WITH it, which is why
    the header and the ON AIR bar are scaled as one box rather than separately. */
-html[data-vp-immersive='on'] .vp-chrome,
-html[data-vp-immersive='on'] .vp-status-bar {
+html[data-vp-landscape='on'] .vp-chrome,
+html[data-vp-landscape='on'] .vp-status-bar {
   width: calc(100% / var(--vp-chrome-scale));
   right: auto;
 }
@@ -1381,7 +1391,7 @@ html[data-vp-immersive='on'] .vp-status-bar {
 /* Selection-driven panels still become right-hand bars. Landscape viewports are
    short: a bottom sheet covers the horizon the operator is watching, which is the
    one thing the map is there for. */
-html[data-vp-immersive='on'] .vp-detail-panel {
+html[data-vp-landscape='on'] .vp-detail-panel {
   top: 0 !important;
   bottom: 0 !important;
   left: auto !important;
@@ -1393,7 +1403,7 @@ html[data-vp-immersive='on'] .vp-detail-panel {
   border-radius: 0 !important;
   z-index: 45;
 }
-html[data-vp-immersive='on'] .vp-report-sheet {
+html[data-vp-landscape='on'] .vp-report-sheet {
   top: 0 !important;
   bottom: 0 !important;
   left: auto !important;

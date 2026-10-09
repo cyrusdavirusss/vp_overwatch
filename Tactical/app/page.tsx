@@ -29,7 +29,7 @@ import { useClientLocation } from '@/hooks/useClientLocation'
 import { haversineMetres } from '@/lib/geo/haversine'
 import { useCommunityDots } from '@/hooks/useCommunityDots'
 import { useRouteAlerts } from '@/hooks/useRouteAlerts'
-import { useImmersiveLandscape } from '@/hooks/useImmersiveLandscape'
+import { useCompactLandscape } from '@/hooks/useCompactLandscape'
 import { useDeviceHeading } from '@/hooks/useDeviceHeading'
 import type { MapViewType } from '@/lib/map-style'
 import type { User, Report } from '@/lib/data'
@@ -67,8 +67,8 @@ export default function VPOverwatch() {
 
   // Landscape on a phone/tablet: the chrome scales to half size so the map gets the room while
   // every control stays on screen. Nothing is hidden, and this does NOT enter fullscreen — see
-  // hooks/useImmersiveLandscape.ts for what that hook used to do and why it no longer does.
-  const immersion = useImmersiveLandscape()
+  // hooks/useCompactLandscape.ts for what that hook used to do and why it no longer does.
+  const landscape = useCompactLandscape()
 
   /**
    * The chrome's REAL rendered height, measured rather than assumed.
@@ -106,7 +106,7 @@ export default function VPOverwatch() {
       if (el) setChromeHeight(el.getBoundingClientRect().height)
     })
     return () => cancelAnimationFrame(id)
-  }, [immersion.immersive])
+  }, [landscape.compact])
 
   // ── Head-up mode ────────────────────────────────────────────────────────────
   // Rotate the map to the direction the phone is facing. The compass has to be
@@ -919,9 +919,9 @@ export default function VPOverwatch() {
     return () => window.removeEventListener('resize', apply)
   }, [])
 
-  // In landscape immersion the desktop three-column layout is wrong even on a
-  // large tablet: the whole point is an unobstructed map, so immersion wins.
-  if (isDesktop && !immersion.immersive) {
+  // In landscape landscape the desktop three-column layout is wrong even on a
+  // large tablet: the whole point is an unobstructed map, so landscape wins.
+  if (isDesktop && !landscape.compact) {
     return (
       <div className="w-screen h-screen bg-ink-0 flex flex-col overflow-hidden" style={{ fontFamily: 'var(--font-ui)' }}>
         <VPHeader
@@ -1329,16 +1329,20 @@ export default function VPOverwatch() {
   const chromeH = chromeCollapsed ? 0 : Math.round(chromeHeight)
 
   return (
-    <div className={immersion.immersive
+    <div className={landscape.compact
       ? 'w-screen h-[100dvh] overflow-hidden bg-ink-0'
       : 'min-h-screen bg-ink-0 flex items-center justify-center'}>
       <div
-        className={`relative overflow-hidden bg-ink-0 ${immersion.immersive ? 'vp-imm-frame' : ''}`}
+        className="relative overflow-hidden bg-ink-0"
         style={{
-          // Immersion uses the real viewport: the mobile frame exists to preview a
-          // phone-sized layout, but in landscape the device IS the frame.
-          width: immersion.immersive ? '100vw' : screenDims.w,
-          height: immersion.immersive ? '100dvh' : screenDims.h,
+          // Landscape uses the REAL viewport, and this is load-bearing rather than a
+          // leftover of the old mode: `screenDims` renders a phone-sized PORTRAIT frame
+          // (393x852) whenever the window is under 900px wide, which is right for previewing
+          // the phone layout on a desktop but wrong on a phone that has actually been turned
+          // — it would draw a tall portrait frame inside a short landscape window. In
+          // landscape the device IS the frame.
+          width: landscape.compact ? '100vw' : screenDims.w,
+          height: landscape.compact ? '100dvh' : screenDims.h,
           fontFamily: 'var(--font-ui)',
         }}
       >
@@ -1392,19 +1396,26 @@ export default function VPOverwatch() {
           </svg>
         </button>
 
-        {/* The landscape immersion TAB used to live here. It existed only to bring
-            back chrome that landscape HID; landscape now scales the chrome to half
-            instead of hiding any of it, so there is nothing to bring back and the
-            tab is gone. `immersion.immersive` still drives that scale — through the
-            data-vp-immersive attribute and the CSS in vp-theme.css. */}
+        {/* The immersion TAB used to live here. It existed only to bring back chrome
+            that landscape HID; landscape now shrinks the chrome to three quarters IN
+            PLACE instead of hiding any of it or floating it over a full-bleed map, so
+            there is nothing to bring back and the tab is gone. `landscape.compact`
+            still drives that scale — through the data-vp-landscape attribute and the
+            CSS in vp-theme.css. */}
 
         <div
           className="vp-map-area absolute left-0 right-0"
           style={{
-            // In landscape the map starts at the very top and the half-scale chrome floats OVER
-            // it — the chrome's height is deliberately not subtracted here. (This is why a
-            // landscape map_top measures 0; it is intended, not a bug.)
-            top: immersion.immersive ? 0 : chromeH,
+            // The map starts BELOW the chrome in landscape too, and the chrome's own measured
+            // height is what puts it there.
+            //
+            // Landscape used to be FULL-BLEED — the map ran from edge to edge with the
+            // half-scale chrome floating over it, and the top offset was deliberately 0. The
+            // operator's call is that rotation comes back without that: the header, the ON AIR
+            // strip and the status bar keep their places, and the map takes what is left. So
+            // the offset is now the measured chrome height at every orientation, and nothing
+            // floats over the map.
+            top: chromeH,
             bottom: 0,
             transition: 'top 240ms var(--ease-out, ease)',
           }}

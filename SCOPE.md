@@ -263,10 +263,20 @@ A location press inside the rotational view now leaves the view first and waits 
 before moving, so the view's own teardown cannot cancel the flight — measured after the fix:
 0.00 km from the device's own position, 64.6 km from the home point.
 
-**Landscape no longer hides the interface.** Turning a phone sideways used to remove the
-header, the ON AIR strip, the control cluster and the status bar, leaving a bare map behind a
-small tab. It now keeps every one of those on screen at half scale instead — the map, and the
-aircraft and ground icons on it, stay full size.
+**Landscape keeps the whole interface, shrunk to three quarters.** Turning a phone sideways used
+to remove the header, the ON AIR strip, the control cluster and the status bar, leaving a bare map
+behind a small tab; it then went to the other extreme, a FULL-BLEED map with half-scale chrome
+floating over it. Both are gone. The chrome is scaled to **0.75** and stays **in flow** — the header
+and the ON AIR strip keep the top, the status bar keeps the bottom, the map takes what is left, and
+nothing floats over it. The map, and the aircraft and ground icons on it, stay full size. The zoom
+is applied with `zoom`, not `transform: scale()`, because zoom changes LAYOUT: the boxes really do
+occupy less space, which is what lets the map's offset follow them.
+
+**Rotation itself was locked, and that was the actual reason it "stopped working".**
+`public/manifest.json` shipped `"orientation": "portrait"`, so an installed PWA could not turn at
+all — no amount of layout work would have shown. It is now `"any"`. If rotation ever appears broken
+again, check that string FIRST: the layout can be perfect behind a portrait lock and it will look
+exactly like a broken rotation handler.
 
 **One consistent basemap across the whole state.** The self-hosted vector extract used to cover only
 lon 144–146 / lat −38.5..−36.5 — Melbourne and central Victoria. Everything outside that box had no
@@ -329,7 +339,7 @@ unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only res
   the Waze subtype mapping at all (it arises only from community sightings) and there were no
   such sightings. The model itself was verified directly; its orbit path is the same one
   verified live for the other two kinds.
-- **The landscape chrome scale (0.5) has no automated regression test.** It was verified by
+- **The landscape chrome scale (0.75) has no automated regression test.** It was verified by
   measuring computed zoom values at several viewports; nothing fails the build if it changes.
 - **Header readability at the small end is a judgement call.** Base text is 15px and the fit
   scale lands around 0.47–0.61 on a 320–412px phone, so effective text is roughly 7–9px
@@ -354,7 +364,10 @@ unrs-resolver DENIED in `pnpm-workspace.yaml` because it is a lint-time-only res
   point when there is no fix. In practice the operator taps the map so coordinates exist, but
   the fallback should not be a real place at all. Left alone here because it is the publish
   path and deserves its own decision.
-- **In landscape the map's measured top offset reads 0 — that is INTENTIONAL, not a bug.** The map
-  goes full-bleed and the half-scale chrome floats over it, so the chrome's height is deliberately
-  not subtracted (see the `.vp-map-area` style in `page.tsx`). Earlier entries here recorded it as
-  unexplained; it was a misreading of a deliberate choice.
+- **In landscape the map's top offset is the measured chrome height, like every other
+  orientation.** It was recorded here as deliberately 0 while landscape was full-bleed; that mode
+  is gone, so a landscape map_top measuring 0 again would now be a REGRESSION, not a choice.
+- **Landscape still uses the real viewport rather than the `screenDims` phone frame, and that is
+  load-bearing.** `screenDims` renders a 393x852 PORTRAIT frame whenever the window is under 900px
+  wide — right for previewing the phone layout on a desktop, wrong on a phone that has actually been
+  turned, where it would draw a tall portrait frame inside a short landscape window.
