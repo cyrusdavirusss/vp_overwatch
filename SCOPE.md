@@ -69,6 +69,14 @@ VP-Overwatch
 ├── Layout
 │   ├── [DONE] One header on every platform — same row, fitted to the width
 │   └── [DONE] Landscape scales the chrome to 50% instead of hiding it
+├── Camera & location controls
+│   └── [DONE] The locate control ("My Location") is ALWAYS in the cluster. It used
+│              to be dropped whenever a live GPS fix existed, which removed the one
+│              control that answers "where am I?" at exactly the moment it was
+│              wanted — showing someone the map, there was no location button, so
+│              Recenter got pressed instead and the camera, already on them, barely
+│              moved. Manual coordinate entry is still offered only when the
+│              browser genuinely cannot answer; that lives in onSetLocationPressed.
 ├── Release communication
 │   └── [DONE] What's New release flag + panel (dot on the cluster, device-local seen flag)
 ├── Security
@@ -150,11 +158,68 @@ normal 36 px, became readable at 52, and were unambiguous at 60. The glyph swap 
 `overwatchAircraftId` is a dependency of the marker effect so the swap happens on the mode change
 rather than up to 3 s later.
 
-**Open on this:** the side-profile FIXED WING does not yet read as a twin turboprop. Two
-independent looks at the review sheet agreed — the prop discs do not survive the size, and the
-first cut (one nacelle) read as a nose-mounted prop while the second (two offset nacelles) read as
-a possible four-engine aircraft. The helicopter side profile is confirmed good at 60 px. Top-down
-art is retained for the normal map view and is unchanged.
+**The fixed-wing side profile is RETIRED, not fixed.** It was the open item here — it never read as
+a twin turboprop, and two rounds of redrawing failed the same way. The reason is structural, not a
+drawing fault: in a true side view the far nacelle hides behind the fuselage, so a second engine is
+genuinely invisible, and drawing one anyway read as a four-engine aircraft. `gods-eye-view` solves
+the same problem the honest way — draw a real glTF airframe when the camera is close enough to see
+it — so the tracking view now does that.
+
+**The Overwatch airframe is a 3D model.** `lib/aircraft-3d.ts` renders `public/models/*.glb`
+(copied from `gods-eye-view`; CC BY 4.0, credited in `public/models/NOTICES.md`) into a canvas
+anchored to the contact's marker, with the canvas reproducing the map camera's own azimuth,
+elevation and up vector so the airframe sits in the same perspective as the ground under it rather
+than being pasted on flat. three.js is imported dynamically, so it is not in the bundle for a
+session that never opens this view. The flat side glyph is hidden rather than removed and comes
+straight back if the model fails to load.
+
+**The fixed wing is a STAND-IN and the code says so.** `gods-eye-view` has no King Air; the closest
+available silhouette is a Citation II — right planform (low wing, T-tail), wrong engines (jets, not
+turboprops). Swapping in a real 350 mesh is the whole integration; the one number that may need
+revisiting is the nose axis.
+
+**Orient the mesh by MEASUREMENT, never by the README.** The meshes here all carry their fuselage on
+**X**, not Z, and getting the axis wrong renders the aircraft END-ON under a side camera — a view
+that still looks like a plausible aircraft, which is why it survived a review. The method that
+settled it: the height profile is ASYMMETRIC along the fuselage axis and SYMMETRIC along the span
+axis, and the fin sits at one extreme (the highest vertices of the helicopter all sit at x ≈ +5.7).
+Both meshes measure nose = −X. A vision pass asked "which way does the nose point" contradicted
+itself across two runs on the same image; the geometry did not.
+
+**Both roles are CHASED, and that is one camera, not two.** The chase (bearing = heading) was
+briefly offered to the fixed wing only, on the reasoning that a helicopter works a small area slowly
+and the abeam view is what lets you read the ground it is circling — but the operator's call is the
+chase for both, and it is the better answer for a reason worth recording: chasing is what a 3D
+airframe is FOR. The camera sits behind, the nose points up the screen, the contact flies away, and
+the ground runs out underneath it. This is gods-eye-view's own convention, whose `HeadingPitchRange`
+is built from the forward heading precisely so the camera ends up behind the vehicle. The nose is
+never re-oriented: it is always yawed onto its own heading, so it is the CAMERA that moves. The
+earlier rejection of a chase ("still reads as birdseye") was correct for a FLAT glyph and does not
+apply to a real airframe — which is exactly the thing the 3D model changed.
+
+**The tracking glyph is therefore the TOP-DOWN one, for both roles**, since a silhouette seen from
+behind is a plan view. The hand-drawn SIDE elevations are no longer reachable from the app; they
+remain only for the marker review sheet (`scripts/render-markers.ts`). **Do not spend effort on the
+side art** — it is not what ships, and two redraws of it were both judged worse than what they
+replaced, because a flat side profile cannot be a side elevation under a tilted camera.
+
+**The tracking view can hold on the OPERATOR's position instead of the contact.** A "MY LOCATION"
+chip is offered beside the launch pill, and only while the view is open. It is disabled with no GPS
+fix and says why in the tooltip rather than looking dead — the same `hasUserFix` guard the map's own
+"you are here" dot uses, and the status bar already reads NO FIX in that state. It is deliberately a
+REF and not a dependency of the camera effect: putting `user` in that effect's deps would re-run it
+on every GPS update, and that effect tears down and rebuilds the view, so the 3D model would reload
+and flash the airframe every ten seconds. Bearing, pitch and zoom are untouched by the toggle —
+only the point under the camera changes.
+
+**The tracked contact can no longer be dimmed by terrain.** MapLibre fades any marker to
+`_opacityWhenCovered` (0.2) whenever it judges terrain to occlude the point the marker is drawn at —
+and aircraft markers are drawn at their GROUND position, never at altitude, so at pitch 78 in hill
+country the subject of the view went translucent. `marker.setOpacity('1','1')` is applied to the
+tracked contact only, and restored on exit; the app's own silent/lost fade is applied to the inner
+glyph and callout nodes, so it is untouched. Note the related limit: aircraft are NOT lifted to their
+real altitude and should not be — 8,500 ft against a frame a few hundred metres across would put the
+contact off screen entirely. Altitude is what the callout is for.
 
 **Two MapLibre marker gotchas, both of which cost a round of "it still looks wrong":**
 

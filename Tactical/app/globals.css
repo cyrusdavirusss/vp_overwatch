@@ -598,6 +598,33 @@ samp,
 .vp-ac-marker--tracking .vp-ac-callout {
   bottom: calc(50% + clamp(75px, 23vmin, 230px) + 8px);
 }
+
+/* ── The 3D airframe (Overwatch tracking view) ─────────────────────────────────────────────
+   The same on-screen footprint as the flat side glyph it replaces, because the marker BOX has
+   to stay 60px: MapLibre anchors at `center`, so growing the box instead of the child would
+   move the contact off its own reported position. Sized relative to the viewport for the same
+   reason the SVG is — at a desktop width, 60px is a speck in a view whose whole subject is
+   this one aircraft. The JS keeps the canvas backing store in step with whatever this resolves
+   to. */
+.vp-ac-3d {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: clamp(150px, 46vmin, 460px);
+  height: clamp(150px, 46vmin, 460px);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.55));
+}
+/* With a real airframe up, the flat glyph is hidden — NOT removed: it stays the fallback for a
+   model that fails to load and comes straight back when the view closes. */
+.vp-ac-marker--3d .vp-ac-rot {
+  display: none;
+}
+/* The callout clears the 3D frame the same way it clears the enlarged SVG. */
+.vp-ac-marker--3d .vp-ac-callout {
+  bottom: calc(50% + clamp(75px, 23vmin, 230px) + 8px);
+}
 .vp-ac-rot {
   width: 100%;
   height: 100%;
@@ -626,6 +653,29 @@ samp,
 /* Reduced motion: the blades still read as a rotor when static, so nothing is lost. */
 @media (prefers-reduced-motion: reduce) {
   .vp-rotor { animation: none; }
+}
+
+/* The SIDE-view main rotor. It deliberately does NOT reuse the spin above, because a rotor
+   blade seen EDGE-ON cannot visibly rotate — a blade turning in the disc plane is a line
+   whichever way round it faces, so a "spinning" edge-on blade would have to sweep down
+   THROUGH the fuselage, which reads as a fault rather than as motion.
+   What is visible from the side is the blade rising and falling as it goes round, which is
+   real rotor behaviour (flapping). So this rocks about the hub instead. The rocking group
+   carries no SVG transform attribute on purpose: this animation sets `transform`, and a
+   transform attribute would be silently overridden, throwing the blades to the origin.
+   The transform-origin is the group's own fill-box centre, which is the coned arc's middle
+   and therefore within a whisker of the mast at this size. */
+.vp-rotor-main {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: vp-rotor-rock 1.05s ease-in-out infinite alternate;
+}
+@keyframes vp-rotor-rock {
+  from { transform: rotate(-3.4deg); }
+  to   { transform: rotate(3.4deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp-rotor-main { animation: none; }
 }
 
 /* ── Floating callouts above map markers ────────────────────────────── */

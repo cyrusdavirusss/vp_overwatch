@@ -11,9 +11,10 @@ import {
   sampleTrailUntil,
   computeDistance,
 } from '@/lib/data'
-import { buildMapStyle, registerPmtilesProtocol, outsideCoverage, type MapViewType } from '@/lib/map-style'
+import { buildMapStyle, registerPmtilesProtocol, outsideCoverage, TERRAIN_SOURCE_ID, type MapViewType } from '@/lib/map-style'
 import type { CommunityDot } from '@/lib/visual-sighting'
-import { aircraftMarkerSVG, reportMarkerSVG, isGlowingKind, ghostMarkerSVG, ghostModelFor, RED, BLUE } from '@/lib/markers'
+import { aircraftMarkerSVG, reportMarkerSVG, isGlowingKind, ghostMarkerSVG, ghostModelFor, RED, BLUE, type AircraftView } from '@/lib/markers'
+import type { Aircraft3DView, Aircraft3DRole } from '@/lib/aircraft-3d'
 import { deadReckon } from '@/lib/geo/dead-reckoning'
 import {
   visionConeForAltitude,
@@ -61,6 +62,12 @@ export interface VPMapProps {
    * is no orbit, because the subject is already moving.
    */
   overwatchAircraftId?: string | null
+  /**
+   * Hold the aircraft tracking view on the OPERATOR's own position instead of the contact.
+   * Bearing, pitch and zoom are untouched — only the point under the camera changes, so it is
+   * the same view pointed at a different piece of ground.
+   */
+  overwatchUserView?: boolean
   onSelectAircraft: (id: string | null) => void
   onSelectReport: (id: string | null) => void
   scrubT: number
@@ -168,6 +175,50 @@ const OVERWATCH_TRACK_PITCH = 78
 const DEFAULT_PITCH = 0
 /** Close enough that the ghost is the subject of the frame, not a detail on it. */
 const OVERWATCH_ZOOM = 16.5
+
+/**
+ * Vertical exaggeration for the Overwatch terrain.
+ *
+ * 1.0 is true scale, and true scale is very nearly INVISIBLE over Greater
+ * Melbourne — the relief around the city is gentle, so at Overwatch zoom a true
+ * surface is indistinguishable from the flat one it replaces, which would make
+ * this feature look broken rather than subtle. It is nudged up instead, and only
+ * modestly: past roughly 1.6 the ground stops reading as ground and starts reading
+ * as a cartoon, which is worse than flat because it misleads about slope.
+ */
+const OVERWATCH_TERRAIN_EXAGGERATION = 1.4
+
+/**
+ * Attach or detach the 3D terrain.
+ *
+ * THE DECISION THIS ENCODES, recorded because it was reached the hard way: relief
+ * is only VISIBLE when the camera is tilted, and a tilt changes how every pin,
+ * street and report on the map reads. So neither the tilt nor the terrain belongs
+ * to the ordinary map — DEFAULT_PITCH stays 0, and the terrain is attached ONLY
+ * while an Overwatch view is open, which is the one mode already deliberately
+ * tilted (OVERWATCH_PITCH for ground contacts, OVERWATCH_TRACK_PITCH for aircraft).
+ * Terrain in the flat map would be a no-op; a tilted flat map was the original
+ * mistake ("u added a tilt to the whole map i only wanted the terain to look more
+ * 3d ... keep it to overwatch button").
+ *
+ * Guarded on the source existing, and wrapped: setTerrain() against a source the
+ * style does not contain THROWS, and an uncaught throw here escapes to Next's
+ * error boundary and takes the whole page down, not just the map. A style swap is
+ * exactly when the source is briefly absent, so this is the normal path, not an
+ * edge case.
+ */
+function applyTerrain(map: maplibregl.Map, on: boolean): void {
+  try {
+    if (!map.getSource(TERRAIN_SOURCE_ID)) return
+    map.setTerrain(
+      on
+        ? { source: TERRAIN_SOURCE_ID, exaggeration: OVERWATCH_TERRAIN_EXAGGERATION }
+        : null,
+    )
+  } catch {
+    /* style mid-swap — the styledata re-assert below retries */
+  }
+}
 /**
  * Zoom for the AIRCRAFT tracking view — now the SAME street-level 16.5 as the ground orbit.
  *
@@ -368,6 +419,7 @@ export function VPMap({
   selectedReportId,
   overwatchReportId = null,
   overwatchAircraftId = null,
+  overwatchUserView = false,
   onSelectAircraft,
   onSelectReport,
   scrubT,
@@ -982,13 +1034,19 @@ export function VPMap({
         // marker is keyed: this effect re-runs on every feed poll, and re-assigning innerHTML
         // re-parses the SVG and RESTARTS the rotor animation at the poll cadence.
         const tracking = a.id === overwatchAircraftId
-        const glyphKey = `${tracking ? 'side' : 'top'}:${a.role}:${tracking ? AIRCRAFT_TRACKING_SIZE : 36}`
+        // Which art the tracking view needs is decided by the CAMERA, and the camera is no
+        // longer the same for both roles: a helicopter is still watched ABEAM, so it keeps the
+        // side elevation, while a fixed wing is now CHASED FROM BEHIND — and from behind, the
+        // honest silhouette is the ordinary top-down one, nose up the screen. Using the side
+        // art under a chase camera would draw the aircraft broadside while it flew away.
+        const trackingView: AircraftView = 'top'
+        const glyphKey = `${trackingView}:${a.role}:${tracking ? AIRCRAFT_TRACKING_SIZE : 36}`
         if (entry.glyphKey !== glyphKey) {
           entry.glyphKey = glyphKey
           entry.rot.innerHTML = aircraftMarkerSVG(
             a.role,
             tracking ? AIRCRAFT_TRACKING_SIZE : 36,
-            tracking ? 'side' : 'top'
+            trackingView
           )
           entry.marker.getElement().classList.toggle('vp-ac-marker--tracking', tracking)
         }
@@ -1222,12 +1280,52 @@ export function VPMap({
     overwatchAircraftId,
   ])
 
+  // Markers are culled to what the camera can see, so they must be recomputed when
+  // the view moves. Without this, panning to a new area shows an empty map until the
+  // next feed poll — which can be 30 minutes away.
+  const [markerTick, setMarkerTick] = useState(0)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    const bump = () => setMarkerTick((t) => t + 1)
+    map.on('moveend', bump)
+    map.on('zoomend', bump)
+    return () => {
+      map.off('moveend', bump)
+      map.off('zoomend', bump)
+    }
+  }, [ready])
+
   // ── Report markers ─────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map) return
 
-    const visible = layers.reports ? reports.filter((r) => r.reportedAgo - scrubT >= 0) : []
+    // ── Viewport culling ─────────────────────────────────────────────────
+    // Every report used to become a DOM marker whether or not it was anywhere near
+    // the camera. At 130 reports that is 130 animated elements, and in Overwatch —
+    // where the camera is nose-down over ONE unit — nearly all of them were far
+    // off-screen and still burning frames. Measured with the camera over a single
+    // contact: 96 report markers and 25 blinking police in the DOM, sustain 33.7fps.
+    // Only what can actually be seen gets a marker now, with a margin so panning
+    // does not pop them in at the very edge of the screen.
+    const b = map.getBounds()
+    const padLng = Math.max(0.01, (b.getEast() - b.getWest()) * 0.15)
+    const padLat = Math.max(0.01, (b.getNorth() - b.getSouth()) * 0.15)
+    const inView = (lat: number, lng: number) =>
+      lat >= b.getSouth() - padLat && lat <= b.getNorth() + padLat &&
+      lng >= b.getWest() - padLng && lng <= b.getEast() + padLng
+
+    const visible = layers.reports
+      ? reports.filter(
+          (r) =>
+            r.reportedAgo - scrubT >= 0 &&
+            // The selected contact is NEVER culled. It is the thing being looked at,
+            // and in Overwatch it is the thing being orbited — a unit that vanished
+            // from the map the moment you opened its own view would be absurd.
+            (r.id === selectedReportId || inView(r.lat, r.lng))
+        )
+      : []
     const live = new Set<string>()
 
     for (const r of visible) {
@@ -1260,12 +1358,24 @@ export function VPMap({
       const el = marker.getElement() as HTMLDivElement
       const ageMin = Math.max(0, Math.round((r.reportedAgo - scrubT) / 60))
       const ageStr = ageMin < 1 ? '<1m' : ageMin < 60 ? `${ageMin}m` : '>1h'
-      el.innerHTML =
-        reportMarkerSVG(r.kind, color, 30) +
-        `<div class="vp-rp-callout${confirmed ? ' confirmed' : ''}">` +
-        `<span class="vp-co-kind">${r.kind.toUpperCase()}</span>` +
-        `<span class="vp-co-age">${ageStr}</span>` +
-        `<div class="vp-co-stem"></div></div>`
+      // Rebuild the marker's innards only when something actually changed.
+      //
+      // This used to assign innerHTML unconditionally on EVERY pass, and the effect
+      // re-runs on every feed poll — so every poll re-parsed an SVG and re-created
+      // the callout for every marker on screen. Replacing the children also RESTARTS
+      // any CSS animation inside them, which is what made the police blink stutter
+      // in time with the feed. The age string only moves once a minute, so keying on
+      // it removes almost all of that churn.
+      const renderKey = `${r.kind}|${color}|${confirmed ? 'c' : 'n'}|${ageStr}`
+      if (el.dataset.vpKey !== renderKey) {
+        el.dataset.vpKey = renderKey
+        el.innerHTML =
+          reportMarkerSVG(r.kind, color, 30) +
+          `<div class="vp-rp-callout${confirmed ? ' confirmed' : ''}">` +
+          `<span class="vp-co-kind">${r.kind.toUpperCase()}</span>` +
+          `<span class="vp-co-age">${ageStr}</span>` +
+          `<div class="vp-co-stem"></div></div>`
+      }
       el.classList.toggle('selected', isSel)
       // Police units get the blinking blue/red overglow — re-evaluated on every
       // data pass so the class cannot go stale if a kind's config changes.
@@ -1280,7 +1390,7 @@ export function VPMap({
         reportMarkers.current.delete(id)
       }
     }
-  }, [ready, reports, scrubT, layers.reports, selectedReportId, onSelectReport])
+  }, [ready, reports, scrubT, layers.reports, selectedReportId, onSelectReport, markerTick])
 
   // ── Overwatch: circle a ground unit and stand its hollow model on the mark ──
   // Two effects, deliberately. The one that matters is that the CAMERA must not
@@ -1349,12 +1459,27 @@ export function VPMap({
     // commands from overlapping.
     const startTimer = window.setTimeout(() => {
       let last = performance.now()
+      // The sweep is SLOW — a handful of degrees per second — so redrawing satellite
+      // imagery plus terrain sixty times a second to express it is almost all waste.
+      // Measured in the orbit with only ONE marker on screen and a fully culled DOM:
+      // 8.8fps, because every frame carried a full re-render of imagery and terrain.
+      // The bearing is therefore applied at ~30Hz while the ANGLE accumulates every
+      // frame, so the sweep keeps exactly the same speed and only the redraw rate
+      // drops. Skipping the accumulation would have silently slowed the orbit down.
+      const ORBIT_APPLY_MS = 33
+      let lastApply = last
+      let pendingDeg = 0
       const tick = (now: number) => {
         const dt = (now - last) / 1000
         last = now
-        // setBearing every frame — a single easeTo sweeps once and then stops at
-        // 360°, and the sweep is meant to be continuous.
-        map.setBearing((map.getBearing() + OVERWATCH_ORBIT_DPS * dt) % 360)
+        pendingDeg += OVERWATCH_ORBIT_DPS * dt
+        if (now - lastApply >= ORBIT_APPLY_MS) {
+          lastApply = now
+          // setBearing, not easeTo — a single easeTo sweeps once and then stops at
+          // 360°, and the sweep is meant to be continuous.
+          map.setBearing((map.getBearing() + pendingDeg) % 360)
+          pendingDeg = 0
+        }
         orbitRef.current = requestAnimationFrame(tick)
       }
       orbitRef.current = requestAnimationFrame(tick)
@@ -1382,6 +1507,45 @@ export function VPMap({
   }, [ready, overwatchReportId, northLock])
 
   /**
+   * ── 3D terrain, scoped to Overwatch ──────────────────────────────────────────
+   *
+   * ONE effect owns this, rather than a call tacked onto each camera effect,
+   * because the states that matter are not "the ground orbit opened" and "the
+   * aircraft view opened" — they are "the map is tilted" and "the map is flat".
+   * There are four paths between those two, and the fourth is the one that gets
+   * forgotten: swapping the basemap while a view is open.
+   *
+   * That fourth case is why there is a styledata listener. setStyle() rebuilds the
+   * style from scratch, which DROPS any attached terrain and says nothing at all
+   * about doing it — the camera keeps its tilt, the ground silently goes flat, and
+   * the only symptom is that the feature looks like it never worked. Re-asserting on
+   * styledata covers the window while the new style's sources settle.
+   *
+   * The tilt condition deliberately MIRRORS the camera effects. Terrain beneath a
+   * camera that is not tilted is invisible, so attaching it there would spend DEM
+   * requests on tiles nobody can see. northLock (stealth / head-up) refuses the tilt
+   * for a ground contact, so it refuses the terrain with it.
+   */
+  useEffect(() => {
+    const map = mapRef.current
+    if (!ready || !map) return
+    const tilted = !!(
+      overwatchAircraftId ||
+      (overwatchReportId && !northLock && !headingMode)
+    )
+    applyTerrain(map, tilted)
+    const reassert = () => applyTerrain(map, tilted)
+    map.on('styledata', reassert)
+    return () => {
+      map.off('styledata', reassert)
+      // Detach unconditionally on the way out, whatever the next state is. Leaving
+      // terrain attached to a flat map is invisible but still costs tiles, and the
+      // next run of this effect re-attaches it if it is still wanted.
+      applyTerrain(map, false)
+    }
+  }, [ready, overwatchReportId, overwatchAircraftId, northLock, headingMode, viewType])
+
+  /**
    * ── Overwatch on an AIRCRAFT: a FIXED view that follows the contact ─────────────────────
    *
    * Deliberately NOT an orbit. A ground report is stationary, so sweeping a circle around it
@@ -1397,6 +1561,17 @@ export function VPMap({
    * The camera does not hand control back while this is open: a follow view that also let you
    * pan would drift off the subject and stop meaning anything. Exiting returns it.
    */
+  /**
+   * The operator's live position, for the tracking view's "hold on me" toggle.
+   *
+   * A REF, not a dependency, deliberately: putting `user` in the tracking effect's deps would
+   * re-run it on every GPS update, and that effect tears down and rebuilds the view — which
+   * would reload the 3D model and flash the airframe every ten seconds. Null when there is no
+   * fix, and the app's rule holds: the view will not hold on a position the device has not got.
+   */
+  const operatorPos = useRef<[number, number] | null>(null)
+  operatorPos.current = hasUserFix ? [user.lng, user.lat] : null
+
   useEffect(() => {
     const map = mapRef.current
     if (!ready || !map || !overwatchAircraftId) return
@@ -1418,6 +1593,48 @@ export function VPMap({
     // were identical, and the wider fixed-wing framing never happened at all. The framing IS the
     // feature here, so it is set outright.
     map.setZoom(targetZoom)
+
+    // ── The real airframe, in 3D ────────────────────────────────────────────────────
+    // This view is a genuine side elevation — the camera sits abeam at pitch 78 — and a
+    // flat glyph has to FAKE that geometry. `gods-eye-view` takes the honest route for the
+    // same situation: draw the actual glTF airframe when the camera is close enough to see
+    // it, keep the flat billboard when it is not. This is that, scoped to this one view.
+    //
+    // The flat side glyph is NOT removed, only hidden: it stays the fallback if the model
+    // fails to load, and it is restored the moment the view closes.
+    //
+    // The module is imported dynamically so three.js is not part of the bundle for the
+    // overwhelming majority of sessions that never open Overwatch on an aircraft.
+    const markerEl = target?.marker.getElement() as HTMLDivElement | undefined
+    const modelRole: Aircraft3DRole = target?.role === 'rotary' ? 'rotary' : 'fixedwing'
+    let view: Aircraft3DView | null = null
+    let cancelled = false
+    if (markerEl) {
+      markerEl.classList.add('vp-ac-marker--3d')
+      // Terrain must never dim the CONTACT this view exists to show.
+      //
+      // MapLibre fades any marker to its "_opacityWhenCovered" — 0.2 by default — whenever it
+      // decides terrain occludes the point the marker is drawn at (`_updateOpacity`). Aircraft
+      // markers are drawn at their GROUND position, never at altitude, so at pitch 78 the
+      // moment any ridge sits between the camera and that point the contact goes translucent.
+      // The subject of a tracking view turning into a ghost is worse than the occlusion it is
+      // reporting, so the covered opacity is raised to 1 for the tracked contact only.
+      // setOpacity(visible, covered) is the public hook; the app's own silent/lost fade is
+      // applied to the inner glyph and callout nodes, so it is untouched by this.
+      target?.marker.setOpacity('1', '1')
+      void import('@/lib/aircraft-3d')
+        .then(async (m) => {
+          const v = await m.createAircraft3D(modelRole)
+          if (cancelled) { v.dispose(); return }
+          view = v
+          markerEl.appendChild(v.canvas)
+        })
+        .catch((e) => {
+          // Never let a 3D model take the map down — the flat side glyph is already up.
+          console.warn('[overwatch] 3D airframe unavailable, keeping the 2D side glyph:', e)
+          markerEl.classList.remove('vp-ac-marker--3d')
+        })
+    }
 
     let raf: number | null = null
     const tick = () => {
@@ -1443,14 +1660,43 @@ export function VPMap({
         // "the heli is sideways" report, and it measured as a 90deg error. +90 sends the contact
         // LEFT instead, so the nose leads and the trail streams out behind it. The two directions
         // agree. (The earlier attempt drew the right conclusion and then picked the wrong sign.)
-        const SIDE_DEG = 90
+        //
+        // ROLE DECIDES THE OFFSET, and the two are deliberately different cameras:
+        //   ROTARY (+90) stays ABEAM. A helicopter works a small area slowly, and reading the
+        //   ground it is circling is the reason this view exists, so the side elevation and the
+        //   sideways-travelling frame stay.
+        //   FIXED WING (0) is a CHASE. A plane crosses the state; from directly behind, you see
+        //   the airframe in perspective with the ground running away under it, which is what a
+        //   3D model is for. This is gods-eye-view's own convention — its HeadingPitchRange is
+        //   built from the forward heading precisely so the camera ends up behind the vehicle.
+        //   That was rejected here once, but for a reason that no longer applies: with a FLAT
+        //   glyph a chase reads as birdseye. With a real airframe it does not.
+        // The nose is NOT re-oriented for the chase — the model is always yawed onto its own
+        // heading, so it is the CAMERA that moved, not the aircraft.
+        const SIDE_DEG = 0
         map.setBearing((entry?.hdgShown ?? 0) + SIDE_DEG)
         // Only issue a camera command when the contact has actually drifted. A stationary one
         // would otherwise cancel an unrelated animation every single frame.
+        // WHICH POINT THE CAMERA HOLDS. The contact, unless the operator has asked for their
+        // own position — which is the whole point of the toggle, since this view exists to read
+        // a patch of GROUND and sometimes the patch that matters is the one you are standing on.
+        const focus = overwatchUserView && operatorPos.current ? operatorPos.current : pos
         const c = map.getCenter()
-        if (Math.abs(c.lng - pos[0]) > 1e-6 || Math.abs(c.lat - pos[1]) > 1e-6) {
-          map.setCenter([pos[0], pos[1]])
+        if (Math.abs(c.lng - focus[0]) > 1e-6 || Math.abs(c.lat - focus[1]) > 1e-6) {
+          map.setCenter([focus[0], focus[1]])
         }
+      }
+      if (view) {
+        const b = map.getBearing()
+        // The map rotates every marker by −bearing, so the canvas counter-rotates by
+        // +bearing to stay screen-aligned. Without it the airframe arrives rolled 90°,
+        // because the marker is map-rotation-aligned for the heading maths.
+        view.canvas.style.transform = `translate(-50%, -50%) rotate(${b}deg)`
+        view.render({
+          bearingDeg: b,
+          pitchDeg: map.getPitch(),
+          headingDeg: entry?.hdgShown ?? 0,
+        })
       }
       raf = requestAnimationFrame(tick)
     }
@@ -1458,12 +1704,18 @@ export function VPMap({
 
     return () => {
       if (raf !== null) cancelAnimationFrame(raf)
+      cancelled = true
+      view?.dispose()
+      view = null
+      markerEl?.classList.remove('vp-ac-marker--3d')
+      // Hand the marker back to MapLibre's default occlusion fade.
+      target?.marker.setOpacity('1', '0.2')
       // Flatten immediately on the way out, for the same reason the orbit does: an eased
       // flatten gets cancelled by the next camera command, an instant one cannot be.
       map.setPitch(DEFAULT_PITCH)
       map.setBearing(0)
     }
-  }, [ready, overwatchAircraftId])
+  }, [ready, overwatchAircraftId, overwatchUserView])
 
   useEffect(() => {
     const map = mapRef.current

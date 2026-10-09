@@ -182,9 +182,13 @@ export default function VPOverwatch() {
 
   const clientLocation = useClientLocation()
   const communityDots = useCommunityDots()
-  // Live GPS fix present → hide the manual "Set Location" button; keep it only
-  // as a fallback when GPS is denied/unavailable (e.g. served over plain HTTP).
-  const gpsLive = clientLocation.permissionState === 'granted' && !clientLocation.isManual && clientLocation.position !== null
+  // The locate control is ALWAYS rendered. It used to be hidden whenever a live GPS
+  // fix existed — which removed the one control that answers "where am I?" at exactly
+  // the moment it was wanted. An operator showing someone the map found no location
+  // button, pressed Recenter instead, and the camera — already on them — barely moved,
+  // so the control read as broken. Manual coordinate entry is still offered ONLY when
+  // the browser genuinely cannot answer; that decision belongs in onSetLocationPressed,
+  // not in whether the button exists.
 
   // Home / default location. Desktop browsers can't GPS-locate, so when no
   // precise fix is available the map centers here instead of a generic
@@ -401,6 +405,13 @@ export default function VPOverwatch() {
    * right hollow model from the report's own kind.
    */
   const [overwatchReportId, setOverwatchReportId] = useState<string | null>(null)
+
+  /**
+   * Whether the aircraft tracking view holds on the operator's own position instead of the
+   * contact. Reset whenever the view closes, so it can never silently open somewhere
+   * unexpected the next time it is used.
+   */
+  const [overwatchUserView, setOverwatchUserView] = useState(false)
   /**
    * Overwatch can also target an AIRCRAFT.
    *
@@ -751,6 +762,7 @@ export default function VPOverwatch() {
     if (overwatchReportId || overwatchAircraftId) {
       setOverwatchReportId(null)
       setOverwatchAircraftId(null)
+      setOverwatchUserView(false)
       return
     }
     // The operator's OWN selection decides the target, and an aircraft is a legitimate one.
@@ -803,7 +815,20 @@ export default function VPOverwatch() {
         // do before launching this — hid the control completely. Lifting it clear of the sheet
         // resolves both: the sheet keeps its rows, and the control is reachable while a unit is
         // selected.
-        position: 'fixed', bottom: 'calc(var(--vp-panel-h, 0px) + 24px)', right: 16, zIndex: 34,
+        position: 'fixed',
+        // Both layouts now render this pill, so the offset has to suit both.
+        //
+        // On the phone it rides ABOVE the mobile detail sheet, exactly as the FAB cluster does,
+        // by reading the sheet's published top edge. It used to sit at a fixed bottom:20 with
+        // z-index 30, and the sheet was deliberately stacked above it (z-index 35) because the
+        // pill was drawing over the sheet's lower rows and hiding the heading value — so
+        // selecting a unit, the very thing you do before launching this, hid the control.
+        //
+        // On DESKTOP there is no sheet; the constraint is the 26px status bar across the bottom
+        // and the FAB cluster, whose lowest button starts 76px above the map area's own bottom
+        // edge. 46px clears the status bar and still leaves a 30px gap to the cluster.
+        bottom: isDesktop ? 46 : 'calc(var(--vp-panel-h, 0px) + 24px)',
+        right: 16, zIndex: 34,
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '11px 17px', borderRadius: 999,
         background: overwatchOn ? 'rgba(45,140,255,0.34)' : 'rgba(45,140,255,0.18)',
@@ -820,9 +845,55 @@ export default function VPOverwatch() {
         <circle cx="12" cy="12" r="2.5" />
         <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
       </svg>
-      {overwatchOn ? 'EXIT OVERWATCH' : 'OVERWATCH'}
+      {overwatchOn ? 'EXIT OVERWATCH' : overwatchLive ? 'OVERWATCH' : 'OVERWATCH · PICK A CONTACT FIRST'}
     </button>
   )
+
+  /**
+   * "Hold the view on me" — offered ONLY while the aircraft tracking view is open, because that
+   * is the only view in which it means anything.
+   *
+   * The view exists to read a patch of GROUND, and sometimes the patch that matters is the one
+   * the operator is standing on. This points the same camera at a different point: bearing,
+   * pitch and zoom are untouched.
+   *
+   * Disabled with no fix, and the tooltip says why rather than the control just looking dead —
+   * the app never implies a position the device has not got. Same guard the map's own "you are
+   * here" dot uses, and the status bar already reads NO FIX in that state.
+   */
+  const overwatchUserChip = overwatchOn ? (
+    <button
+      className="vp-chrome50"
+      onClick={() => setOverwatchUserView((v) => !v)}
+      disabled={!clientLocation.position !== null}
+      aria-pressed={overwatchUserView}
+      aria-label={overwatchUserView ? 'Tracking view is holding on your position — tap to follow the contact' : 'Hold the tracking view on your own position'}
+      title={clientLocation.position !== null
+        ? (overwatchUserView ? 'Holding on your position — tap to follow the contact' : 'Centre the view on your own position')
+        : 'No GPS fix — the view cannot hold on a position this device has not got'}
+      style={{
+        position: 'fixed',
+        bottom: isDesktop ? 94 : 'calc(var(--vp-panel-h, 0px) + 72px)',
+        right: 16, zIndex: 34,
+        display: 'flex', alignItems: 'center', gap: 7,
+        padding: '9px 14px', borderRadius: 999,
+        background: overwatchUserView ? 'rgba(255,176,32,0.28)' : 'rgba(11,18,26,0.86)',
+        border: `1px solid ${overwatchUserView ? 'rgba(255,176,32,0.85)' : 'var(--border)'}`,
+        color: overwatchUserView ? 'var(--amber)' : 'var(--fg-2)',
+        backdropFilter: 'blur(8px)',
+        fontFamily: 'var(--font-mono, monospace)', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
+        boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
+        cursor: clientLocation.position !== null ? 'pointer' : 'not-allowed',
+        opacity: clientLocation.position !== null ? 1 : 0.5,
+      }}
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="10" r="3.2" />
+        <path d="M12 21.5c4.6-5.6 7-9.3 7-12.1a7 7 0 1 0-14 0c0 2.8 2.4 6.5 7 12.1z" />
+      </svg>
+      {overwatchUserView ? 'ON MY POSITION' : 'MY LOCATION'}
+    </button>
+  ) : null
 
   /** Compact relative age for the VPS report list. `reportedAgo` is in SECONDS. */
   const formatAgo = (secs?: number | null): string => {
@@ -982,6 +1053,7 @@ export default function VPOverwatch() {
               selectedReportId={selectedReportId}
               overwatchReportId={overwatchReportId}
               overwatchAircraftId={overwatchAircraftId}
+              overwatchUserView={overwatchUserView}
               onSelectAircraft={onSelectAircraft}
               onSelectReport={onSelectReport}
               scrubT={scrubT}
@@ -1032,7 +1104,7 @@ export default function VPOverwatch() {
               onLayers={cycleMapView}
               onFilters={() => { railTouched.current = true; setRailLeftOpen((v) => !v) }}
               onRecenter={onRecenter}
-              onSetLocation={gpsLive ? undefined : onSetLocationPressed}
+              onSetLocation={onSetLocationPressed}
               followUser={followUser}
               onFitAll={onFitAll}
               onRoute={() => setPickingDest(true)}
@@ -1232,6 +1304,13 @@ export default function VPOverwatch() {
             its own here, and the two layouts cannot drift apart again. */}
         {arOverlay}
         {whatsNew}
+        {/* The Overwatch pill lives on the MAP in both layouts, not only on the phone.
+            It was mobile-only (rendered only in the other branch below), and the desktop
+            layout's sole control was a 9px tab buried in the left rail under Map view —
+            reachable, but the operator could not find it. This is the same element, same
+            handler, so the two layouts cannot drift apart. */}
+        {overwatchUserChip}
+        {arLaunch}
       {showSubscribe && <SubscribeModal onClose={() => setShowSubscribe(false)} />}
       <TermsGate />
       </div>
@@ -1340,6 +1419,7 @@ export default function VPOverwatch() {
             selectedReportId={selectedReportId}
             overwatchReportId={overwatchReportId}
             overwatchAircraftId={overwatchAircraftId}
+            overwatchUserView={overwatchUserView}
             onSelectAircraft={onSelectAircraft}
             onSelectReport={onSelectReport}
             scrubT={scrubT}
@@ -1423,7 +1503,7 @@ export default function VPOverwatch() {
             onLayers={cycleMapView}
             onFilters={() => setFilterOpen((v) => !v)}
             onRecenter={onRecenter}
-            onSetLocation={gpsLive ? undefined : onSetLocationPressed}
+            onSetLocation={onSetLocationPressed}
             followUser={followUser}
             onFitAll={onFitAll}
             onHeading={heading.supported ? onToggleHeading : undefined}
@@ -1501,6 +1581,7 @@ export default function VPOverwatch() {
           )}
         </div>
       </div>
+      {overwatchUserChip}
       {arLaunch}
       {arOverlay}
       {whatsNew}
