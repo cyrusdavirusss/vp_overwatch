@@ -290,10 +290,13 @@ export default function VPOverwatch() {
   const [recenterCounter, setRecenterCounter] = useState(0)
   /** Set by an explicit location press so the next fix is used even if it is coarse. */
   const forceFocusRef = useRef(false)
-  const [relayTick, setRelayTick] = useState(liveData.relay.lastTickAgo)
-  const [systemClock, setSystemClock] = useState(Date.now())
-
-  useEffect(() => { setRelayTick(liveData.relay.lastTickAgo) }, [liveData.relay.lastTickAgo])
+  // NOTE: a `relayTick` counter and a `systemClock` timestamp used to live here, driven by a 1 s
+  // interval below. BOTH WERE DEAD — `relayTick` was never read, and `systemClock` fed only
+  // `clockStr`, which is not rendered anywhere (vp-header ticks its own clock). All they did was
+  // call setState on this top-level component once a second, which re-rendered LazyMap, the whole
+  // of map.tsx, both rails and every marker effect 60 times a minute. Do not reintroduce a ticker
+  // here: if a live-updating value is needed, own the interval in the leaf component that DISPLAYS
+  // it, the way vp-header does, so a clock tick cannot repaint the map.
 
   // Device orientation feeds the AR overlay (bearing/elevation via window.__vpOrientation).
   // iOS 13+ needs an explicit permission prompt (handled when AR opens), so skip auto-bind there.
@@ -305,13 +308,6 @@ export default function VPOverwatch() {
     }
     window.addEventListener('deviceorientation', onOrient)
     return () => window.removeEventListener('deviceorientation', onOrient)
-  }, [])
-  useEffect(() => {
-    const id = setInterval(() => {
-      setRelayTick((t) => t + 1)
-      setSystemClock(Date.now())
-    }, 1000)
-    return () => clearInterval(id)
   }, [])
 
   // Live-follow: while follow is on, re-center on every position update so the
@@ -728,11 +724,6 @@ export default function VPOverwatch() {
   ) : selectedReport ? (
     <ReportDetail report={selectedReport} user={userPosition} onClose={onCloseDetail} />
   ) : null
-
-  const clockStr = useMemo(() => {
-    const d = new Date(systemClock)
-    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`
-  }, [systemClock])
 
   const locationStr = useMemo(() => {
     if (clientLocation.position) {
