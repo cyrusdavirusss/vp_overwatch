@@ -1391,6 +1391,17 @@ export function VPMap({
           `<span class="vp-co-kind">${r.kind.toUpperCase()}</span>` +
           `<span class="vp-co-age">${ageStr}</span>` +
           `<div class="vp-co-stem"></div></div>`
+        // The RED half of the police overglow. A real element, not a pseudo-element: `::before`
+        // is the invisible 44px touch target and `::after` is already the blue ring, and one
+        // element cannot cross-fade two colours independently.
+        //
+        // Appended HERE, inside the rebuild, because the assignment above replaces every child —
+        // a span added once at marker creation would be destroyed the first time the age string
+        // ticked over. It carries no text and is aria-hidden: it is light, not information.
+        const glow = document.createElement('span')
+        glow.className = 'vp-rp-glow'
+        glow.setAttribute('aria-hidden', 'true')
+        el.appendChild(glow)
       }
       el.classList.toggle('selected', isSel)
       // Police units get the blinking blue/red overglow — re-evaluated on every
