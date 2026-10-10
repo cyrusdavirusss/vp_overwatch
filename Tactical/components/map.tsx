@@ -621,6 +621,37 @@ export function VPMap({
       const debug =
         process.env.NODE_ENV !== 'production' ||
         (typeof window !== 'undefined' && window.location.search.includes('mapdebug'))
+      // ── A FAILED BASEMAP MUST BE VISIBLE, AND RETRYABLE, IN PRODUCTION ──────────────
+      //
+      // The overlay below is gated on `debug`, so in the build the operator actually runs a
+      // basemap that fails to load gives a BLACK MAP: no message, no retry, and no way out
+      // except closing the app. Measured by blocking the pmtiles on a cold load — the console
+      // got `[VP-MAP ERROR] TypeError: Failed to fetch at FetchSource`, and the screen got
+      // nothing at all.
+      //
+      // This is worth surfacing rather than hiding because the failure is genuinely recoverable:
+      // it is a dropped or interrupted FETCH of the 240 MB basemap, and a reload fixes it. That
+      // is why "close and reopen" works. A tap should do it.
+      //
+      // Gated on source/tile fetch errors so a benign sprite or label failure does not raise a
+      // false alarm about the basemap, and it removes itself if the source later loads.
+      const src = String((e as any)?.sourceId || '') + ' ' + msg
+      if (/fetch|pmtiles|source|tile/i.test(src) && typeof document !== 'undefined') {
+        if (!document.getElementById('__vp_basemap_retry')) {
+          const n = document.createElement('button')
+          n.id = '__vp_basemap_retry'
+          n.textContent = 'BASEMAP DID NOT LOAD · TAP TO RETRY'
+          n.style.cssText =
+            'position:fixed;left:50%;top:96px;transform:translateX(-50%);z-index:99998;' +
+            'background:rgba(28,18,0,.94);color:#ffb020;' +
+            'border:1px solid rgba(255,176,32,.75);border-radius:999px;padding:11px 18px;' +
+            'font:700 11px/1 var(--font-mono,monospace);letter-spacing:.12em;' +
+            'cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.55)'
+          n.onclick = () => window.location.reload()
+          document.body.appendChild(n)
+        }
+      }
+
       if (!debug || typeof document === 'undefined') return
       let box = document.getElementById('__vp_maperr')
       if (!box) {
@@ -631,6 +662,20 @@ export function VPMap({
         document.body.appendChild(box)
       }
       box.textContent = (box.textContent ? box.textContent + '\n' : '') + msg
+    })
+
+    // If the basemap recovers on its own, the retry notice is a lie — take it away.
+    //
+    // ONLY the basemap source can clear it. `sourcedata` fires for EVERY source, and gating on
+    // `isSourceLoaded` alone cleared the notice the instant it appeared, because the aerodromes
+    // GeoJSON and the place-label source both load perfectly well while the pmtiles never
+    // arrives. That is how the first version of this fix did nothing at all — found by making
+    // the pmtiles fail on purpose and observing no notice appeared.
+    // 'protomaps' mirrors the private SOURCE constant in lib/map-style.ts.
+    map.on('sourcedata', (ev: any) => {
+      if (ev?.isSourceLoaded && ev?.sourceId === 'protomaps' && typeof document !== 'undefined') {
+        document.getElementById('__vp_basemap_retry')?.remove()
+      }
     })
 
     // Tap-to-set position (only acts when pickMode is on, via the live callback).
