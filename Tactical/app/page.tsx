@@ -196,6 +196,23 @@ export default function VPOverwatch() {
   const HOME_LAT = Number(process.env.NEXT_PUBLIC_HOME_LAT) || -37.8136
   const HOME_LNG = Number(process.env.NEXT_PUBLIC_HOME_LNG) || 144.9631
 
+  // A fix coarse beyond this is a network guess, not a device lock.
+  //
+  // navigator.geolocation with enableHighAccuracy:true still answers from WiFi/IP on a
+  // machine with no GPS, and that answer is routinely a suburb out — it is the classic
+  // reason a desktop user reports "it says I am somewhere I am not". A stale or coarse
+  // fix also reports a flattering accuracy figure, so the only safe test is the number
+  // itself. The server already draws this line at accuracy < 100 for "a real lock"; this
+  // is the same rule applied where the operator can see the consequence.
+  const USER_FIX_MAX_ACCURACY_M = 1000
+
+  // Present AND precise enough to be worth acting on. Nothing in the UI may treat a
+  // coarse or absent fix as the operator's position: no "you are here" dot, no camera
+  // fly-to, and no bearings measured from it.
+  const userFixOk =
+    clientLocation.position !== null &&
+    (clientLocation.position.accuracy ?? Infinity) <= USER_FIX_MAX_ACCURACY_M
+
   // Derive a User object from the client-held position
   // Never sent over the network — lives only in React state.
   const userPosition: User = useMemo(() => ({
@@ -571,21 +588,26 @@ export default function VPOverwatch() {
     if (leavingOverwatch) setOverwatchReportId(null)
 
     const flyToOperator = () => {
+      const fix = clientLocation.position
+      // Only fly to a fix worth flying to.
+      //
+      // With NO fix this used to set follow mode and bump the trigger, which sent the camera
+      // to the configured home point and left follow mode chasing it — the operator presses
+      // "where am I" and the map confidently shows somewhere they are not. With a COARSE fix
+      // it did the same thing with a suburb-level guess. In both cases: ask the browser and
+      // leave the camera alone. A press that visibly does nothing is honest; one that shows
+      // the wrong place is not.
+      if (!fix || fix.accuracy > USER_FIX_MAX_ACCURACY_M) {
+        clientLocation.requestLocation()
+        return
+      }
       setFollowUser(true)
       // Bump the recenter trigger so the map flies to the operator on EVERY press, even
       // when the GPS fix is unchanged (otherwise the focus dedup swallows it).
       setRecenterCounter((c) => c + 1)
       forceFocusRef.current = true
-      if (clientLocation.position) {
-        setFocusTarget({ lat: clientLocation.position.lat, lng: clientLocation.position.lng })
-        forceFocusRef.current = false
-      } else {
-        // No fix yet — ASK THE BROWSER. This used to centre on the home point "meanwhile",
-        // which is worse than doing nothing: the map flies somewhere plausible and the
-        // operator reads that as a successful fix. A request here is a user gesture, which is
-        // exactly when the browser will show its permission prompt.
-        clientLocation.requestLocation()
-      }
+      setFocusTarget({ lat: fix.lat, lng: fix.lng })
+      forceFocusRef.current = false
     }
 
     if (leavingOverwatch) requestAnimationFrame(flyToOperator)
@@ -739,7 +761,7 @@ export default function VPOverwatch() {
       aircraft={liveData.aircraft}
       reports={allGroundContacts}
       communityDots={communityDots}
-      userLocation={userPosition}
+      userLocation={userFixOk ? userPosition : null}
       onClose={() => setShowAR(false)}
     />
   ) : null
@@ -1039,7 +1061,7 @@ export default function VPOverwatch() {
               aircraft={filteredAircraft}
               reports={allGroundContacts}
               user={userPosition}
-              hasUserFix={clientLocation.position !== null}
+              hasUserFix={userFixOk}
               selectedAircraftId={selectedAircraftId}
               selectedReportId={selectedReportId}
               overwatchReportId={overwatchReportId}
@@ -1416,7 +1438,7 @@ export default function VPOverwatch() {
             aircraft={filteredAircraft}
             reports={allGroundContacts}
             user={userPosition}
-            hasUserFix={clientLocation.position !== null}
+            hasUserFix={userFixOk}
             selectedAircraftId={selectedAircraftId}
             selectedReportId={selectedReportId}
             overwatchReportId={overwatchReportId}

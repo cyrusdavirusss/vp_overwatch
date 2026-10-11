@@ -18,7 +18,7 @@ test('everything inside the operating area passes through unchanged', () => {
   const inside = [
     { lat: -37.8136, lng: 144.9631 }, // Melbourne CBD
     { lat: -38.1499, lng: 144.3617 }, // Geelong
-    { lat: -37.9343, lng: 145.1805 }, // south-east metro
+    { lat: -37.9871, lng: 145.2146 }, // Dandenong, south-east metro
     { lat: -38.4, lng: 145.7 },       // Wilsons Prom-ish
     { lat: -36.75, lng: 144.28 },     // Bendigo
     { lat: -34.18, lng: 142.16 },     // Mildura, the far north-west corner

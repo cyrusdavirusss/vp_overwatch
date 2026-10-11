@@ -33,9 +33,19 @@ Tactical/scripts/__pycache__/
 
 # Secrets in tool env files (never commit) + local backups
 tools/**/.env
+# Sibling env variants (e.g. .env.openwebninja) carry the SAME relay secret plus a
+# provider API key, so they must be ignored too. The committed *.example templates
+# are negated back in so the documented shape stays in the repo.
+tools/**/.env.*
+!tools/**/.env*.example
 Tactical/assets/relay/.env
 *.bak
 *.bak.*
+
+# research notes — copper facilities, cable carriers, facility sites. Working notes that
+# name real businesses and are not app code; keep them out of a PUBLIC repo. Only
+# notes/ai-model-prompts.md is tracked (it predates this rule); everything else stays local.
+notes/
 
 # local test env (never commit)
 /.env
