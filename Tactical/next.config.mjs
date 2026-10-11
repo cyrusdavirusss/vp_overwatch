@@ -2,6 +2,9 @@
 const nextConfig = {
   allowedDevOrigins: ['100.94.31.125'],
   output: 'standalone',
+  // Override the build output dir (used for a verify build so the live
+  // .next served by the systemd unit is never disturbed). Defaults to .next.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
 
   // Cache policy. Next serves the statically-prerendered app shell with a
   // year-long `s-maxage`, and there is no service worker to bust it — so a
@@ -19,6 +22,7 @@ const nextConfig = {
     return [
       { source: '/', headers: [noStore] },
       { source: '/vicpol-history', headers: [noStore] },
+      { source: '/dashboard', headers: [noStore] },
     ]
   },
 }

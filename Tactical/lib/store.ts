@@ -533,24 +533,31 @@ function integratePoliceFuelPct(
   const perf = perfForHex(hex)
   const last = policeFuelCalcAt.get(hex) ?? now
   policeFuelCalcAt.set(hex, now)
+  // Launder every input up front so a NaN can never enter — and never stick.
+  const prevSafe = pct(prevPct, 100)
+  const altSafe = num(altFt, 0)
+  const gsSafe = num(gsKt, 0)
+  const trkSafe = num(trackDeg, 0)
+  const vsSafe = num(vsFpm, 0)
   if (!perf) {
-    return Math.max(0, Math.min(100, (1 - timeAirborneSec / (fallbackEnduranceMin * 60)) * 100))
+    return Math.max(0, Math.min(100, (1 - num(timeAirborneSec, 0) / (fallbackEnduranceMin * 60)) * 100))
   }
   const dtH = (now - last) / 3.6e6
-  if (dtH <= 0 || dtH > 0.5) return prevPct // first tick or a long gap: hold
+  if (dtH <= 0 || dtH > 0.5) return prevSafe // first tick or a long gap: hold
   try {
     const wind = currentAreaWind()
-    const tas = trueAirspeedKt(gsKt, trackDeg, wind)
-    const weightFrac = Math.max(0, Math.min(1, prevPct / 100))
-    const ff = instantFuelFlowKgH(perf, tas, altFt, vsFpm, 0, weightFrac)
-    const prevKg = (prevPct / 100) * perf.usableFuelKg
+    const tas = trueAirspeedKt(gsSafe, trkSafe, wind)
+    const weightFrac = Math.max(0, Math.min(1, prevSafe / 100))
+    const ff = instantFuelFlowKgH(perf, tas, altSafe, vsSafe, 0, weightFrac)
+    const prevKg = (prevSafe / 100) * perf.usableFuelKg
     const newKg = Math.max(0, prevKg - ff * dtH)
     // Keep FULL PRECISION — a single 3s/60s tick burns a fraction of a percent;
     // rounding to an int here would round every tick straight back to the prior
     // value, so the tank would never actually drain. Round only for display.
-    return Math.max(0, Math.min(100, (newKg / perf.usableFuelKg) * 100))
+    const result = (newKg / perf.usableFuelKg) * 100
+    return Number.isFinite(result) ? Math.max(0, Math.min(100, result)) : prevSafe
   } catch {
-    return prevPct
+    return prevSafe
   }
 }
 
@@ -616,22 +623,24 @@ function modelFuelPercent(
   fallbackEnduranceMin: number,
 ): number {
   const perf = perfForHex(hex)
-  const linear = Math.max(0, Math.min(100, (1 - timeAirborneSec / (fallbackEnduranceMin * 60)) * 100))
+  const linear = Math.max(0, Math.min(100, (1 - num(timeAirborneSec, 0) / (fallbackEnduranceMin * 60)) * 100))
   if (!perf || !prev || !prev.lastSeen || !prev.isActive) return linear
   const dtH = (now - prev.lastSeen) / 3.6e6
-  if (dtH <= 0 || dtH > 0.5) return prev.fuelRemainingPercent ?? linear // gap >30min: hold last
+  const prevSafe = pct(prev.fuelRemainingPercent, 100)
+  if (dtH <= 0 || dtH > 0.5) return prevSafe // gap >30min: hold last
   try {
     const wind = currentAreaWind()
-    const tasNow = trueAirspeedKt(gsKt, trackDeg, wind)
-    const tasPrev = trueAirspeedKt(prev.speed, prev.heading, wind)
+    const tasNow = trueAirspeedKt(num(gsKt, 0), num(trackDeg, 0), wind)
+    const tasPrev = trueAirspeedKt(num(prev.speed, 0), num(prev.heading, 0), wind)
     const accel = ((tasNow - tasPrev) * KT_TO_MS) / (dtH * 3600)
-    const weightFrac = Math.max(0, Math.min(1, (prev.fuelRemainingPercent ?? 100) / 100))
-    const ff = instantFuelFlowKgH(perf, tasNow, altFt, vsFpm, accel, weightFrac)
-    const prevKg = ((prev.fuelRemainingPercent ?? 100) / 100) * perf.usableFuelKg
+    const weightFrac = Math.max(0, Math.min(1, prevSafe / 100))
+    const ff = instantFuelFlowKgH(perf, tasNow, num(altFt, 0), num(vsFpm, 0), accel, weightFrac)
+    const prevKg = (prevSafe / 100) * perf.usableFuelKg
     const newKg = Math.max(0, prevKg - ff * dtH)
     // Full precision (see integratePoliceFuelPct) — rounding per tick would stall
     // the drain. Display layers round for presentation.
-    return Math.max(0, Math.min(100, (newKg / perf.usableFuelKg) * 100))
+    const result = (newKg / perf.usableFuelKg) * 100
+    return Number.isFinite(result) ? Math.max(0, Math.min(100, result)) : prevSafe
   } catch {
     return linear
   }
@@ -644,8 +653,8 @@ function modelFuelPercent(
 function silentExpiryMs(ac: Aircraft): number {
   const perf = perfForHex(ac.hex)
   const base = ac.lastSeen ?? (ac.startTime || Date.now())
-  if (perf && ac.fuelRemainingPercent != null) {
-    const remKg = (ac.fuelRemainingPercent / 100) * perf.usableFuelKg
+  if (perf && Number.isFinite(ac.fuelRemainingPercent)) {
+    const remKg = (ac.fuelRemainingPercent! / 100) * perf.usableFuelKg
     return base + maxRemainingEnduranceSec(remKg, perf) * 1000 + SILENT_RESERVE_MS
   }
   const enduranceMs = (ac.fuelEnduranceMinutes || 60) * 60_000
@@ -666,7 +675,7 @@ function pruneSilentKnown(now: number): void {
     const silentForMs = now - ac.lastSeen
     // Retire once the tank is dry (fuel drains every 3s while silent, below) or
     // it has been dark past its fuel-based endurance bound — whichever first.
-    const dry = (ac.fuelRemainingPercent ?? 0) <= 0
+    const dry = pct(ac.fuelRemainingPercent, 0) <= 0
     if (silentForMs >= SILENT_MIN_GRACE_MS && (dry || now >= silentExpiryMs(ac))) {
       resetToDormant(ac)
     }
@@ -702,6 +711,26 @@ function validLatLng(lat: any, lng: any): boolean {
     Math.abs(lat) <= 90 && Math.abs(lng) <= 180 &&
     !(lat === 0 && lng === 0)
   )
+}
+
+// Coerce any ADS-B numeric field to a FINITE number. adsb.lol emits non-numeric
+// sentinels — most importantly `alt_baro: "ground"` when a contact is on the
+// deck — plus occasional nulls. Number("ground") is NaN, and a single NaN fed
+// into the fuel model produces NaN fuel that (a) serialises to JSON `null`,
+// freezing the fuel bar at the UI's `?? 100` fallback, and (b) defeats every
+// silent-expiry test, because ALL comparisons with NaN are false — so a silent
+// airframe never lands/prunes and lingers as a phantom. Sanitise at the boundary.
+function num(v: any, fallback = 0): number {
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? n : fallback
+}
+
+// NaN-safe percentage guard. `x ?? fb` only catches null/undefined, NOT NaN, so
+// once a fuel value went NaN it would stick to the airframe forever (even after
+// it came back on ADS-B with clean telemetry). Always launder fuel state through
+// this so a bad sample can never permanently poison the tank.
+function pct(v: any, fallback: number): number {
+  return Number.isFinite(v) ? (v as number) : fallback
 }
 
 // ── ADSB.lol Polling ────────────────────────────────────────────────────
@@ -804,9 +833,8 @@ async function pollOpenSky(): Promise<void> {
         const clat = ac.lat
         const clng = ac.lon
         if (!validLatLng(clat, clng)) continue
-        const calt = (ac.alt_geom != null && Number(ac.alt_geom) > 0)
-          ? Number(ac.alt_geom)
-          : (ac.alt_baro != null ? Number(ac.alt_baro) : 0)
+        const caltGeom = num(ac.alt_geom, 0)
+        const calt = caltGeom > 0 ? caltGeom : num(ac.alt_baro, 0)
         s.civilMap.set(hex, {
           id: hex,
           hex,
@@ -851,16 +879,37 @@ async function pollOpenSky(): Promise<void> {
       if (!validLatLng(latitude, longitude)) continue
 
       // adsb.lol field mapping — alt_geom is often 0 for MLAT, fallback to alt_baro
-      // ADSB.lol returns alt_geom/alt_baro in FEET and gs in KNOTS — do NOT convert
-      const altRaw = (ac.alt_geom != null && Number(ac.alt_geom) > 0) ? Number(ac.alt_geom) : (ac.alt_baro != null ? Number(ac.alt_baro) : 0)
-      const alt = Math.round(altRaw)   // already feet
-      const speed = Math.round(Number(ac.gs ?? 0))   // already knots
-      const heading = Math.round(ac.track ?? 0)
-      const verticalRate = ac.baro_rate ?? ac.geom_rate ?? 0
+      // (which is the string "ground" on the deck). num() maps every non-numeric
+      // sentinel to 0 so NaN can never reach the fuel model. Feet + knots already.
+      const altGeom = num(ac.alt_geom, 0)
+      const alt = Math.round(altGeom > 0 ? altGeom : num(ac.alt_baro, 0))   // feet
+      const speed = Math.round(num(ac.gs, 0))   // already knots
+      const heading = Math.round(num(ac.track, 0))
+      const verticalRate = num(ac.baro_rate, num(ac.geom_rate, 0))
       const callsign = ac.flight?.trim() || ''
 
       const existing = s.aircraftMap.get(hex)
       const wasActiveHex = prevActiveStates.get(hex)
+
+      // On-ground gate (see pollFastPolice): a known airframe parked at base
+      // transmits ADS-B but is not airborne. Low AND slow ⇒ keep it dormant and
+      // off-map instead of rendering it as an active in-flight contact.
+      if (alt <= LANDED_ALT_FT && speed <= LANDED_SPD_KT) {
+        if (existing && existing.isActive) {
+          existing.isActive = false
+          const activeIdx = s.sortieHistory.findIndex((e) => e.hex === hex && e.status === 'active')
+          if (activeIdx !== -1) {
+            const entry = s.sortieHistory[activeIdx]
+            entry.endTime = now
+            entry.durationSeconds = Math.round((now - entry.startTime) / 1000)
+            entry.maxAltitude = s.sortieMaxAlt.get(hex) ?? existing.altitude
+            entry.status = 'landed'
+            saveToDisk()
+          }
+        }
+        if (existing && !existing.landed) resetToDormant(existing)
+        continue
+      }
 
       // Sortie start = was inactive, now seen active. On takeoff (or whenever the
       // stored startTime is the seeded-0 sentinel) anchor the fuel/airborne timer
@@ -1053,20 +1102,59 @@ async function pollFastPolice(): Promise<void> {
       if (!validLatLng(latitude, longitude)) continue
       seenWithPos.add(hex)
 
-      const altRaw = (ac.alt_geom != null && Number(ac.alt_geom) > 0)
-        ? Number(ac.alt_geom)
-        : (ac.alt_baro != null ? Number(ac.alt_baro) : 0)
-      // ADSB.lol returns feet and knots — do NOT apply unit conversions
-      const alt = Math.round(altRaw)   // already feet
-      const speed = Math.round(Number(ac.gs ?? 0))   // already knots
-      const heading = Math.round(ac.track ?? 0)
-      const verticalRate = ac.baro_rate ?? ac.geom_rate ?? 0
+      // alt_baro is the string "ground" when the contact is on the deck; num()
+      // maps that (and any other non-numeric sentinel) to 0 so it can never
+      // poison the fuel model with NaN. ADSB.lol returns feet and knots already.
+      const altGeom = num(ac.alt_geom, 0)
+      const alt = Math.round(altGeom > 0 ? altGeom : num(ac.alt_baro, 0))   // feet
+      const speed = Math.round(num(ac.gs, 0))   // knots
+      const heading = Math.round(num(ac.track, 0))
+      const verticalRate = num(ac.baro_rate, num(ac.geom_rate, 0))
       const callsign = ac.flight?.trim() || POLICE_CALLSIGNS[hex] || ''
 
       const known = KNOWN_AIRCRAFT[hex]
       const existing = s.aircraftMap.get(hex)
       const startTime = (existing && existing.startTime > 0) ? existing.startTime : now
       const timeAirborne = Math.round((now - startTime) / 1000)
+
+      // On-ground gate: a police airframe parked at base still transmits ADS-B
+      // (adsb.lol reports alt_baro:"ground", gs≈0), which num() maps to alt 0.
+      // Low AND slow ⇒ it is on the deck, NOT airborne — never show it as an
+      // active "on air" contact. Only genuine flight (above the ground thresholds)
+      // opens/keeps a sortie. This is what stopped every parked heli from looking
+      // like it was in flight.
+      const onGround = alt <= LANDED_ALT_FT && speed <= LANDED_SPD_KT
+      if (onGround) {
+        if (existing) {
+          if (existing.isActive) {
+            // Was flying, now low+slow on a fresh fix → it has just landed.
+            // Record where it set down, close the sortie, flag LANDED (lingers).
+            existing.latitude = latitude
+            existing.longitude = longitude
+            existing.altitude = alt
+            existing.speed = speed
+            existing.heading = heading
+            existing.lastSeen = now
+            markLandedPolice(existing, now)
+          } else if (existing.landed) {
+            // Sitting where it landed — keep the LANDED marker up for the linger
+            // window (so you can see where it put down), then retire to dormant.
+            const landedAt = policeLandedAt.get(hex) ?? existing.lastSeen ?? now
+            if (now - landedAt > LANDED_LINGER_MS) {
+              resetToDormant(existing)
+            } else {
+              existing.latitude = latitude
+              existing.longitude = longitude
+              existing.lastSeen = now
+            }
+          } else {
+            // Parked on the deck and not part of a sortie → keep the slot
+            // dormant and off-map (never an airborne or "lost" contact).
+            resetToDormant(existing)
+          }
+        }
+        continue
+      }
 
       // Distinguish a genuine new sortie from a contact resuming after a brief
       // (or even >30s) signal dropout. We only "take off" — reset the fuel timer
@@ -1124,7 +1212,7 @@ async function pollFastPolice(): Promise<void> {
       // bar tracks continuously across dropouts instead of resetting to 100%.
       const fuelPct = justTookOff
         ? 100
-        : integratePoliceFuelPct(hex, existing?.fuelRemainingPercent ?? 100, now, alt, speed, heading, Math.round(Number(verticalRate)), fuelEndurance, effectiveTimeAirborne)
+        : integratePoliceFuelPct(hex, pct(existing?.fuelRemainingPercent, 100), now, alt, speed, heading, Math.round(num(verticalRate)), fuelEndurance, effectiveTimeAirborne)
       const historicalAvg = computeHistoricalAverage(hex, 42 * 60)
 
       // Avoid duplicating breadcrumb points when nothing moved between ticks.
@@ -1191,7 +1279,7 @@ async function pollFastPolice(): Promise<void> {
 
       // Keep the fuel bar draining against held last-known telemetry (level).
       ac.fuelRemainingPercent = integratePoliceFuelPct(
-        hex, ac.fuelRemainingPercent ?? 100, now, ac.altitude, ac.speed, ac.heading, 0, ac.fuelEnduranceMinutes, ac.timeAirborneSeconds,
+        hex, pct(ac.fuelRemainingPercent, 100), now, ac.altitude, ac.speed, ac.heading, 0, ac.fuelEnduranceMinutes, ac.timeAirborneSeconds,
       )
 
       if (ac.isActive) {
@@ -1203,7 +1291,7 @@ async function pollFastPolice(): Promise<void> {
         } else {
           ac.isActive = false
         }
-      } else if ((ac.fuelRemainingPercent ?? 0) <= 0 || now >= silentExpiryMs(ac)) {
+      } else if (pct(ac.fuelRemainingPercent, 0) <= 0 || now >= silentExpiryMs(ac)) {
         // Silent-airborne but the tank is dry (or past its fuel-based endurance
         // bound) — it must be on the ground now.
         markLandedPolice(ac, now)
@@ -1221,7 +1309,7 @@ async function pollFastPolice(): Promise<void> {
       if (!ac || ac.isActive || ac.lastSeen == null || ac.landed) continue
       if (!validLatLng(ac.latitude, ac.longitude)) continue
       ac.fuelRemainingPercent = integratePoliceFuelPct(
-        hex, ac.fuelRemainingPercent ?? 100, now, ac.altitude, ac.speed, ac.heading, 0, ac.fuelEnduranceMinutes, ac.timeAirborneSeconds,
+        hex, pct(ac.fuelRemainingPercent, 100), now, ac.altitude, ac.speed, ac.heading, 0, ac.fuelEnduranceMinutes, ac.timeAirborneSeconds,
       )
     }
 
@@ -1248,12 +1336,12 @@ function pruneSilentOnStartup(): void {
     if (offlineMs > 0 && offlineMs < 24 * 3_600_000) {
       const perf = perfForHex(hex)
       if (perf) {
-        const remKg     = (ac.fuelRemainingPercent / 100) * perf.usableFuelKg
+        const remKg     = (pct(ac.fuelRemainingPercent, 100) / 100) * perf.usableFuelKg
         const drainedKg = (perf.ffLoiterKgH / 3600) * (offlineMs / 1000)
         ac.fuelRemainingPercent = Math.max(0, ((remKg - drainedKg) / perf.usableFuelKg) * 100)
       } else {
         const enduranceMs = (ac.fuelEnduranceMinutes || (ac.role === 'rotary' ? 180 : 240)) * 60_000
-        ac.fuelRemainingPercent = Math.max(0, (ac.fuelRemainingPercent ?? 100) - (100 / enduranceMs) * offlineMs)
+        ac.fuelRemainingPercent = Math.max(0, pct(ac.fuelRemainingPercent, 100) - (100 / enduranceMs) * offlineMs)
       }
     }
   }
@@ -1263,7 +1351,7 @@ function pruneSilentOnStartup(): void {
   for (const hex of POLICE_HEXES) {
     const ac = s.aircraftMap.get(hex)
     if (!ac || ac.isActive || ac.lastSeen == null || ac.landed) continue
-    const dry      = (ac.fuelRemainingPercent ?? 0) <= 0
+    const dry      = pct(ac.fuelRemainingPercent, 0) <= 0
     const silentMs = now - ac.lastSeen
     if (silentMs >= SILENT_MIN_GRACE_MS && (dry || now >= silentExpiryMs(ac))) {
       resetToDormant(ac)
@@ -1325,7 +1413,7 @@ export function getStore() {
       for (const ac of s.aircraftMap.values()) {
         if (!validLatLng(ac.latitude, ac.longitude)) continue
         if (ac.isActive) active++
-        else if (ac.lastSeen != null && !ac.landed && (ac.fuelRemainingPercent ?? 0) > 0) silent++
+        else if (ac.lastSeen != null && !ac.landed && pct(ac.fuelRemainingPercent, 0) > 0) silent++
       }
       return { active, silent }
     },
