@@ -43,8 +43,12 @@ export default function VPOverwatch() {
   }, [])
 
   const liveData = useRealtimeData({
-    aircraftInterval: 30_000,
-    reportsInterval: 15_000,
+    // The backend fast-police loop refreshes adsb.lol every 3s (FAST_POLICE_INTERVAL);
+    // poll the client at the same cadence so the map is near-real-time instead of
+    // lagging up to 30s behind the store. /api/aircraft/active just returns in-memory
+    // state (the OpenSky sub-poll is independently throttled to 60s), so this is cheap.
+    aircraftInterval: 3_000,
+    reportsInterval: 10_000,
     relayInterval: 3_000,
   })
 
@@ -182,6 +186,11 @@ export default function VPOverwatch() {
   const hasSilentAircraft = silentCount > 0
   const isLostSignal = hasSilentAircraft
 
+  // Header LIVE/OFFLINE status: online whenever a tracked aircraft is actually
+  // airborne (proof the ADS-B feed is live), or the Waze relay is connected.
+  const airborneCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive).length, [liveData.aircraft])
+  const isOnline = airborneCount > 0 || liveData.relay.connected
+
   // MLAT / "Blind Sky" awareness — count active aircraft by ADS-B source quality
   const mlatCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive && a.isMlat).length, [liveData.aircraft])
   const modeSCount = useMemo(() => liveData.aircraft.filter((a) => a.isActive && a.isModeS).length, [liveData.aircraft])
@@ -274,7 +283,7 @@ export default function VPOverwatch() {
   const selectedReport = filteredReports.find((r) => r.id === selectedReportId)
 
   const detailContent = selectedAircraft ? (
-    <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} />
+    <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} user={userPosition} />
   ) : selectedReport ? (
     <ReportDetail report={selectedReport} user={userPosition} onClose={onCloseDetail} />
   ) : null
@@ -336,7 +345,7 @@ export default function VPOverwatch() {
           gndCount={filteredReports.length}
           silentCount={silentCount}
           isLostSignal={isLostSignal}
-          isConnected={liveData.relay.connected}
+          isConnected={isOnline}
           onSubscribeClick={() => setShowSubscribe(true)}
         />
 
@@ -481,7 +490,7 @@ export default function VPOverwatch() {
             )}
           {/* Aircraft detail — slide-in panel (right 280px on desktop) */}
           {selectedAircraft && (
-            <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} />
+            <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} user={userPosition} />
           )}
 
           {/* Ground report detail — right panel */}
@@ -519,7 +528,7 @@ export default function VPOverwatch() {
           gndCount={filteredReports.length}
           silentCount={silentCount}
           isLostSignal={isLostSignal}
-          isConnected={liveData.relay.connected}
+          isConnected={isOnline}
           onSubscribeClick={() => setShowSubscribe(true)}
         />
 
@@ -627,7 +636,7 @@ export default function VPOverwatch() {
 
           {/* Aircraft detail — slide-in overlay panel (bottom 60% on mobile) */}
           {selectedAircraft && (
-            <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} />
+            <AircraftDetail aircraft={selectedAircraft} onClose={onCloseDetail} user={userPosition} />
           )}
 
           {/* Ground report detail — bottom overlay */}
